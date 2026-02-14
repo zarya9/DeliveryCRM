@@ -17,6 +17,13 @@ namespace APIDeliveryCRM.Controllers
             _orderService = orderService;
         }
 
+        [HttpGet]
+        public async Task<IActionResult> GetAll([FromQuery] int? companyId)
+        {
+            var orders = await _orderService.GetAllAsync(companyId);
+            return new OkObjectResult(orders);
+        }
+
         [HttpGet("{id:int}")]
         public async Task<IActionResult> Get(int id)
         {

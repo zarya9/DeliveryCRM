@@ -1,0 +1,59 @@
+@page "/manager/orders"
+@layout ManagerLayout
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject OrdersApiService OrdersApi
+
+<PageTitle>Заказы — Менеджер</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Управление заказами</h1>
+    <p class="subtitle">Все заказы, фильтры и действия</p>
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Список заказов</h2>
+    @if (_orders != null && _orders.Count > 0)
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>№</th>
+                    <th>Название</th>
+                    <th>Клиент</th>
+                    <th>Статус</th>
+                    <th>Курьер</th>
+                    <th>Сумма</th>
+                    <th>Дата</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var o in _orders)
+                {
+                    <tr>
+                        <td>@o.Order_Number</td>
+                        <td>@o.Name</td>
+                        <td>@(o.ClientProfile?.User != null ? $"{o.ClientProfile.User.FName} {o.ClientProfile.User.Name}" : "—")</td>
+                        <td>@(o.OrderStatus?.Name ?? "—")</td>
+                        <td>@(o.CourierProfile != null ? $"{o.CourierProfile.User?.FName} {o.CourierProfile.User?.Name}" : "—")</td>
+                        <td>@(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost) ₽</td>
+                        <td>@o.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <p class="text-muted">Заказов нет.</p>
+    }
+</div>
+
+@code {
+    private List<OrderDto>? _orders;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _orders = await OrdersApi.GetAllAsync(null);
+    }
+}

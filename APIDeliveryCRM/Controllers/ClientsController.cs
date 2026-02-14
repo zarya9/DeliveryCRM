@@ -16,6 +16,15 @@ namespace APIDeliveryCRM.Controllers
             _clientService = clientService;
         }
 
+        [HttpGet("by-user/{userId:int}")]
+        public async Task<IActionResult> GetByUserId(int userId)
+        {
+            var profile = await _clientService.GetByUserIdAsync(userId);
+            if (profile == null)
+                return new NotFoundResult();
+            return new OkObjectResult(profile);
+        }
+
         [HttpGet("{id:int}")]
         public async Task<IActionResult> GetProfile(int id)
         {

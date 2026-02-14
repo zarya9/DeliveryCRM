@@ -8,6 +8,7 @@ namespace APIDeliveryCRM.Interfaces
     public interface IOrderService
     {
         Task<Order> GetByIdAsync(int id);
+        Task<IReadOnlyList<Order>> GetAllAsync(int? companyId = null);
         Task<IReadOnlyList<Order>> GetByClientAsync(int clientProfileId);
         Task<IReadOnlyList<Order>> GetByCourierAsync(int courierProfileId);
         Task<Order> CreateAsync(CreateOrderRequest request);

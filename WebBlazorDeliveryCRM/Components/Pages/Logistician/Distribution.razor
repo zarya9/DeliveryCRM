@@ -1,0 +1,143 @@
+@page "/logistician"
+@layout LogisticianLayout
+@using Blazored.Toast.Services
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject OrdersApiService OrdersApi
+@inject CouriersApiService CouriersApi
+@inject IToastService Toast
+
+<PageTitle>Распределение заказов — Логист</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Панель распределения заказов</h1>
+    <p class="subtitle">Новые заказы и назначение курьеров</p>
+</div>
+
+<div class="dms-stat-grid">
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_unassignedCount</div>
+        <div class="dms-stat-label">Ожидают назначения</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_freeCouriersCount</div>
+        <div class="dms-stat-label">Свободных курьеров</div>
+    </div>
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Заказы без курьера</h2>
+    @if (_unassigned?.Count > 0)
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>№</th>
+                    <th>Название</th>
+                    <th>Статус</th>
+                    <th>Действие</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var o in _unassigned)
+                {
+                    <tr>
+                        <td>@o.Order_Number</td>
+                        <td>@o.Name</td>
+                        <td>@(o.OrderStatus?.Name ?? "—")</td>
+                        <td>
+                            <select class="form-select form-select-sm" style="width: auto; display: inline-block;" value="@GetSelectedCourier(o.ID_Order)" @onchange="e => SetSelectedCourier(o.ID_Order, int.TryParse(e.Value?.ToString(), out var v) ? v : 0)">
+                                <option value="0">— Выбрать курьера —</option>
+                                @if (_couriers != null)
+                                {
+                                    @foreach (var c in _couriers)
+                                    {
+                                        <option value="@c.ID_CourierProfile">@(c.User?.FName) @(c.User?.Name)</option>
+                                    }
+                                }
+                            </select>
+                            <button class="btn btn-sm btn-primary ms-1" disabled="@(_assigningOrderId == o.ID_Order)" @onclick="() => AssignCourier(o.ID_Order)">Назначить</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <p class="text-muted">Нет заказов без курьера.</p>
+    }
+</div>
+
+<div class="dms-card mt-3">
+    <h2 class="dms-card-title">Курьеры</h2>
+    @if (_couriers != null && _couriers.Count > 0)
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>ФИО</th>
+                    <th>Статус</th>
+                    <th>Онлайн</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in _couriers)
+                {
+                    <tr>
+                        <td>@(c.User?.FName) @(c.User?.Name)</td>
+                        <td>@(c.CourierStatus?.Name ?? "—")</td>
+                        <td>@(c.Is_online ? "Да" : "Нет")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <p class="text-muted">Нет данных о курьерах.</p>
+    }
+</div>
+
+@code {
+    private List<OrderDto>? _orders;
+    private List<CourierProfileDto>? _couriers;
+    private List<OrderDto>? _unassigned;
+    private int _unassignedCount;
+    private int _freeCouriersCount;
+    private Dictionary<int, int> _orderCourierSelection = new();
+    private int _assigningOrderId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _orders = await OrdersApi.GetAllAsync(null);
+        _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
+        _unassigned = _orders?.Where(o => o.Courier_id == null).ToList() ?? new List<OrderDto>();
+        _unassignedCount = _unassigned.Count;
+        _freeCouriersCount = _couriers.Count(c => c.Is_online);
+        _orderCourierSelection = _unassigned.ToDictionary(x => x.ID_Order, _ => 0);
+    }
+
+    private int GetSelectedCourier(int orderId) => _orderCourierSelection.GetValueOrDefault(orderId);
+    private void SetSelectedCourier(int orderId, int courierId) => _orderCourierSelection[orderId] = courierId;
+
+    private async Task AssignCourier(int orderId)
+    {
+        var courierId = GetSelectedCourier(orderId);
+        if (courierId <= 0) { Toast.ShowWarning("Выберите курьера."); return; }
+        _assigningOrderId = orderId;
+        try
+        {
+            var ok = await OrdersApi.AssignCourierAsync(orderId, courierId);
+            if (ok) { Toast.ShowSuccess("Курьер назначен."); await Load(); }
+            else Toast.ShowError("Не удалось назначить курьера.");
+        }
+        catch (Exception ex) { Toast.ShowError(ex.Message); }
+        finally { _assigningOrderId = 0; }
+    }
+}

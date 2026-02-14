@@ -1,0 +1,64 @@
+@page "/customer"
+@layout CustomerLayout
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@using System.Security.Claims
+@inject ClientsApiService ClientsApi
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Главная — Клиент</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Главная</h1>
+    <p class="subtitle">Быстрые действия и активные заказы</p>
+</div>
+
+<div class="dms-card mb-3">
+    <h2 class="dms-card-title">Активные заказы</h2>
+    @if (_orders != null && _orders.Count > 0)
+    {
+        <ul class="list-group list-group-flush">
+            @foreach (var o in _orders.Take(5))
+            {
+                <li class="list-group-item d-flex justify-content-between">
+                    <span>№@o.Order_Number — @o.Name</span>
+                    <span class="badge bg-secondary">@(o.OrderStatus?.Name ?? "—")</span>
+                </li>
+            }
+        </ul>
+        <a href="/customer/orders" class="btn btn-outline-primary mt-2">Все заказы</a>
+    }
+    else
+    {
+        <p class="text-muted">Нет активных заказов.</p>
+    }
+    <a href="/customer/create-order" class="btn btn-primary dms-btn-primary mt-2">Создать заказ</a>
+</div>
+
+<div class="dms-stat-grid">
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@(_orders?.Count ?? 0)</div>
+        <div class="dms-stat-label">Активных заказов</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_deliveredCount</div>
+        <div class="dms-stat-label">Доставлено за месяц</div>
+    </div>
+</div>
+
+@code {
+    private List<OrderDto>? _orders;
+    private int _deliveredCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userIdStr = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(userIdStr, out var userId)) return;
+        var client = await ClientsApi.GetByUserIdAsync(userId);
+        if (client == null) return;
+        _orders = await ClientsApi.GetOrdersAsync(client.ID_ClientProfile) ?? new List<OrderDto>();
+        var monthStart = new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1);
+        _deliveredCount = _orders.Count(o => o.Delivered_at >= monthStart);
+    }
+}

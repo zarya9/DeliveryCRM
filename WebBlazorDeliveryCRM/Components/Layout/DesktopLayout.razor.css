@@ -1,0 +1,26 @@
+.desktop-layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+.desktop-sidebar {
+    width: 260px;
+    min-width: 260px;
+    background: var(--dms-sidebar-bg, #0f172a);
+    color: var(--dms-sidebar-fg, #f1f5f9);
+    padding: 1rem 0;
+    box-shadow: 2px 0 8px rgba(0,0,0,0.06);
+}
+
+.desktop-main {
+    flex: 1;
+    overflow: auto;
+    padding: 0;
+    background: var(--dms-page-bg, #f1f5f9);
+}
+
+.desktop-main-inner {
+    padding: 1.5rem 2rem;
+    max-width: 1400px;
+    margin: 0 auto;
+}

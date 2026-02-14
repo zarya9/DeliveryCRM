@@ -1,0 +1,57 @@
+@page "/manager/couriers"
+@layout ManagerLayout
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject CouriersApiService CouriersApi
+
+<PageTitle>Курьеры — Менеджер</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Управление курьерами</h1>
+    <p class="subtitle">Список курьеров компании</p>
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Курьеры</h2>
+    @if (_couriers != null && _couriers.Count > 0)
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>ФИО</th>
+                    <th>Рейтинг</th>
+                    <th>Статус</th>
+                    <th>Онлайн</th>
+                    <th>Доставок</th>
+                    <th>Последняя активность</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in _couriers)
+                {
+                    <tr>
+                        <td>@(c.User?.FName) @(c.User?.Name)</td>
+                        <td>@c.Rating</td>
+                        <td>@(c.CourierStatus?.Name ?? "—")</td>
+                        <td>@(c.Is_online ? "Да" : "Нет")</td>
+                        <td>@c.Total_deliveries</td>
+                        <td>@c.LastActivity_at.ToString("dd.MM.yyyy HH:mm")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <p class="text-muted">Курьеров нет.</p>
+    }
+</div>
+
+@code {
+    private List<CourierProfileDto>? _couriers;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
+    }
+}

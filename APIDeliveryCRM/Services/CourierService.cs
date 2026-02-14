@@ -29,13 +29,24 @@ namespace APIDeliveryCRM.Services
                 .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId);
         }
 
-        public async Task<CourierProfile> GetByUserIdAsync(int userId)
+        public async Task<CourierProfile?> GetByUserIdAsync(int userId)
         {
             return await _context.CourierProfiles
                 .Include(c => c.User)
                 .Include(c => c.VehicleCategory)
                 .Include(c => c.CourierStatus)
                 .FirstOrDefaultAsync(c => c.User_id == userId);
+        }
+
+        public async Task<IReadOnlyList<CourierProfile>> GetAllAsync(int? companyId = null)
+        {
+            var query = _context.CourierProfiles
+                .Include(c => c.User)
+                .Include(c => c.CourierStatus)
+                .AsQueryable();
+            if (companyId.HasValue)
+                query = query.Where(c => c.Company_id == companyId.Value);
+            return await query.ToListAsync();
         }
 
         public async Task<IReadOnlyList<Order>> GetActiveOrdersAsync(int courierProfileId)

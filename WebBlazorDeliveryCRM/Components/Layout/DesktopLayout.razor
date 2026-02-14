@@ -1,0 +1,19 @@
+<div class="desktop-layout">
+    <aside class="desktop-sidebar">
+        @SidebarContent
+    </aside>
+    <main class="desktop-main">
+        <div class="desktop-main-inner">
+            <AppBar />
+            @ChildContent
+        </div>
+    </main>
+</div>
+
+@code {
+    [Parameter]
+    public RenderFragment? SidebarContent { get; set; }
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

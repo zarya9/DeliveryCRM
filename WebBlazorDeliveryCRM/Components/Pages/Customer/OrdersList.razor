@@ -1,0 +1,62 @@
+@page "/customer/orders"
+@layout CustomerLayout
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@using System.Security.Claims
+@inject ClientsApiService ClientsApi
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Мои заказы — Клиент</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Мои заказы</h1>
+    <p class="subtitle">История всех заказов</p>
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Список заказов</h2>
+    @if (_orders != null && _orders.Count > 0)
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>№</th>
+                    <th>Название</th>
+                    <th>Статус</th>
+                    <th>Сумма</th>
+                    <th>Дата</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var o in _orders)
+                {
+                    <tr>
+                        <td>@o.Order_Number</td>
+                        <td>@o.Name</td>
+                        <td>@(o.OrderStatus?.Name ?? "—")</td>
+                        <td>@(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost) ₽</td>
+                        <td>@o.Created_at.ToString("dd.MM.yyyy")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <p class="text-muted">Заказов пока нет.</p>
+    }
+</div>
+
+@code {
+    private List<OrderDto>? _orders;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userIdStr = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(userIdStr, out var userId)) return;
+        var client = await ClientsApi.GetByUserIdAsync(userId);
+        if (client == null) return;
+        _orders = await ClientsApi.GetOrdersAsync(client.ID_ClientProfile) ?? new List<OrderDto>();
+    }
+}

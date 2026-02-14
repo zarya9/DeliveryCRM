@@ -30,6 +30,19 @@ namespace APIDeliveryCRM.Services
                 .FirstOrDefaultAsync(o => o.ID_Order == id);
         }
 
+        public async Task<IReadOnlyList<Order>> GetAllAsync(int? companyId = null)
+        {
+            var query = _context.Orders
+                .Include(o => o.OrderStatus)
+                .Include(o => o.ClientProfile).ThenInclude(c => c.User)
+                .Include(o => o.CourierProfile).ThenInclude(c => c!.User)
+                .Include(o => o.OrderType)
+                .AsQueryable();
+            if (companyId.HasValue)
+                query = query.Where(o => o.Company_id == companyId.Value);
+            return await query.OrderByDescending(o => o.Created_at).Take(500).ToListAsync();
+        }
+
         public async Task<IReadOnlyList<Order>> GetByClientAsync(int clientProfileId)
         {
             return await _context.Orders

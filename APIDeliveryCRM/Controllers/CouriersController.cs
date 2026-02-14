@@ -17,6 +17,22 @@ namespace APIDeliveryCRM.Controllers
             _shiftService = shiftService;
         }
 
+        [HttpGet]
+        public async Task<IActionResult> GetAll([FromQuery] int? companyId)
+        {
+            var list = await _courierService.GetAllAsync(companyId);
+            return new OkObjectResult(list);
+        }
+
+        [HttpGet("by-user/{userId:int}")]
+        public async Task<IActionResult> GetByUserId(int userId)
+        {
+            var profile = await _courierService.GetByUserIdAsync(userId);
+            if (profile == null)
+                return new NotFoundResult();
+            return new OkObjectResult(profile);
+        }
+
         [HttpGet("{id:int}")]
         public async Task<IActionResult> GetProfile(int id)
         {

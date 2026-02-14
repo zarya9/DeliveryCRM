@@ -1,0 +1,106 @@
+@page "/"
+@page "/login"
+@using Blazored.Toast.Services
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@inject AuthApiService AuthApi
+@inject CustomAuthenticationStateProvider AuthState
+@inject ChatHubClientService ChatHub
+@inject NavigationManager Navigation
+@inject IToastService Toast
+
+<PageTitle>Вход</PageTitle>
+
+<div class="login-page">
+    <div class="dms-card" style="max-width: 24rem; margin: 2rem auto;">
+        <h1 class="dms-card-title">Вход в систему</h1>
+        <EditForm Model="@_model" OnValidSubmit="HandleLogin">
+            <DataAnnotationsValidator />
+            <div class="mb-3">
+                <label class="form-label">Email</label>
+                <InputText @bind-Value="_model.Email" class="form-control" type="email" />
+                <ValidationMessage For="@(() => _model.Email)" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Пароль</label>
+                <InputText @bind-Value="_model.Password" class="form-control" type="password" />
+                <ValidationMessage For="@(() => _model.Password)" />
+            </div>
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger">@_error</div>
+            }
+            <button type="submit" class="btn btn-primary dms-btn-primary" disabled="@_loading">@(_loading ? "Вход..." : "Войти")</button>
+        </EditForm>
+        <p class="mt-3 mb-0">
+            <a href="/home">Выбор роли</a>
+        </p>
+    </div>
+</div>
+
+@code {
+    private readonly LoginModel _model = new();
+    private string? _error;
+    private bool _loading;
+
+    private async Task HandleLogin()
+    {
+        _error = null;
+        _loading = true;
+        try
+        {
+            var token = await AuthApi.LoginAsync(_model.Email!, _model.Password!);
+            if (string.IsNullOrEmpty(token))
+            {
+                _error = "Неверный email или пароль.";
+                Toast.ShowError("Неверный email или пароль.");
+                return;
+            }
+            var role = GetRoleFromToken(token);
+            await AuthState.MarkUserAsAuthenticated(token);
+            await ChatHub.StartAsync();
+            Toast.ShowSuccess("Вход выполнен.");
+            if (role == "Клиент")
+                Navigation.NavigateTo("/customer", forceLoad: true);
+            else if (role == "Менеджер")
+                Navigation.NavigateTo("/manager", forceLoad: true);
+            else if (role == "Логист")
+                Navigation.NavigateTo("/logistician", forceLoad: true);
+            else if (role == "Курьер")
+            {
+                Toast.ShowInfo("Для курьера предназначено мобильное приложение.");
+                Navigation.NavigateTo("/", forceLoad: true);
+            }
+            else
+                Navigation.NavigateTo("/", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toast.ShowError(ex.Message);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string? GetRoleFromToken(string token)
+    {
+        try
+        {
+            var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+            var jwt = handler.ReadJwtToken(token);
+            return jwt.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "role")?.Value;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private class LoginModel
+    {
+        public string? Email { get; set; }
+        public string? Password { get; set; }
+    }
+}

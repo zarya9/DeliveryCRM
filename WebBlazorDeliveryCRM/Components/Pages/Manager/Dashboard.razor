@@ -1,0 +1,81 @@
+@page "/manager"
+@layout ManagerLayout
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject OrdersApiService OrdersApi
+@inject CouriersApiService CouriersApi
+
+<PageTitle>Дашборд — Менеджер</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Панель управления</h1>
+    <p class="subtitle">Обзор и статистика по заказам и курьерам</p>
+</div>
+
+<div class="dms-stat-grid">
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_todayOrders</div>
+        <div class="dms-stat-label">Заказов сегодня</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_activeCouriers</div>
+        <div class="dms-stat-label">Активных курьеров</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_unassignedCount</div>
+        <div class="dms-stat-label">Ожидают назначения</div>
+    </div>
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Последние заказы</h2>
+    @if (_orders != null && _orders.Count > 0)
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>№</th>
+                    <th>Название</th>
+                    <th>Статус</th>
+                    <th>Курьер</th>
+                    <th>Дата</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var o in _orders.Take(10))
+                {
+                    <tr>
+                        <td>@o.Order_Number</td>
+                        <td>@o.Name</td>
+                        <td>@(o.OrderStatus?.Name ?? "—")</td>
+                        <td>@(o.CourierProfile != null ? $"{o.CourierProfile.User?.FName} {o.CourierProfile.User?.Name}" : "—")</td>
+                        <td>@o.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <a href="/manager/orders" class="btn btn-outline-primary">Все заказы</a>
+    }
+    else
+    {
+        <p class="text-muted">Нет заказов.</p>
+    }
+</div>
+
+@code {
+    private List<OrderDto>? _orders;
+    private List<CourierProfileDto>? _couriers;
+    private int _todayOrders;
+    private int _activeCouriers;
+    private int _unassignedCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _orders = await OrdersApi.GetAllAsync(null);
+        _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
+        var today = DateTime.Today;
+        _todayOrders = _orders?.Count(o => o.Created_at.Date == today) ?? 0;
+        _activeCouriers = _couriers.Count(c => c.Is_online);
+        _unassignedCount = _orders?.Count(o => o.Courier_id == null) ?? 0;
+    }
+}

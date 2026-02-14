@@ -1,0 +1,38 @@
+@inject AuthenticationStateProvider AuthStateProvider
+@inject CustomAuthenticationStateProvider AuthState
+@inject NavigationManager Navigation
+
+<div class="dms-appbar">
+    <a href="/" class="dms-appbar-logo">Delivery CRM</a>
+    <div class="dms-appbar-actions">
+        @if (_isAuthenticated)
+        {
+            <span class="dms-appbar-user">@_userName</span>
+            <button type="button" class="dms-btn-outline" @onclick="Logout">Выйти</button>
+        }
+        else
+        {
+            <a href="/" class="dms-btn-outline">Войти</a>
+        }
+    </div>
+</div>
+
+@code {
+    private bool _isAuthenticated;
+    private string? _userName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        _isAuthenticated = state.User.Identity?.IsAuthenticated ?? false;
+        _userName = state.User.FindFirst(c => c.Type == System.Security.Claims.ClaimTypes.Email)?.Value
+                    ?? state.User.FindFirst("email")?.Value
+                    ?? state.User.Identity?.Name;
+    }
+
+    private async Task Logout()
+    {
+        await AuthState.MarkUserAsLoggedOut();
+        Navigation.NavigateTo("/", forceLoad: true);
+    }
+}
