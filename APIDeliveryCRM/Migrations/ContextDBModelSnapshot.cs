@@ -276,6 +276,64 @@ namespace APIDeliveryCRM.Migrations
                     b.ToTable("ChatRoomTypes");
                 });
 
+            modelBuilder.Entity("APIDeliveryCRM.Model.ClientNote", b =>
+                {
+                    b.Property<int>("ID_ClientNote")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_ClientNote"));
+
+                    b.Property<int>("Author_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ClientNoteType_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ClientProfile_id")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("Created_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.HasKey("ID_ClientNote");
+
+                    b.HasIndex("Author_id");
+
+                    b.HasIndex("ClientNoteType_id");
+
+                    b.HasIndex("ClientProfile_id");
+
+                    b.ToTable("ClientNotes");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ClientNoteType", b =>
+                {
+                    b.Property<int>("ID_ClientNoteType")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_ClientNoteType"));
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("ID_ClientNoteType");
+
+                    b.ToTable("ClientNoteTypes");
+                });
+
             modelBuilder.Entity("APIDeliveryCRM.Model.ClientProfile", b =>
                 {
                     b.Property<int>("ID_ClientProfile")
@@ -283,6 +341,12 @@ namespace APIDeliveryCRM.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_ClientProfile"));
+
+                    b.Property<int?>("ClientSegment_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ClientStatus_id")
+                        .HasColumnType("integer");
 
                     b.Property<int>("Company_id")
                         .HasColumnType("integer");
@@ -302,6 +366,10 @@ namespace APIDeliveryCRM.Migrations
 
                     b.HasKey("ID_ClientProfile");
 
+                    b.HasIndex("ClientSegment_id");
+
+                    b.HasIndex("ClientStatus_id");
+
                     b.HasIndex("Company_id");
 
                     b.HasIndex("Preferred_payment_method_id");
@@ -309,6 +377,50 @@ namespace APIDeliveryCRM.Migrations
                     b.HasIndex("User_id");
 
                     b.ToTable("ClientProfiles");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ClientSegment", b =>
+                {
+                    b.Property<int>("ID_ClientSegment")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_ClientSegment"));
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("ID_ClientSegment");
+
+                    b.ToTable("ClientSegments");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ClientStatus", b =>
+                {
+                    b.Property<int>("ID_ClientStatus")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_ClientStatus"));
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("ID_ClientStatus");
+
+                    b.ToTable("ClientStatuses");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.Company", b =>
@@ -682,6 +794,105 @@ namespace APIDeliveryCRM.Migrations
                     b.HasKey("ID_FuelType");
 
                     b.ToTable("FuelTypes");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.Lead", b =>
+                {
+                    b.Property<int>("ID_Lead")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_Lead"));
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("Company_id")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Contact")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("Created_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("LeadSource_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LeadStage_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ManagerUser_id")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("Updated_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("ID_Lead");
+
+                    b.HasIndex("Company_id");
+
+                    b.HasIndex("LeadSource_id");
+
+                    b.HasIndex("LeadStage_id");
+
+                    b.HasIndex("ManagerUser_id");
+
+                    b.ToTable("Leads");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.LeadSource", b =>
+                {
+                    b.Property<int>("ID_LeadSource")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_LeadSource"));
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("ID_LeadSource");
+
+                    b.ToTable("LeadSources");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.LeadStage", b =>
+                {
+                    b.Property<int>("ID_LeadStage")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_LeadStage"));
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.HasKey("ID_LeadStage");
+
+                    b.ToTable("LeadStages");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.Login", b =>
@@ -1666,8 +1877,45 @@ namespace APIDeliveryCRM.Migrations
                     b.Navigation("Order");
                 });
 
+            modelBuilder.Entity("APIDeliveryCRM.Model.ClientNote", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.User", "Author")
+                        .WithMany()
+                        .HasForeignKey("Author_id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.ClientNoteType", "ClientNoteType")
+                        .WithMany("ClientNotes")
+                        .HasForeignKey("ClientNoteType_id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.ClientProfile", "ClientProfile")
+                        .WithMany()
+                        .HasForeignKey("ClientProfile_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Author");
+
+                    b.Navigation("ClientNoteType");
+
+                    b.Navigation("ClientProfile");
+                });
+
             modelBuilder.Entity("APIDeliveryCRM.Model.ClientProfile", b =>
                 {
+                    b.HasOne("APIDeliveryCRM.Model.ClientSegment", "ClientSegment")
+                        .WithMany("ClientProfiles")
+                        .HasForeignKey("ClientSegment_id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("APIDeliveryCRM.Model.ClientStatus", "ClientStatus")
+                        .WithMany("ClientProfiles")
+                        .HasForeignKey("ClientStatus_id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("APIDeliveryCRM.Model.Company", "Company")
                         .WithMany()
                         .HasForeignKey("Company_id")
@@ -1685,6 +1933,10 @@ namespace APIDeliveryCRM.Migrations
                         .HasForeignKey("User_id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("ClientSegment");
+
+                    b.Navigation("ClientStatus");
 
                     b.Navigation("Company");
 
@@ -1831,6 +2083,39 @@ namespace APIDeliveryCRM.Migrations
                     b.Navigation("FuelCardType");
 
                     b.Navigation("FuelCompany");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.Lead", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("Company_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.LeadSource", "Source")
+                        .WithMany("Leads")
+                        .HasForeignKey("LeadSource_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.LeadStage", "Stage")
+                        .WithMany("Leads")
+                        .HasForeignKey("LeadStage_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.User", "Manager")
+                        .WithMany()
+                        .HasForeignKey("ManagerUser_id");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Manager");
+
+                    b.Navigation("Source");
+
+                    b.Navigation("Stage");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.Login", b =>
@@ -2208,6 +2493,21 @@ namespace APIDeliveryCRM.Migrations
                     b.Navigation("ChatRooms");
                 });
 
+            modelBuilder.Entity("APIDeliveryCRM.Model.ClientNoteType", b =>
+                {
+                    b.Navigation("ClientNotes");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ClientSegment", b =>
+                {
+                    b.Navigation("ClientProfiles");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ClientStatus", b =>
+                {
+                    b.Navigation("ClientProfiles");
+                });
+
             modelBuilder.Entity("APIDeliveryCRM.Model.Company", b =>
                 {
                     b.Navigation("Users");
@@ -2216,6 +2516,16 @@ namespace APIDeliveryCRM.Migrations
             modelBuilder.Entity("APIDeliveryCRM.Model.CourierStatus", b =>
                 {
                     b.Navigation("CourierProfiles");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.LeadSource", b =>
+                {
+                    b.Navigation("Leads");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.LeadStage", b =>
+                {
+                    b.Navigation("Leads");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.Order", b =>

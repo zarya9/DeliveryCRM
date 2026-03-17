@@ -135,6 +135,18 @@ namespace APIDeliveryCRM.ContextDb
                 .HasForeignKey(c => c.User_id)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            modelBuilder.Entity<ClientProfile>()
+                .HasOne(c => c.ClientStatus)
+                .WithMany(s => s.ClientProfiles)
+                .HasForeignKey(c => c.ClientStatus_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ClientProfile>()
+                .HasOne(c => c.ClientSegment)
+                .WithMany(s => s.ClientProfiles)
+                .HasForeignKey(c => c.ClientSegment_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
             modelBuilder.Entity<ManagerProfile>()
                 .HasOne(m => m.User)
                 .WithMany()
@@ -328,6 +340,24 @@ namespace APIDeliveryCRM.ContextDb
                 .HasForeignKey(cm => cm.Sender_id)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            modelBuilder.Entity<ClientNote>()
+                .HasOne(n => n.ClientProfile)
+                .WithMany()
+                .HasForeignKey(n => n.ClientProfile_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<ClientNote>()
+                .HasOne(n => n.Author)
+                .WithMany()
+                .HasForeignKey(n => n.Author_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ClientNote>()
+                .HasOne(n => n.ClientNoteType)
+                .WithMany(t => t.ClientNotes)
+                .HasForeignKey(n => n.ClientNoteType_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
             modelBuilder.Entity<Vehicle>()
                 .HasOne(v => v.VehicleCategory)
                 .WithMany()
@@ -448,6 +478,10 @@ namespace APIDeliveryCRM.ContextDb
         public DbSet<Role> Roles { get; set; }
         public DbSet<Login> Logins { get; set; }
         public DbSet<ClientProfile> ClientProfiles { get; set; }
+        public DbSet<ClientStatus> ClientStatuses { get; set; }
+        public DbSet<ClientSegment> ClientSegments { get; set; }
+        public DbSet<ClientNote> ClientNotes { get; set; }
+        public DbSet<ClientNoteType> ClientNoteTypes { get; set; }
         public DbSet<CourierProfile> CourierProfiles { get; set; }
         public DbSet<ManagerProfile> ManagerProfiles { get; set; }
         public DbSet<CourierStatus> CourierStatuses { get; set; }
@@ -485,6 +519,9 @@ namespace APIDeliveryCRM.ContextDb
         public DbSet<AuditLog> AuditLogs { get; set; }
         public DbSet<Report> Reports { get; set; }
         public DbSet<ReportStatus> ReportStatuses { get; set; }
+        public DbSet<Lead> Leads { get; set; }
+        public DbSet<LeadSource> LeadSources { get; set; }
+        public DbSet<LeadStage> LeadStages { get; set; }
     }
 }
 

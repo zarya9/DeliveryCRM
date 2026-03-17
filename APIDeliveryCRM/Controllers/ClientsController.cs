@@ -7,7 +7,7 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class ClientsController
+    public class ClientsController : Controller
     {
         private readonly IClientService _clientService;
 
@@ -44,10 +44,22 @@ namespace APIDeliveryCRM.Controllers
             return new OkObjectResult(orders);
         }
 
+        [HttpGet("{id:int}/details")]
+        public async Task<IActionResult> GetDetails(int id)
+        {
+            return await _clientService.GetClientDetailsAsync(id);
+        }
+
         [HttpPut("{id:int}")]
         public async Task<IActionResult> UpdateProfile(int id, [FromBody] UpdateClientProfileRequest request)
         {
             return await _clientService.UpdateProfileAsync(id, request);
+        }
+
+        [HttpPost("notes")]
+        public async Task<IActionResult> AddNote([FromBody] AddClientNoteRequest request)
+        {
+            return await _clientService.AddClientNoteAsync(request);
         }
     }
 }

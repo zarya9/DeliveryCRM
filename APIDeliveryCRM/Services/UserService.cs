@@ -30,6 +30,7 @@ namespace APIDeliveryCRM.Services
         {
             var user = await _context.Users
                 .Include(u => u.Role)
+                .Include(u => u.Company)
                 .FirstOrDefaultAsync(u => u.ID_User == id);
             if (user == null)
             {
@@ -73,7 +74,9 @@ namespace APIDeliveryCRM.Services
                 new Claim(ClaimTypes.NameIdentifier, user.ID_User.ToString()),
                 new Claim(ClaimTypes.Email, email),
                 new Claim(ClaimTypes.Name, $"{user.FName} {user.Name}"),
-                new Claim(ClaimTypes.Role, user.Role?.Name ?? "Unknown")
+                new Claim(ClaimTypes.Role, user.Role?.Name ?? "Unknown"),
+                new Claim("company", user.Company?.Name ?? string.Empty),
+                new Claim("companyId", user.Company_id.ToString())
             };
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
@@ -286,6 +289,82 @@ namespace APIDeliveryCRM.Services
             }
         }
 
+        public async Task<IActionResult> RegisterLogisticianAsync(RegisterLogisticianRequest dto)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var existingLogin = await _context.Logins.FirstOrDefaultAsync(l => l.Email == dto.Email);
+                if (existingLogin != null)
+                {
+                    return new BadRequestObjectResult(new { message = "Пользователь с таким email уже существует" });
+                }
+
+                // Получаем дефолтную компанию (ID = 1)
+                var defaultCompany = await _context.Companies.FirstOrDefaultAsync(c => c.ID_Company == 1);
+                if (defaultCompany == null)
+                {
+                    defaultCompany = new Company
+                    {
+                        Name = "Default Company",
+                        Subdomain = "default",
+                        Created_at = DateTime.UtcNow,
+                        Is_Active = true,
+                        SubscriptionPlan = "Pro",
+                        MaxUsers = 100,
+                        MaxOrdersPerMonth = 10000,
+                        SubscriptionExpiresAt = DateTime.UtcNow.AddYears(1)
+                    };
+                    _context.Companies.Add(defaultCompany);
+                    await _context.SaveChangesAsync();
+                }
+
+                var logisticRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == "Логист");
+                if (logisticRole == null)
+                {
+                    logisticRole = new Role { Name = "Логист" };
+                    _context.Roles.Add(logisticRole);
+                    await _context.SaveChangesAsync();
+                }
+
+                var login = new Login
+                {
+                    Email = dto.Email,
+                    Password = HashPassword(dto.Password),
+                    User = new User
+                    {
+                        FName = dto.FName,
+                        Name = dto.Name,
+                        Patronumic = dto.Patronumic,
+                        Created_at = DateTime.UtcNow,
+                        Is_Active = true,
+                        Theme = "light",
+                        Avatar = "/avatars/default.png",
+                        Role_id = logisticRole.ID_Role,
+                        Role = logisticRole,
+                        Company_id = defaultCompany.ID_Company,
+                        Company = defaultCompany
+                    }
+                };
+
+                await _context.AddAsync(login);
+                await _context.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+
+                return new OkObjectResult(new
+                {
+                    status = true,
+                    userId = login.User.ID_User
+                });
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                return new BadRequestObjectResult(new { message = $"Ошибка при регистрации: {ex.Message}" });
+            }
+        }
+
         public async Task<IActionResult> LoginAsync(LoginRequest dto)
         {
             if (string.IsNullOrEmpty(dto.Email) || string.IsNullOrEmpty(dto.Password))
@@ -296,6 +375,8 @@ namespace APIDeliveryCRM.Services
             var login = await _context.Logins
                 .Include(l => l.User)
                     .ThenInclude(u => u.Role)
+                .Include(l => l.User)
+                    .ThenInclude(u => u.Company)
                 .FirstOrDefaultAsync(l => l.Email == dto.Email);
 
             if (login == null || login.User == null)

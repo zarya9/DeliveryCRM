@@ -52,8 +52,10 @@
 @code {
     private List<OrderDto>? _orders;
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender) return;
         _orders = await OrdersApi.GetAllAsync(null);
+        StateHasChanged();
     }
 }

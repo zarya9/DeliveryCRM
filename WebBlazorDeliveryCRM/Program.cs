@@ -18,18 +18,27 @@ builder.Services.AddScoped<AuthApiService>();
 builder.Services.AddScoped<ChatHubClientService>();
 builder.Services.AddScoped<OrdersApiService>();
 builder.Services.AddScoped<ClientsApiService>();
+builder.Services.AddScoped<ClientsDetailsApiService>();
 builder.Services.AddScoped<CouriersApiService>();
+builder.Services.AddScoped<AppNotificationService>();
+builder.Services.AddScoped<ThemeApiService>();
+builder.Services.AddScoped<RolesApiService>();
+builder.Services.AddScoped<EmployeesApiService>();
+builder.Services.AddScoped<LeadsApiService>();
 
-var apiBase = builder.Configuration["ApiBaseUrl"] ?? "http://localhost:5220";
+// Связь Blazor с API: один базовый адрес, два HttpClient — без токена (логин) и с JWT (остальные запросы)
+var apiBase = (builder.Configuration["ApiBaseUrl"] ?? "http://localhost:5220").TrimEnd('/');
 
 builder.Services.AddHttpClient("UnauthorizedClient", client =>
 {
     client.BaseAddress = new Uri(apiBase);
+    client.Timeout = TimeSpan.FromSeconds(5);
 });
 
 builder.Services.AddHttpClient("AuthorizedClient", client =>
 {
     client.BaseAddress = new Uri(apiBase);
+    client.Timeout = TimeSpan.FromSeconds(5);
 }).AddHttpMessageHandler<AuthorizationMessageHandler>();
 
 builder.Services.AddTransient<AuthorizationMessageHandler>();
@@ -51,9 +60,9 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
+    app.UseHttpsRedirection();
 }
 
-app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseAntiforgery();
 

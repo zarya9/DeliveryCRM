@@ -50,13 +50,15 @@
 @code {
     private List<OrderDto>? _orders;
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender) return;
         var auth = await AuthState.GetAuthenticationStateAsync();
         var userIdStr = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (!int.TryParse(userIdStr, out var userId)) return;
+        if (!int.TryParse(userIdStr, out var userId)) { StateHasChanged(); return; }
         var client = await ClientsApi.GetByUserIdAsync(userId);
-        if (client == null) return;
+        if (client == null) { StateHasChanged(); return; }
         _orders = await ClientsApi.GetOrdersAsync(client.ID_ClientProfile) ?? new List<OrderDto>();
+        StateHasChanged();
     }
 }

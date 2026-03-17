@@ -7,7 +7,7 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class ThemeController
+    public class ThemeController : Controller
     {
         private readonly IThemeService _themeService;
 

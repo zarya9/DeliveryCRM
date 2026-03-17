@@ -7,7 +7,7 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class UsersController
+    public class UsersController : Controller
     {
         private readonly IUserLoginService _userService;
 
@@ -42,6 +42,13 @@ namespace APIDeliveryCRM.Controllers
         public async Task<IActionResult> RegisterManagerAsync(RegisterManagerRequest dto)
         {
             return await _userService.RegisterManagerAsync(dto);
+        }
+
+        [HttpPost]
+        [Route("RegisterLogistician")]
+        public async Task<IActionResult> RegisterLogisticianAsync(RegisterLogisticianRequest dto)
+        {
+            return await _userService.RegisterLogisticianAsync(dto);
         }
 
         [HttpPost]

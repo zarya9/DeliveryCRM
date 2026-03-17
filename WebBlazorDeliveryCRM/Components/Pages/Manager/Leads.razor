@@ -1,0 +1,229 @@
+@page "/manager/leads"
+@layout ManagerLayout
+@using System.Security.Claims
+@using WebBlazorDeliveryCRM.Services
+@using static WebBlazorDeliveryCRM.Services.LeadsApiService
+@inject LeadsApiService LeadsApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AppNotificationService Notify
+
+<PageTitle>Лиды — Менеджер</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Лиды и воронка продаж</h1>
+    <p class="subtitle">Потенциальные клиенты и статусы по воронке</p>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-8">
+        <div class="dms-card h-100">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h2 class="dms-card-title">Лиды компании</h2>
+            </div>
+
+            @if (_leads.Count == 0)
+            {
+                <p class="text-muted mb-0">Лидов пока нет.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped align-middle">
+                        <thead>
+                            <tr>
+                                <th>Название</th>
+                                <th>Контакт</th>
+                                <th>Источник</th>
+                                <th>Стадия</th>
+                                <th>Ответственный</th>
+                                <th>Создан</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var l in _leads)
+                            {
+                                <tr>
+                                    <td>@l.Name</td>
+                                    <td>@l.Contact</td>
+                                    <td>@l.Source</td>
+                                    <td>@l.Stage</td>
+                                    <td>@(string.IsNullOrWhiteSpace(l.ManagerName) ? "—" : l.ManagerName)</td>
+                                    <td>@l.CreatedAt.ToString("g")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="dms-card h-100">
+            <h2 class="dms-card-title">Новый лид</h2>
+
+            <div class="mb-2">
+                <label class="form-label">Название лида</label>
+                <input class="form-control" @bind="_newName" />
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Контакт (телефон / email)</label>
+                <input class="form-control" @bind="_newContact" />
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Источник</label>
+                <select class="form-select" @bind="_selectedSourceId">
+                    <option value="0">— выберите источник —</option>
+                    @foreach (var s in _meta?.Sources ?? new List<IdNameDto>())
+                    {
+                        <option value="@s.Id">@s.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Стадия</label>
+                <select class="form-select" @bind="_selectedStageId">
+                    <option value="0">— выберите стадию —</option>
+                    @foreach (var s in _meta?.Stages ?? new List<IdNameDto>())
+                    {
+                        <option value="@s.Id">@s.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Комментарий</label>
+                <textarea class="form-control" rows="3" @bind="_newComment"></textarea>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger mt-2">@_error</div>
+            }
+
+            <button class="btn btn-primary dms-btn-primary mt-2"
+                    disabled="@_saving || string.IsNullOrWhiteSpace(_newName) || _selectedSourceId == 0 || _selectedStageId == 0"
+                    @onclick="SaveLead">
+                @(_saving ? "Сохраняем..." : "Создать лид")
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Воронка по стадиям</h2>
+
+    @if (_leads.Count == 0)
+    {
+        <p class="text-muted mb-0">Для построения воронки нужны лиды.</p>
+    }
+    else if (_meta is null)
+    {
+        <p class="text-muted mb-0">Загрузка данных по стадиям…</p>
+    }
+    else
+    {
+        <div class="d-flex flex-wrap gap-2">
+            @foreach (var stage in _meta.Stages.OrderBy(s => s.Id))
+            {
+                var count = _leads.Count(l => l.Stage == stage.Name);
+                <div class="p-2 border rounded-3" style="min-width: 140px;">
+                    <div class="fw-semibold">@stage.Name</div>
+                    <div class="text-muted">Лидов: @count</div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<LeadDto> _leads = new();
+    private LeadMetaDto? _meta;
+    private int _companyId;
+
+    private string _newName = string.Empty;
+    private string? _newContact;
+    private int _selectedSourceId;
+    private int _selectedStageId;
+    private string? _newComment;
+    private string? _error;
+    private bool _saving;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = state.User;
+        var companyIdStr = user.FindFirst("companyId")?.Value;
+        if (!int.TryParse(companyIdStr, out _companyId))
+        {
+            _error = "Не удалось определить компанию пользователя.";
+            StateHasChanged();
+            return;
+        }
+
+        _meta = await LeadsApi.GetMetaAsync();
+        await LoadLeads();
+        StateHasChanged();
+    }
+
+    private async Task LoadLeads()
+    {
+        _leads = await LeadsApi.GetByCompanyAsync(_companyId);
+    }
+
+    private async Task SaveLead()
+    {
+        _error = null;
+
+        if (string.IsNullOrWhiteSpace(_newName))
+        {
+            _error = "Введите название лида.";
+            return;
+        }
+        if (_selectedSourceId == 0 || _selectedStageId == 0)
+        {
+            _error = "Выберите источник и стадию.";
+            return;
+        }
+
+        var dto = new CreateLeadRequestDto
+        {
+            Name = _newName.Trim(),
+            Contact = string.IsNullOrWhiteSpace(_newContact) ? null : _newContact.Trim(),
+            LeadSourceId = _selectedSourceId,
+            LeadStageId = _selectedStageId,
+            Comment = string.IsNullOrWhiteSpace(_newComment) ? null : _newComment.Trim()
+        };
+
+        _saving = true;
+        try
+        {
+            var ok = await LeadsApi.CreateAsync(dto);
+            if (ok)
+            {
+                _newName = string.Empty;
+                _newContact = null;
+                _newComment = null;
+                _selectedSourceId = 0;
+                _selectedStageId = 0;
+                await LoadLeads();
+                Notify.ShowSuccess("Лид создан.");
+            }
+            else
+            {
+                _error = "Не удалось создать лид.";
+                Notify.ShowError(_error);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Notify.ShowError(_error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}
+

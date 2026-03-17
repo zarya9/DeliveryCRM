@@ -6,7 +6,7 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class FilesController : ControllerBase
+    public class FilesController : Controller
     {
         private readonly IFileService _fileService;
 

@@ -69,13 +69,15 @@
     private int _activeCouriers;
     private int _unassignedCount;
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender) return;
         _orders = await OrdersApi.GetAllAsync(null);
         _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
         var today = DateTime.Today;
         _todayOrders = _orders?.Count(o => o.Created_at.Date == today) ?? 0;
         _activeCouriers = _couriers.Count(c => c.Is_online);
         _unassignedCount = _orders?.Count(o => o.Courier_id == null) ?? 0;
+        StateHasChanged();
     }
 }

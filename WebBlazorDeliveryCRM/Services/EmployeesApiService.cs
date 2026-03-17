@@ -1,0 +1,49 @@
+using System.Net.Http.Json;
+
+namespace WebBlazorDeliveryCRM.Services;
+
+public class EmployeesApiService
+{
+    private readonly HttpClient _http;
+
+    public EmployeesApiService(IHttpClientFactory factory)
+    {
+        _http = factory.CreateClient("AuthorizedClient");
+    }
+
+    public async Task<List<EmployeeDto>> GetByCompanyAsync(int companyId, CancellationToken cancellationToken = default)
+    {
+        var list = await _http.GetFromJsonAsync<List<EmployeeDto>>($"/api/Employees?companyId={companyId}", cancellationToken);
+        return list ?? new List<EmployeeDto>();
+    }
+
+    public async Task<bool> CreateAsync(CreateEmployeeRequestDto request, int companyId, CancellationToken cancellationToken = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/Employees?companyId={companyId}", request, cancellationToken);
+        return resp.IsSuccessStatusCode;
+    }
+
+    public sealed class EmployeeDto
+    {
+        public int Id { get; set; }
+        public string FullName { get; set; } = "";
+        public string? Patronumic { get; set; }
+        public string Role { get; set; } = "";
+        public bool Is_Active { get; set; }
+        public DateTime Created_at { get; set; }
+        public int Company_id { get; set; }
+        public string? Email { get; set; }
+    }
+
+    public sealed class CreateEmployeeRequestDto
+    {
+        public string FName { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string? Patronymic { get; set; }
+        public DateTime? BirthDate { get; set; }
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+        public int RoleId { get; set; }
+    }
+}
+

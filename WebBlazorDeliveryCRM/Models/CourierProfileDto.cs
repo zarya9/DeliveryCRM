@@ -12,6 +12,8 @@ public class CourierProfileDto
     public DateTime LastActivity_at { get; set; }
     public UserDto? User { get; set; }
     public CourierStatusDto? CourierStatus { get; set; }
+    public string? VehicleCategoryName { get; set; }
+    public string? ScheduleName { get; set; }
 }
 
 public class CourierStatusDto

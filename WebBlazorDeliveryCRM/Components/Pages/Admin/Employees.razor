@@ -1,0 +1,150 @@
+@page "/admin/employees"
+@layout ManagerLayout
+@using WebBlazorDeliveryCRM.Services
+@inject RolesApiService RolesApi
+@inject AuthApiService AuthApi
+
+<PageTitle>Сотрудники — Админ</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Создание сотрудников</h1>
+    <p class="subtitle">Добавление пользователей компании с нужной ролью</p>
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Новый сотрудник</h2>
+
+    <div class="row g-3">
+        <div class="col-md-4">
+            <label class="form-label">Фамилия</label>
+            <input class="form-control" @bind="_fName" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Имя</label>
+            <input class="form-control" @bind="_name" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Отчество</label>
+            <input class="form-control" @bind="_patronymic" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Дата рождения</label>
+            <input type="date" class="form-control" @bind="_birthDate" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Email (логин)</label>
+            <input type="email" class="form-control" @bind="_email" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Пароль</label>
+            <input type="password" class="form-control" @bind="_password" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Роль</label>
+            <select class="form-select" @bind="_selectedRoleId">
+                <option value="0">— выберите роль —</option>
+                @foreach (var r in _roles)
+                {
+                    <option value="@r.Id">@r.Name</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger mt-3">@_error</div>
+    }
+    @if (!string.IsNullOrEmpty(_success))
+    {
+        <div class="alert alert-success mt-3">@_success</div>
+    }
+
+    <button class="btn btn-primary dms-btn-primary mt-3" disabled="@_saving" @onclick="SaveEmployee">
+        @(_saving ? "Сохраняем..." : "Создать сотрудника")
+    </button>
+</div>
+
+@code {
+    private List<RolesApiService.RoleDto> _roles = new();
+    private string _fName = "";
+    private string _name = "";
+    private string? _patronymic;
+    private DateTime? _birthDate;
+    private string _email = "";
+    private string _password = "";
+    private int _selectedRoleId;
+    private bool _saving;
+    private string? _error;
+    private string? _success;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _roles = await RolesApi.GetAllAsync();
+        StateHasChanged();
+    }
+
+    private async Task SaveEmployee()
+    {
+        _error = null;
+        _success = null;
+
+        if (string.IsNullOrWhiteSpace(_fName) || string.IsNullOrWhiteSpace(_name))
+        {
+            _error = "Введите ФИО.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_email) || string.IsNullOrWhiteSpace(_password))
+        {
+            _error = "Введите email и пароль.";
+            return;
+        }
+        if (!IsValidEmail(_email))
+        {
+            _error = "Введите корректный email.";
+            return;
+        }
+        if (_password.Length < 6)
+        {
+            _error = "Пароль должен быть не короче 6 символов.";
+            return;
+        }
+        if (_selectedRoleId == 0)
+        {
+            _error = "Выберите роль.";
+            return;
+        }
+
+        // Здесь можно вызвать соответствующий endpoint регистрации по роли.
+        // Пока это заготовка UI: создание профилей по ролям делается существующими API.
+
+        _saving = true;
+        try
+        {
+            _success = "Данные сотрудника заполнены. Дальнейшая логика сохранения профиля подключается к API регистрации по ролям.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static bool IsValidEmail(string email)
+    {
+        try
+        {
+            var addr = new System.Net.Mail.MailAddress(email);
+            return addr.Address == email;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}
+

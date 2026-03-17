@@ -15,7 +15,15 @@ public class AuthorizationMessageHandler : DelegatingHandler
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        var token = await _localStorage.GetItemAsync<string>(TokenKey, cancellationToken);
+        string? token = null;
+        try
+        {
+            token = await _localStorage.GetItemAsync<string>(TokenKey, cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            // Prerendering: JS interop недоступен — запрос уйдёт без токена (после подключения circuit загрузка повторится в OnAfterRenderAsync).
+        }
         if (!string.IsNullOrEmpty(token))
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);

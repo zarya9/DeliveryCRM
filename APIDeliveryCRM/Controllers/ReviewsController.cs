@@ -7,7 +7,7 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class ReviewsController
+    public class ReviewsController : Controller
     {
         private readonly IReviewService _reviewService;
 

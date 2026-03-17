@@ -6,7 +6,7 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class NotificationsController
+    public class NotificationsController : Controller
     {
         private readonly INotificationService _notificationService;
 

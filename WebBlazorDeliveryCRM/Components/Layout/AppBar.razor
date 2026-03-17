@@ -1,9 +1,11 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject CustomAuthenticationStateProvider AuthState
+@inject ThemeApiService ThemeApi
+@inject IJSRuntime JS
 @inject NavigationManager Navigation
 
 <div class="dms-appbar">
-    <a href="/" class="dms-appbar-logo">Delivery CRM</a>
+    <a href="/" class="dms-appbar-logo">@(_companyName ?? "Delivery CRM")</a>
     <div class="dms-appbar-actions">
         @if (_isAuthenticated)
         {
@@ -20,14 +22,36 @@
 @code {
     private bool _isAuthenticated;
     private string? _userName;
+    private string? _companyName;
+    private int? _userId;
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender) return;
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         _isAuthenticated = state.User.Identity?.IsAuthenticated ?? false;
-        _userName = state.User.FindFirst(c => c.Type == System.Security.Claims.ClaimTypes.Email)?.Value
-                    ?? state.User.FindFirst("email")?.Value
-                    ?? state.User.Identity?.Name;
+        var user = state.User;
+        _userName = user.FindFirst(c => c.Type == System.Security.Claims.ClaimTypes.Email)?.Value
+                    ?? user.FindFirst("email")?.Value
+                    ?? user.Identity?.Name;
+        _companyName = user.FindFirst("company")?.Value;
+
+        var idStr = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (int.TryParse(idStr, out var id))
+        {
+            _userId = id;
+            var theme = await ThemeApi.GetThemeAsync(id);
+            if (!string.IsNullOrWhiteSpace(theme))
+            {
+                try
+                {
+                    await JS.InvokeVoidAsync("appTheme.set", theme);
+                }
+                catch { }
+            }
+        }
+
+        StateHasChanged();
     }
 
     private async Task Logout()

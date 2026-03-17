@@ -50,8 +50,10 @@
 @code {
     private List<CourierProfileDto>? _couriers;
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender) return;
         _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
+        StateHasChanged();
     }
 }

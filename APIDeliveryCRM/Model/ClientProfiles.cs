@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APIDeliveryCRM.Model
@@ -15,6 +15,14 @@ namespace APIDeliveryCRM.Model
 
         public string Default_address { get; set; } = string.Empty;
         public decimal Rating { get; set; }
+
+        [ForeignKey(nameof(ClientStatus))]
+        public int? ClientStatus_id { get; set; }
+        public ClientStatus? ClientStatus { get; set; }
+
+        [ForeignKey(nameof(ClientSegment))]
+        public int? ClientSegment_id { get; set; }
+        public ClientSegment? ClientSegment { get; set; }
 
         [Required]
         [ForeignKey(nameof(User))]

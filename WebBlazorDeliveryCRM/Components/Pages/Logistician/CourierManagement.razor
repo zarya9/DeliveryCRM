@@ -3,6 +3,7 @@
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
 @inject CouriersApiService CouriersApi
+@inject AuthenticationStateProvider AuthStateProvider
 
 <PageTitle>Курьеры — Логист</PageTitle>
 
@@ -12,7 +13,13 @@
 </div>
 
 <div class="dms-card">
-    <h2 class="dms-card-title">Курьеры</h2>
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h2 class="dms-card-title">Курьеры</h2>
+        <input class="form-control"
+               style="max-width: 260px;"
+               placeholder="Поиск по ФИО"
+               @bind="_searchText" />
+    </div>
     @if (_couriers != null && _couriers.Count > 0)
     {
         <table class="table">
@@ -27,10 +34,17 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (var c in _couriers)
+                @foreach (var c in _couriers.Where(FilterCourier))
                 {
                     <tr>
-                        <td>@(c.User?.FName) @(c.User?.Name)</td>
+                        <td>
+                            <span class="status-dot @(c.Is_online ? "status-dot-online" : "status-dot-offline")"></span>
+                            @(c.User?.FName) @(c.User?.Name)
+                            @if (c.User_id == _currentUserId)
+                            {
+                                <span class="text-muted ms-1">(Вы)</span>
+                            }
+                        </td>
                         <td>@c.Rating</td>
                         <td>@(c.CourierStatus?.Name ?? "—")</td>
                         <td>@(c.Is_online ? "Да" : "Нет")</td>
@@ -49,9 +63,27 @@
 
 @code {
     private List<CourierProfileDto>? _couriers;
+    private string _searchText = string.Empty;
+    private int? _currentUserId;
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender) return;
         _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userIdStr = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (int.TryParse(userIdStr, out var uid))
+        {
+            _currentUserId = uid;
+        }
+        StateHasChanged();
+    }
+
+    private bool FilterCourier(CourierProfileDto c)
+    {
+        if (string.IsNullOrWhiteSpace(_searchText)) return true;
+        var q = _searchText.Trim().ToLowerInvariant();
+        var fullName = $"{c.User?.FName} {c.User?.Name}".ToLowerInvariant();
+        return fullName.Contains(q);
     }
 }

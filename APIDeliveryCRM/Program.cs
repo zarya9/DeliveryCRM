@@ -22,6 +22,9 @@ builder.Services.AddScoped<IThemeService, ThemeService>();
 builder.Services.AddScoped<IAzureBlobService, AzureBlobService>();
 builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddScoped<IChatService, ChatService>();
+builder.Services.AddScoped<IRoleService, RoleService>();
+builder.Services.AddScoped<IEmployeeService, EmployeeService>();
+builder.Services.AddScoped<ILeadService, LeadService>();
 
 // SignalR
 builder.Services.AddSignalR();

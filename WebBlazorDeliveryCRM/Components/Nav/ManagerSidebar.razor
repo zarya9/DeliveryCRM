@@ -1,5 +1,12 @@
+@using System.Security.Claims
+@inject AuthenticationStateProvider AuthStateProvider
+
 <div class="sidebar-header">
-    <h2 class="sidebar-title">Менеджер</h2>
+    <h2 class="sidebar-title">@(_fullName ?? "Менеджер")</h2>
+    @if (!string.IsNullOrEmpty(_email))
+    {
+        <p class="text-muted" style="font-size: 0.825rem; margin: 0;">@_email</p>
+    }
 </div>
 <nav class="sidebar-nav">
     <NavLink href="/manager" class="sidebar-link" Match="NavLinkMatch.Prefix">
@@ -8,10 +15,29 @@
     <NavLink href="/manager/orders" class="sidebar-link">
         <span class="icon">📋</span> Заказы
     </NavLink>
-    <NavLink href="/manager/couriers" class="sidebar-link">
-        <span class="icon">🚴</span> Курьеры
+    <NavLink href="/manager/leads" class="sidebar-link">
+        <span class="icon">🧲</span> Лиды
+    </NavLink>
+    <NavLink href="/manager/employees" class="sidebar-link">
+        <span class="icon">👥</span> Сотрудники
     </NavLink>
     <NavLink href="/manager/analytics" class="sidebar-link">
         <span class="icon">📊</span> Аналитика
     </NavLink>
 </nav>
+
+@code {
+    private string? _fullName;
+    private string? _email;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = state.User;
+        _email = user.FindFirst(ClaimTypes.Email)?.Value
+                 ?? user.FindFirst("email")?.Value;
+        _fullName = user.FindFirst(ClaimTypes.Name)?.Value;
+        StateHasChanged();
+    }
+}

@@ -43,6 +43,8 @@ namespace APIDeliveryCRM.Services
             var query = _context.CourierProfiles
                 .Include(c => c.User)
                 .Include(c => c.CourierStatus)
+                .Include(c => c.VehicleCategory)
+                .Include(c => c.ScheduleType)
                 .AsQueryable();
             if (companyId.HasValue)
                 query = query.Where(c => c.Company_id == companyId.Value);

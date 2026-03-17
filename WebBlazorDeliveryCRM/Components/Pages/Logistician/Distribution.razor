@@ -1,11 +1,10 @@
 @page "/logistician"
 @layout LogisticianLayout
-@using Blazored.Toast.Services
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
 @inject OrdersApiService OrdersApi
 @inject CouriersApiService CouriersApi
-@inject IToastService Toast
+@inject AppNotificationService Notify
 
 <PageTitle>Распределение заказов — Логист</PageTitle>
 
@@ -108,9 +107,11 @@
     private Dictionary<int, int> _orderCourierSelection = new();
     private int _assigningOrderId;
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender) return;
         await Load();
+        StateHasChanged();
     }
 
     private async Task Load()
@@ -129,15 +130,15 @@
     private async Task AssignCourier(int orderId)
     {
         var courierId = GetSelectedCourier(orderId);
-        if (courierId <= 0) { Toast.ShowWarning("Выберите курьера."); return; }
+        if (courierId <= 0) { Notify.ShowWarning("Выберите курьера."); return; }
         _assigningOrderId = orderId;
         try
         {
             var ok = await OrdersApi.AssignCourierAsync(orderId, courierId);
-            if (ok) { Toast.ShowSuccess("Курьер назначен."); await Load(); }
-            else Toast.ShowError("Не удалось назначить курьера.");
+            if (ok) { Notify.ShowSuccess("Курьер назначен."); await Load(); }
+            else Notify.ShowError("Не удалось назначить курьера.");
         }
-        catch (Exception ex) { Toast.ShowError(ex.Message); }
+        catch (Exception ex) { Notify.ShowError(ex.Message); }
         finally { _assigningOrderId = 0; }
     }
 }

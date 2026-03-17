@@ -1,0 +1,243 @@
+@page "/manager/clients"
+@using WebBlazorDeliveryCRM.Models
+@inject ClientsDetailsApiService ClientsDetailsApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AppNotificationService Notify
+
+<h3>Клиенты</h3>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label">ID клиентского профиля</label>
+                <input class="form-control" type="number" @bind="_searchClientProfileId" />
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-primary" @onclick="LoadClientDetails">Найти</button>
+            </div>
+        </div>
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="text-danger mt-2">@_error</div>
+        }
+    </div>
+</div>
+
+@if (_isLoading)
+{
+    <p>Загрузка...</p>
+}
+else if (_client != null)
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">
+                @_client.FName @_client.Name @if (!string.IsNullOrWhiteSpace(_client.Patronumic)) { @_client.Patronumic }
+            </h5>
+            <p class="card-text mb-1"><strong>Email:</strong> @_client.Email</p>
+            @if (!string.IsNullOrWhiteSpace(_client.Phone))
+            {
+                <p class="card-text mb-1"><strong>Телефон:</strong> @_client.Phone</p>
+            }
+            <p class="card-text mb-1"><strong>Рейтинг:</strong> @_client.Rating</p>
+            @if (!string.IsNullOrWhiteSpace(_client.Status) || !string.IsNullOrWhiteSpace(_client.Segment))
+            {
+                <p class="card-text">
+                    @if (!string.IsNullOrWhiteSpace(_client.Status))
+                    {
+                        <span><strong>Статус:</strong> @_client.Status</span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_client.Segment))
+                    {
+                        <span class="ms-3"><strong>Сегмент:</strong> @_client.Segment</span>
+                    }
+                </p>
+            }
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Заказы клиента</h5>
+
+            @if (_client.Orders.Count == 0)
+            {
+                <p class="mb-0">Заказов пока нет.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped align-middle">
+                        <thead>
+                            <tr>
+                                <th>Номер</th>
+                                <th>Название</th>
+                                <th>Статус</th>
+                                <th>Создан</th>
+                                <th>Доставлен</th>
+                                <th>Расчетная стоимость</th>
+                                <th>Итоговая стоимость</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var o in _client.Orders)
+                            {
+                                <tr>
+                                    <td>@o.OrderNumber</td>
+                                    <td>@o.Name</td>
+                                    <td>@o.Status</td>
+                                    <td>@o.CreatedAt.ToString("g")</td>
+                                    <td>@(o.DeliveredAt?.ToString("g") ?? "-")</td>
+                                    <td>@o.EstimatedCost.ToString("N2")</td>
+                                    <td>@o.FinalCost.ToString("N2")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">Заметки менеджера, жалобы и отзывы</h5>
+
+            <div class="mb-3">
+                <label class="form-label">Новая заметка</label>
+                <textarea class="form-control"
+                          rows="3"
+                          @bind="_newNoteText"></textarea>
+                <small class="text-muted">Сохраняется как тип «Заметка».</small>
+                <button class="btn btn-primary mt-2"
+                        disabled="@_savingNote || string.IsNullOrWhiteSpace(_newNoteText) || _client is null"
+                        @onclick="SaveNote">
+                    @(_savingNote ? "Сохраняем..." : "Добавить заметку")
+                </button>
+            </div>
+
+            @if (_client.Notes.Count == 0)
+            {
+                <p class="mb-0">Заметок пока нет.</p>
+            }
+            else
+            {
+                <ul class="list-group list-group-flush">
+                    @foreach (var n in _client.Notes.OrderByDescending(n => n.CreatedAt))
+                    {
+                        <li class="list-group-item">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <span class="badge bg-secondary me-2">@n.Type</span>
+                                    <strong>@n.AuthorName</strong>
+                                </div>
+                                <small class="text-muted">@n.CreatedAt.ToString("g")</small>
+                            </div>
+                            <div class="mt-1">@n.Text</div>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+}
+
+@code
+{
+    private int _searchClientProfileId;
+    private bool _isLoading;
+    private string? _error;
+    private ClientDetailsDto? _client;
+    private string _newNoteText = string.Empty;
+    private bool _savingNote;
+    private int? _currentUserId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = state.User;
+        var userIdStr = user.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")?.Value;
+        if (int.TryParse(userIdStr, out var uid))
+        {
+            _currentUserId = uid;
+        }
+    }
+
+    private async Task LoadClientDetails()
+    {
+        _error = null;
+        _client = null;
+
+        if (_searchClientProfileId <= 0)
+        {
+            _error = "Введите корректный ID клиента.";
+            return;
+        }
+
+        _isLoading = true;
+        try
+        {
+            var result = await ClientsDetailsApi.GetDetailsAsync(_searchClientProfileId);
+            if (result == null)
+            {
+                _error = "Клиент не найден.";
+            }
+            else
+            {
+                _client = result;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Не удалось связаться с API клиентов.";
+        }
+        catch (Exception)
+        {
+            _error = "Произошла ошибка при загрузке данных клиента.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task SaveNote()
+    {
+        if (_client is null || _currentUserId is null)
+        {
+            return;
+        }
+
+        _savingNote = true;
+        try
+        {
+            var ok = await ClientsDetailsApi.AddNoteAsync(
+                _client.ClientProfileId,
+                _currentUserId.Value,
+                "ЗАМЕТКА",
+                _newNoteText);
+            if (ok)
+            {
+                _newNoteText = string.Empty;
+                await LoadClientDetails();
+                Notify.ShowSuccess("Заметка сохранена.");
+            }
+            else
+            {
+                Notify.ShowError("Не удалось сохранить заметку.");
+            }
+        }
+        catch
+        {
+            Notify.ShowError("Ошибка при сохранении заметки.");
+        }
+        finally
+        {
+            _savingNote = false;
+        }
+    }
+}
+

@@ -8,7 +8,7 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class ChatController
+    public class ChatController : Controller
     {
         private readonly IChatService _chatService;
 

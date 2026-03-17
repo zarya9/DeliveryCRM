@@ -1,0 +1,306 @@
+@page "/manager/employees"
+@layout ManagerLayout
+@using System.Security.Claims
+@using WebBlazorDeliveryCRM.Services
+@using static WebBlazorDeliveryCRM.Services.EmployeesApiService
+@inject EmployeesApiService EmployeesApi
+@inject RolesApiService RolesApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AppNotificationService Notify
+
+<PageTitle>Сотрудники — Менеджер</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Сотрудники компании</h1>
+    <p class="subtitle">Список сотрудников и создание новых аккаунтов</p>
+</div>
+
+<div class="dms-card mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h2 class="dms-card-title">Сотрудники</h2>
+        <input class="form-control"
+               style="max-width: 260px;"
+               placeholder="Поиск по ФИО"
+               @bind="_searchText" @bind:event="oninput" />
+    </div>
+    @if (_employees is { Count: > 0 })
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>ФИО</th>
+                    <th>Роль</th>
+                    <th>Email</th>
+                    <th>Создан</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var e in _employees.Where(FilterEmployee))
+                {
+                    <tr style="cursor: pointer;" @onclick="() => OpenEmployee(e)">
+                        <td>
+                            <span class="status-dot @(e.Is_Active ? "status-dot-online" : "status-dot-offline")"></span>
+                            @e.FullName
+                            @if (e.Id == _currentUserId)
+                            {
+                                <span class="text-muted ms-1">(Вы)</span>
+                            }
+                        </td>
+                        <td>@e.Role</td>
+                        <td>@e.Email</td>
+                        <td>@e.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <p class="text-muted mb-0">Сотрудников пока нет.</p>
+    }
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Новый сотрудник</h2>
+
+    <div class="row g-3">
+        <div class="col-md-4">
+            <label class="form-label">Фамилия</label>
+            <input class="form-control" @bind="_fName" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Имя</label>
+            <input class="form-control" @bind="_name" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Отчество</label>
+            <input class="form-control" @bind="_patronymic" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Дата рождения</label>
+            <input type="date" class="form-control" @bind="_birthDate" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Email (логин)</label>
+            <input type="email" class="form-control" @bind="_email" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Пароль</label>
+            <input type="password" class="form-control" @bind="_password" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Роль</label>
+            <select class="form-select" @bind="_selectedRoleId">
+                <option value="0">— выберите роль —</option>
+                @foreach (var r in _roles)
+                {
+                    <option value="@r.Id">@r.Name</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger mt-3">@_error</div>
+    }
+    @if (!string.IsNullOrEmpty(_success))
+    {
+        <div class="alert alert-success mt-3">@_success</div>
+    }
+
+    <button class="btn btn-primary dms-btn-primary mt-3" disabled="@_saving" @onclick="SaveEmployee">
+        @(_saving ? "Сохраняем..." : "Создать сотрудника")
+    </button>
+</div>
+
+@if (_selectedEmployee is not null)
+{
+    <div class="employee-modal-backdrop" @onclick="CloseEmployee">
+        <div class="employee-modal" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <h2 class="h5 mb-0">Карточка сотрудника</h2>
+                <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseEmployee"></button>
+            </div>
+            <div class="row g-3 align-items-center">
+                <div class="col-md-3 text-center">
+                    <img src="@(_selectedEmployeeAvatar ?? "/avatars/default.png")"
+                         alt="Аватар"
+                         class="img-fluid rounded-circle"
+                         style="max-width: 96px;" />
+                </div>
+                <div class="col-md-9">
+                    <p class="mb-1"><strong>ФИО:</strong> @_selectedEmployee.FullName</p>
+                    <p class="mb-1"><strong>Роль:</strong> @_selectedEmployee.Role</p>
+                    @if (!string.IsNullOrWhiteSpace(_selectedEmployee.Email))
+                    {
+                        <p class="mb-1"><strong>Email:</strong> @_selectedEmployee.Email</p>
+                    }
+                    <p class="mb-1"><strong>Создан:</strong> @_selectedEmployee.Created_at.ToString("dd.MM.yyyy HH:mm")</p>
+                    <button class="btn btn-outline-primary mt-2">Написать</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<EmployeeDto> _employees = new();
+    private List<RolesApiService.RoleDto> _roles = new();
+    private int _companyId;
+    private int? _currentUserId;
+    private EmployeeDto? _selectedEmployee;
+    private string? _selectedEmployeeAvatar;
+
+    private string _fName = "";
+    private string _name = "";
+    private string? _patronymic;
+    private DateTime? _birthDate;
+    private string _email = "";
+    private string _password = "";
+    private int _selectedRoleId;
+    private bool _saving;
+    private string? _error;
+    private string? _success;
+    private string _searchText = string.Empty;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = state.User;
+
+        var userIdStr = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (int.TryParse(userIdStr, out var uid))
+        {
+            _currentUserId = uid;
+        }
+        var companyIdStr = user.FindFirst("companyId")?.Value;
+        if (!int.TryParse(companyIdStr, out _companyId))
+        {
+            _error = "Не удалось определить компанию пользователя.";
+            StateHasChanged();
+            return;
+        }
+
+        _roles = await RolesApi.GetAllAsync();
+        await LoadEmployees();
+        StateHasChanged();
+    }
+
+    private async Task LoadEmployees()
+    {
+        _employees = await EmployeesApi.GetByCompanyAsync(_companyId);
+    }
+
+    private async Task SaveEmployee()
+    {
+        _error = null;
+        _success = null;
+
+        if (string.IsNullOrWhiteSpace(_fName))
+        {
+            _error = "Введите фамилию.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_name))
+        {
+            _error = "Введите имя.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_email) || string.IsNullOrWhiteSpace(_password))
+        {
+            _error = "Введите email и пароль.";
+            return;
+        }
+        if (!IsValidEmail(_email))
+        {
+            _error = "Введите корректный email.";
+            return;
+        }
+        if (_password.Length < 6)
+        {
+            _error = "Пароль должен быть не короче 6 символов.";
+            return;
+        }
+        if (_selectedRoleId == 0)
+        {
+            _error = "Выберите роль.";
+            return;
+        }
+
+        var dto = new CreateEmployeeRequestDto
+        {
+            FName = _fName.Trim(),
+            Name = _name.Trim(),
+            Patronymic = string.IsNullOrWhiteSpace(_patronymic) ? null : _patronymic.Trim(),
+            BirthDate = _birthDate,
+            Email = _email.Trim(),
+            Password = _password,
+            RoleId = _selectedRoleId
+        };
+
+        _saving = true;
+        try
+        {
+            var ok = await EmployeesApi.CreateAsync(dto, _companyId);
+            if (ok)
+            {
+                _success = "Сотрудник создан.";
+                await LoadEmployees();
+                Notify.ShowSuccess("Сотрудник создан.");
+                // очистка формы
+                _fName = _name = _email = _password = "";
+                _patronymic = null;
+                _birthDate = null;
+                _selectedRoleId = 0;
+            }
+            else
+            {
+                _error = "Не удалось создать сотрудника.";
+                Notify.ShowError(_error);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Notify.ShowError(_error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static bool IsValidEmail(string email)
+    {
+        try
+        {
+            var addr = new System.Net.Mail.MailAddress(email);
+            return addr.Address == email;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool FilterEmployee(EmployeeDto e)
+    {
+        if (string.IsNullOrWhiteSpace(_searchText)) return true;
+        var q = _searchText.Trim().ToLowerInvariant();
+        return (e.FullName ?? string.Empty).ToLowerInvariant().Contains(q);
+    }
+
+    private void OpenEmployee(EmployeeDto e)
+    {
+        _selectedEmployee = e;
+        _selectedEmployeeAvatar = "/avatars/default.png"; // пока один аватар по умолчанию
+    }
+
+    private void CloseEmployee()
+    {
+        _selectedEmployee = null;
+    }
+}
+

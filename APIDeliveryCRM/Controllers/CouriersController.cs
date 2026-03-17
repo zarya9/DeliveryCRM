@@ -6,7 +6,7 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class CouriersController
+    public class CouriersController : Controller
     {
         private readonly ICourierService _courierService;
         private readonly IShiftService _shiftService;

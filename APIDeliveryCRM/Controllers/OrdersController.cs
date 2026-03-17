@@ -8,7 +8,7 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class OrdersController
+    public class OrdersController : Controller
     {
         private readonly IOrderService _orderService;
 

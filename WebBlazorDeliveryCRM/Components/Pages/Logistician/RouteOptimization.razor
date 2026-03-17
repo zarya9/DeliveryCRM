@@ -13,8 +13,11 @@
 </div>
 
 <div class="dms-card mb-3">
-    <h2 class="dms-card-title">Карта курьеров</h2>
-    <p class="text-muted">Позиции курьеров в реальном времени (координаты с API).</p>
+    <h2 class="dms-card-title">Карта курьеров и маршрутов</h2>
+    <p class="text-muted">
+        Позиции курьеров в реальном времени (координаты с API).
+        Щёлкните по двум точкам на карте: сначала старт, затем финиш — между ними построится маршрут по алгоритму A*.
+    </p>
     <div id="logistician-map" style="height: 480px; width: 100%; border-radius: 8px;"></div>
 </div>
 
@@ -28,6 +31,8 @@
                     <th>Курьер</th>
                     <th>Рейтинг</th>
                     <th>Статус</th>
+                    <th>Транспорт</th>
+                    <th>График</th>
                     <th>Координаты</th>
                 </tr>
             </thead>
@@ -38,6 +43,8 @@
                         <td>@(c.User?.FName) @(c.User?.Name)</td>
                         <td>@c.Rating</td>
                         <td>@(c.CourierStatus?.Name ?? "—")</td>
+                        <td>@(string.IsNullOrEmpty(c.VehicleCategoryName) ? "—" : c.VehicleCategoryName)</td>
+                        <td>@(string.IsNullOrEmpty(c.ScheduleName) ? "—" : c.ScheduleName)</td>
                         <td>@c.Current_lat.ToString("0.00"), @c.Current_lon.ToString("0.00")</td>
                     </tr>
                 }
@@ -52,29 +59,29 @@
 
 @code {
     private List<CourierProfileDto>? _couriers;
-    private bool _mapRendered;
-
-    protected override async Task OnInitializedAsync()
-    {
-        _couriers = await CouriersApi.GetAllAsync(null);
-    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && _couriers != null)
+        if (!firstRender) return;
+        _couriers = await CouriersApi.GetAllAsync(null);
+        StateHasChanged();
+        if (_couriers != null)
         {
-            _mapRendered = true;
             var markers = _couriers
                 .Where(c => c.Current_lat != 0 || c.Current_lon != 0)
-                .Select(c => new { lat = (double)c.Current_lat, lon = (double)c.Current_lon, title = $"{c.User?.FName} {c.User?.Name} — {c.CourierStatus?.Name}" })
+                .Select(c => new
+                {
+                    lat = (double)c.Current_lat,
+                    lon = (double)c.Current_lon,
+                    title = $"{c.User?.FName} {c.User?.Name} — {c.CourierStatus?.Name}"
+                })
                 .ToList();
             try
             {
-                await JS.InvokeVoidAsync("leafletMap.init", "logistician-map", 55.7558, 37.6173, 10);
+                await JS.InvokeVoidAsync("leafletMap.init", "logistician-map", 55.7558, 37.6173, 10, null);
                 await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
             }
-            catch { /* map may fail in prerender */ }
+            catch { /* map may fail */ }
         }
     }
-
 }

@@ -1,5 +1,9 @@
 @page "/manager/analytics"
 @layout ManagerLayout
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject OrdersApiService OrdersApi
+@inject CouriersApiService CouriersApi
 
 <PageTitle>Аналитика — Менеджер</PageTitle>
 
@@ -8,7 +12,267 @@
     <p class="subtitle">Глубокая аналитика и финансы</p>
 </div>
 
-<div class="dms-card">
-    <h2 class="dms-card-title">Графики и отчёты</h2>
-    <p class="text-muted">Метрики по заказам и курьерам (API).</p>
+<div class="dms-stat-grid">
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_ordersToday</div>
+        <div class="dms-stat-label">Заказов сегодня</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_ordersThisMonth</div>
+        <div class="dms-stat-label">Заказов в этом месяце</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_onTimePercent.ToString("0")@("%")</div>
+        <div class="dms-stat-label">Доставлены вовремя</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_avgDeliveryHours.ToString("0.0")</div>
+        <div class="dms-stat-label">Среднее время доставки, ч</div>
+    </div>
 </div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Финансы</h2>
+    <div class="row">
+        <div class="col-md-4">
+            <div class="mb-2">
+                <strong>Выручка сегодня:</strong>
+                @_revenueToday.ToString("N0") ₽
+            </div>
+            <div class="mb-2">
+                <strong>Выручка за месяц:</strong>
+                @_revenueThisMonth.ToString("N0") ₽
+            </div>
+            <div class="mb-2">
+                <strong>Средний чек (месяц):</strong>
+                @_avgCheckThisMonth.ToString("N0") ₽
+            </div>
+        </div>
+        <div class="col-md-8">
+            <h3 class="h6">Динамика заказов за 7 дней</h3>
+            @if (_ordersByDay.Any())
+            {
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Заказов</th>
+                            <th>Выручка</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _ordersByDay.OrderBy(r => r.Date))
+                        {
+                            <tr>
+                                <td>@row.Date.ToString("dd.MM")</td>
+                                <td>@row.Count</td>
+                                <td>@row.Revenue.ToString("N0") ₽</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            else
+            {
+                <p class="text-muted mb-0">Недостаточно данных по заказам.</p>
+            }
+        </div>
+    </div>
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Статусы заказов</h2>
+    @if (_statusRows.Any())
+    {
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Статус</th>
+                    <th>Количество</th>
+                    <th>Доля</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _statusRows)
+                {
+                    <tr>
+                        <td>@row.Status</td>
+                        <td>@row.Count</td>
+                        <td>@row.Share.ToString("0")@("%")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <p class="text-muted mb-0">Нет данных по статусам.</p>
+    }
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Топ курьеров по доставкам</h2>
+    @if (_courierRows.Any())
+    {
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Курьер</th>
+                    <th>Доставок</th>
+                    <th>Выручка</th>
+                    <th>Рейтинг</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in _courierRows)
+                {
+                    <tr>
+                        <td>@c.Name</td>
+                        <td>@c.Delivered</td>
+                        <td>@c.Revenue.ToString("N0") ₽</td>
+                        <td>@c.Rating.ToString("0.0")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <p class="text-muted mb-0">Нет данных по курьерам.</p>
+    }
+</div>
+
+@code {
+    private List<OrderDto> _orders = new();
+    private List<CourierProfileDto> _couriers = new();
+
+    private int _ordersToday;
+    private int _ordersThisMonth;
+    private decimal _revenueToday;
+    private decimal _revenueThisMonth;
+    private decimal _avgCheckThisMonth;
+    private double _avgDeliveryHours;
+    private double _onTimePercent;
+
+    private List<OrdersByDayRow> _ordersByDay = new();
+    private List<StatusRow> _statusRows = new();
+    private List<CourierRow> _courierRows = new();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _orders = await OrdersApi.GetAllAsync(null) ?? new List<OrderDto>();
+        _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
+
+        ComputeMetrics();
+        StateHasChanged();
+    }
+
+    private void ComputeMetrics()
+    {
+        if (_orders.Count == 0)
+            return;
+
+        var today = DateTime.Today;
+        var monthStart = new DateTime(today.Year, today.Month, 1);
+
+        _ordersToday = _orders.Count(o => o.Created_at.Date == today);
+        _ordersThisMonth = _orders.Count(o => o.Created_at >= monthStart);
+
+        var delivered = _orders.Where(o => o.Delivered_at.HasValue).ToList();
+
+        _revenueToday = delivered
+            .Where(o => o.Delivered_at!.Value.Date == today)
+            .Sum(o => o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost);
+
+        _revenueThisMonth = delivered
+            .Where(o => o.Delivered_at!.Value >= monthStart)
+            .Sum(o => o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost);
+
+        var monthOrders = delivered.Where(o => o.Delivered_at!.Value >= monthStart).ToList();
+        _avgCheckThisMonth = monthOrders.Count > 0
+            ? monthOrders.Average(o => (o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost))
+            : 0;
+
+        var withDeliveryTime = delivered
+            .Where(o => o.Delivered_at!.Value > o.Created_at)
+            .ToList();
+
+        _avgDeliveryHours = withDeliveryTime.Count > 0
+            ? withDeliveryTime.Average(o => (o.Delivered_at!.Value - o.Created_at).TotalHours)
+            : 0;
+
+        var slaLimit = TimeSpan.FromHours(4);
+        var onTimeCount = withDeliveryTime.Count(o => (o.Delivered_at!.Value - o.Created_at) <= slaLimit);
+        _onTimePercent = withDeliveryTime.Count > 0
+            ? onTimeCount * 100.0 / withDeliveryTime.Count
+            : 0;
+
+        _ordersByDay = _orders
+            .GroupBy(o => o.Created_at.Date)
+            .OrderByDescending(g => g.Key)
+            .Take(7)
+            .Select(g => new OrdersByDayRow
+            {
+                Date = g.Key,
+                Count = g.Count(),
+                Revenue = g.Where(o => o.Delivered_at.HasValue)
+                    .Sum(o => o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost)
+            })
+            .ToList();
+
+        var total = _orders.Count;
+        _statusRows = _orders
+            .GroupBy(o => o.OrderStatus?.Name ?? "Неизвестно")
+            .Select(g => new StatusRow
+            {
+                Status = g.Key,
+                Count = g.Count(),
+                Share = total > 0 ? g.Count() * 100.0 / total : 0
+            })
+            .OrderByDescending(r => r.Count)
+            .ToList();
+
+        _courierRows = _couriers
+            .Select(c =>
+            {
+                var courierOrders = delivered.Where(o => o.Courier_id == c.ID_CourierProfile).ToList();
+                var revenue = courierOrders.Sum(o => o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost);
+                return new CourierRow
+                {
+                    Name = $"{c.User?.FName} {c.User?.Name}".Trim(),
+                    Delivered = courierOrders.Count,
+                    Revenue = revenue,
+                    Rating = c.Rating
+                };
+            })
+            .Where(c => c.Delivered > 0 || c.Revenue > 0)
+            .OrderByDescending(c => c.Delivered)
+            .ThenByDescending(c => c.Revenue)
+            .Take(10)
+            .ToList();
+    }
+
+    private sealed class OrdersByDayRow
+    {
+        public DateTime Date { get; set; }
+        public int Count { get; set; }
+        public decimal Revenue { get; set; }
+    }
+
+    private sealed class StatusRow
+    {
+        public string Status { get; set; } = "";
+        public int Count { get; set; }
+        public double Share { get; set; }
+    }
+
+    private sealed class CourierRow
+    {
+        public string Name { get; set; } = "";
+        public int Delivered { get; set; }
+        public decimal Revenue { get; set; }
+        public decimal Rating { get; set; }
+    }
+}

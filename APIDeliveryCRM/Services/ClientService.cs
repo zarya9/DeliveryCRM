@@ -23,6 +23,8 @@ namespace APIDeliveryCRM.Services
         {
             return await _context.ClientProfiles
                 .Include(c => c.User)
+                .Include(c => c.ClientStatus)
+                .Include(c => c.ClientSegment)
                 .Include(c => c.PaymentMethod)
                 .FirstOrDefaultAsync(c => c.ID_ClientProfile == clientProfileId);
         }
@@ -31,6 +33,8 @@ namespace APIDeliveryCRM.Services
         {
             return await _context.ClientProfiles
                 .Include(c => c.User)
+                .Include(c => c.ClientStatus)
+                .Include(c => c.ClientSegment)
                 .Include(c => c.PaymentMethod)
                 .FirstOrDefaultAsync(c => c.User_id == userId);
         }
@@ -69,6 +73,116 @@ namespace APIDeliveryCRM.Services
 
             await _context.SaveChangesAsync();
             return new OkObjectResult(new { message = "Профиль успешно обновлен", profile });
+        }
+
+        public async Task<IActionResult> GetClientDetailsAsync(int clientProfileId)
+        {
+            var client = await _context.ClientProfiles
+                .Include(c => c.User)
+                    .ThenInclude(u => u.Logins)
+                .Include(c => c.ClientStatus)
+                .Include(c => c.ClientSegment)
+                .Include(c => c.Company)
+                .FirstOrDefaultAsync(c => c.ID_ClientProfile == clientProfileId);
+
+            if (client == null)
+            {
+                return new NotFoundObjectResult(new { message = "Клиент не найден" });
+            }
+
+            var email = client.User.Logins
+                .OrderBy(l => l.ID_Login)
+                .Select(l => l.Email)
+                .FirstOrDefault() ?? string.Empty;
+
+            var orders = await _context.Orders
+                .Include(o => o.OrderStatus)
+                .Where(o => o.Client_id == clientProfileId)
+                .OrderByDescending(o => o.Created_at)
+                .Take(100)
+                .Select(o => new ClientOrderShortDto
+                {
+                    OrderId = o.ID_Order,
+                    OrderNumber = o.Order_Number,
+                    Name = o.Name,
+                    Status = o.OrderStatus.Name,
+                    CreatedAt = o.Created_at,
+                    DeliveredAt = o.Delivered_at,
+                    EstimatedCost = o.Estimated_cost,
+                    FinalCost = o.Final_cost
+                })
+                .ToListAsync();
+
+            var notes = await _context.ClientNotes
+                .Where(n => n.ClientProfile_id == clientProfileId)
+                .Include(n => n.Author)
+                .Include(n => n.ClientNoteType)
+                .OrderByDescending(n => n.Created_at)
+                .Take(50)
+                .Select(n => new ClientNoteShortDto
+                {
+                    Id = n.ID_ClientNote,
+                    Type = n.ClientNoteType.Name,
+                    Text = n.Text,
+                    CreatedAt = n.Created_at,
+                    AuthorName = n.Author.FName + " " + n.Author.Name
+                })
+                .ToListAsync();
+
+            var dto = new ClientDetailsResponse
+            {
+                ClientProfileId = client.ID_ClientProfile,
+                UserId = client.User_id,
+                FName = client.User.FName,
+                Name = client.User.Name,
+                Patronumic = client.User.Patronumic,
+                Email = email,
+                Phone = null,
+                Rating = client.Rating,
+                Status = client.ClientStatus?.Name,
+                Segment = client.ClientSegment?.Name,
+                Orders = orders,
+                Notes = notes
+            };
+
+            return new OkObjectResult(dto);
+        }
+
+        public async Task<IActionResult> AddClientNoteAsync(AddClientNoteRequest request)
+        {
+            var client = await _context.ClientProfiles
+                .FirstOrDefaultAsync(c => c.ID_ClientProfile == request.ClientProfileId);
+            if (client == null)
+            {
+                return new NotFoundObjectResult(new { message = "Клиент не найден" });
+            }
+
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.ID_User == request.AuthorUserId);
+            if (user == null)
+            {
+                return new BadRequestObjectResult(new { message = "Автор не найден" });
+            }
+
+            var note = new ClientNote
+            {
+                ClientProfile_id = request.ClientProfileId,
+                Author_id = request.AuthorUserId,
+                Text = request.Text.Trim()
+            };
+
+            var typeCode = string.IsNullOrWhiteSpace(request.Type) ? "NOTE" : request.Type.Trim();
+            var noteType = await _context.ClientNoteTypes
+                .FirstOrDefaultAsync(t => t.Code == typeCode);
+            if (noteType == null)
+            {
+                return new BadRequestObjectResult(new { message = "Некорректный тип заметки" });
+            }
+
+            note.ClientNoteType_id = noteType.ID_ClientNoteType;
+
+            _context.ClientNotes.Add(note);
+            await _context.SaveChangesAsync();
+            return new OkObjectResult(note);
         }
     }
 }
