@@ -189,6 +189,60 @@ namespace APIDeliveryCRM.Services
             }
         }
 
+        public async Task<IActionResult> UploadChatAttachmentAsync(IFormFile file, int userId)
+        {
+            if (file == null || file.Length == 0)
+                return new BadRequestObjectResult(new { message = "Файл не выбран" });
+
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null)
+                return new NotFoundObjectResult(new { message = "Пользователь не найден" });
+
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt", ".zip" };
+            var fileExtension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (!allowedExtensions.Contains(fileExtension))
+                return new BadRequestObjectResult(new { message = "Недопустимый тип файла для вложения." });
+
+            if (file.Length > 25 * 1024 * 1024)
+                return new BadRequestObjectResult(new { message = "Размер файла превышает 25MB" });
+
+            try
+            {
+                var safeName = Path.GetFileNameWithoutExtension(file.FileName);
+                if (safeName.Length > 60)
+                    safeName = safeName[..60];
+
+                var fileName = $"chat_{userId}_{DateTime.UtcNow:yyyyMMddHHmmss}_{safeName}{fileExtension}";
+                string filePathOrUrl;
+
+                if (_useAzureStorage)
+                {
+                    var blobName = $"chat/{fileName}";
+                    await using var stream = file.OpenReadStream();
+                    var contentType = GetContentTypeByExtension(fileExtension);
+                    filePathOrUrl = await _azureBlobService.UploadFileAsync(blobName, stream, contentType);
+                }
+                else
+                {
+                    var uploadsFolder = Path.Combine(_environment.WebRootPath, "chat");
+                    if (!Directory.Exists(uploadsFolder))
+                        Directory.CreateDirectory(uploadsFolder);
+
+                    var filePath = Path.Combine(uploadsFolder, fileName);
+                    filePathOrUrl = $"/chat/{fileName}";
+                    await using var stream = new FileStream(filePath, FileMode.Create);
+                    await file.CopyToAsync(stream);
+                }
+
+                return new OkObjectResult(new { path = filePathOrUrl, fileName = file.FileName, message = "Вложение загружено" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ошибка при загрузке вложения чата");
+                return new StatusCodeResult(500);
+            }
+        }
+
         public async Task<IActionResult> UpdateAvatarAsync(IFormFile file, int userId)
         {
             return await UploadAvatarAsync(file, userId);
@@ -336,6 +390,10 @@ namespace APIDeliveryCRM.Services
                 ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ".xls" => "application/vnd.ms-excel",
                 ".csv" => "text/csv",
+                ".txt" => "text/plain",
+                ".doc" => "application/msword",
+                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".zip" => "application/zip",
                 _ => "application/octet-stream"
             };
         }

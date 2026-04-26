@@ -1,14 +1,44 @@
 @page "/logistician/shifts"
 @layout LogisticianLayout
+@using WebBlazorDeliveryCRM.Components.Shared
 
 <PageTitle>Планирование смен — Логист</PageTitle>
 
 <div class="dms-page-header">
     <h1>Планирование смен</h1>
-    <p class="subtitle">Календарь смен и загрузка курьеров</p>
+    <p class="subtitle">Календарь смен и загрузка курьеров (черновик интерфейса)</p>
+</div>
+
+<div class="dms-stat-grid mb-3">
+    <KpiCard Title="Смен сегодня" Value="0" Meta="После подключения API" />
+    <KpiCard Title="Активные смены" Value="0" Meta="Live данные SignalR" />
+</div>
+
+<div class="dms-card mb-3">
+    <h2 class="dms-card-title">Ближайшие смены</h2>
+    <p class="text-muted mb-0">
+        Здесь будет интеграция с API смен (старт/окончание смены курьера). Сейчас отображается структура страницы для дальнейшей доработки.
+    </p>
 </div>
 
 <div class="dms-card">
-    <h2 class="dms-card-title">Календарь смен</h2>
-    <p class="text-muted">Расписание смен (API).</p>
+    <h2 class="dms-card-title">Курьеры</h2>
+    <div class="table-responsive">
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Курьер</th>
+                    <th>Статус смены</th>
+                    <th>Действие</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>—</td>
+                    <td><StatusBadge Text="Ожидает интеграции" Tone="warning" /></td>
+                    <td class="text-muted">Подключение к <code>/api/Couriers/.../shift</code></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
 </div>

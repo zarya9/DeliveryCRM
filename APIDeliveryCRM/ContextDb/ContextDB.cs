@@ -304,6 +304,154 @@ namespace APIDeliveryCRM.ContextDb
                 .HasForeignKey(o => o.DeliveryAddress_id)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            modelBuilder.Entity<LogisticsHub>()
+                .HasOne(h => h.Company)
+                .WithMany()
+                .HasForeignKey(h => h.Company_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<LogisticsHub>()
+                .HasOne(h => h.Address)
+                .WithMany()
+                .HasForeignKey(h => h.Address_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Order>()
+                .HasOne(o => o.OriginHub)
+                .WithMany()
+                .HasForeignKey(o => o.OriginHub_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Order>()
+                .HasOne(o => o.DestinationHub)
+                .WithMany()
+                .HasForeignKey(o => o.DestinationHub_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<OrderRouteStop>()
+                .HasOne(s => s.Order)
+                .WithMany(o => o.RouteStops)
+                .HasForeignKey(s => s.Order_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<OrderRouteStop>()
+                .HasOne(s => s.Address)
+                .WithMany()
+                .HasForeignKey(s => s.Address_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<OrderRouteStop>()
+                .HasOne(s => s.LogisticsHub)
+                .WithMany()
+                .HasForeignKey(s => s.LogisticsHub_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<OrderRouteStop>()
+                .HasOne(s => s.AssignedCourier)
+                .WithMany()
+                .HasForeignKey(s => s.AssignedCourier_id)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<OrderTimelineEvent>()
+                .HasOne(e => e.Order)
+                .WithMany(o => o.TimelineEvents)
+                .HasForeignKey(e => e.Order_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<SupportTicket>()
+                .HasOne(t => t.Company)
+                .WithMany()
+                .HasForeignKey(t => t.Company_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<SupportTicket>()
+                .HasOne(t => t.Order)
+                .WithMany()
+                .HasForeignKey(t => t.Order_id)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<SupportTicket>()
+                .HasOne(t => t.ClientProfile)
+                .WithMany()
+                .HasForeignKey(t => t.ClientProfile_id)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<SupportTicket>()
+                .HasOne(t => t.ResponsibleUser)
+                .WithMany()
+                .HasForeignKey(t => t.ResponsibleUser_id)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<SupportTicket>()
+                .HasOne(t => t.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(t => t.CreatedByUser_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ServiceAreaZone>()
+                .HasOne(z => z.Company)
+                .WithMany()
+                .HasForeignKey(z => z.Company_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ServiceAreaZoneCourier>()
+                .HasOne(zc => zc.Zone)
+                .WithMany(z => z.Couriers)
+                .HasForeignKey(zc => zc.ServiceAreaZone_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<ServiceAreaZoneCourier>()
+                .HasOne(zc => zc.Courier)
+                .WithMany()
+                .HasForeignKey(zc => zc.CourierProfile_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<CompanySubscription>()
+                .HasOne(s => s.Company)
+                .WithMany()
+                .HasForeignKey(s => s.Company_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<CompanySubscription>()
+                .HasOne(s => s.Plan)
+                .WithMany()
+                .HasForeignKey(s => s.SubscriptionPlan_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<BillingInvoice>()
+                .HasOne(i => i.Company)
+                .WithMany()
+                .HasForeignKey(i => i.Company_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<BillingInvoice>()
+                .HasOne(i => i.Plan)
+                .WithMany()
+                .HasForeignKey(i => i.SubscriptionPlan_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<PaymentTransaction>()
+                .HasOne(t => t.Invoice)
+                .WithMany()
+                .HasForeignKey(t => t.BillingInvoice_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<CommunicationTemplate>()
+                .HasOne(t => t.Company)
+                .WithMany()
+                .HasForeignKey(t => t.Company_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<ScheduledReportJob>()
+                .HasOne(j => j.Company)
+                .WithMany()
+                .HasForeignKey(j => j.Company_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<BillingWebhookEvent>()
+                .HasIndex(e => new { e.Provider, e.EventKey })
+                .IsUnique();
+
             modelBuilder.Entity<ChatRoom>()
                 .HasOne(cr => cr.ChatRoomType)
                 .WithMany(crt => crt.ChatRooms)
@@ -340,6 +488,18 @@ namespace APIDeliveryCRM.ContextDb
                 .HasForeignKey(cm => cm.Sender_id)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            modelBuilder.Entity<ChatQuickReplyTemplate>()
+                .HasOne(t => t.Company)
+                .WithMany()
+                .HasForeignKey(t => t.Company_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<ChatQuickReplyTemplate>()
+                .HasOne(t => t.User)
+                .WithMany()
+                .HasForeignKey(t => t.User_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
             modelBuilder.Entity<ClientNote>()
                 .HasOne(n => n.ClientProfile)
                 .WithMany()
@@ -368,6 +528,7 @@ namespace APIDeliveryCRM.ContextDb
                 .HasOne(v => v.VehicleModel)
                 .WithMany()
                 .HasForeignKey(v => v.Model_id)
+                .IsRequired(false)
                 .OnDelete(DeleteBehavior.Restrict);
 
             modelBuilder.Entity<Vehicle>()
@@ -386,6 +547,7 @@ namespace APIDeliveryCRM.ContextDb
                 .HasOne(v => v.CourierProfile)
                 .WithMany()
                 .HasForeignKey(v => v.CurrentCourier_id)
+                .IsRequired(false)
                 .OnDelete(DeleteBehavior.Restrict);
 
             modelBuilder.Entity<VehicleAssignment>()
@@ -502,6 +664,7 @@ namespace APIDeliveryCRM.ContextDb
         public DbSet<ChatRoomType> ChatRoomTypes { get; set; }
         public DbSet<ChatMessage> ChatMessages { get; set; }
         public DbSet<ChatParticipant> ChatParticipants { get; set; }
+        public DbSet<ChatQuickReplyTemplate> ChatQuickReplyTemplates { get; set; }
         public DbSet<Vehicle> Vehicles { get; set; }
         public DbSet<VehicleCategory> VehicleCategories { get; set; }
         public DbSet<VehicleModel> VehicleModels { get; set; }
@@ -522,6 +685,19 @@ namespace APIDeliveryCRM.ContextDb
         public DbSet<Lead> Leads { get; set; }
         public DbSet<LeadSource> LeadSources { get; set; }
         public DbSet<LeadStage> LeadStages { get; set; }
+        public DbSet<LogisticsHub> LogisticsHubs { get; set; }
+        public DbSet<OrderRouteStop> OrderRouteStops { get; set; }
+        public DbSet<OrderTimelineEvent> OrderTimelineEvents { get; set; }
+        public DbSet<SupportTicket> SupportTickets { get; set; }
+        public DbSet<ServiceAreaZone> ServiceAreaZones { get; set; }
+        public DbSet<ServiceAreaZoneCourier> ServiceAreaZoneCouriers { get; set; }
+        public DbSet<SubscriptionPlan> SubscriptionPlans { get; set; }
+        public DbSet<CompanySubscription> CompanySubscriptions { get; set; }
+        public DbSet<BillingInvoice> BillingInvoices { get; set; }
+        public DbSet<PaymentTransaction> PaymentTransactions { get; set; }
+        public DbSet<BillingWebhookEvent> BillingWebhookEvents { get; set; }
+        public DbSet<CommunicationTemplate> CommunicationTemplates { get; set; }
+        public DbSet<ScheduledReportJob> ScheduledReportJobs { get; set; }
     }
 }
 

@@ -1,4 +1,5 @@
 @rendermode InteractiveServer
+@using WebBlazorDeliveryCRM.Components.Pages
 <Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
         <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
@@ -17,7 +18,7 @@
     </Found>
     <NotFound>
         <LayoutView Layout="typeof(Layout.MainLayout)">
-            <p>Страница не найдена. <a href="/">На главную</a></p>
+            <NotFoundView />
         </LayoutView>
     </NotFound>
 </Router>

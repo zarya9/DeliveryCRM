@@ -1,5 +1,6 @@
 @page "/logistician/analytics"
 @layout LogisticianLayout
+@using WebBlazorDeliveryCRM.Components.Shared
 
 <PageTitle>Аналитика — Логист</PageTitle>
 
@@ -8,7 +9,14 @@
     <p class="subtitle">Метрики, графики загруженности</p>
 </div>
 
+<div class="dms-stat-grid mb-3">
+    <KpiCard Title="Средняя загрузка" Value="0%" Meta="по активным курьерам" />
+    <KpiCard Title="SLA в норме" Value="0%" Meta="за текущие сутки" />
+    <KpiCard Title="Рейсов с риском" Value="0" Meta="требует внимания" />
+</div>
+
 <div class="dms-card">
     <h2 class="dms-card-title">Графики и отчёты</h2>
     <p class="text-muted">Эффективность по зонам и курьерам (API).</p>
+    <StatusBadge Text="Данные будут подгружены из API" Tone="info" />
 </div>

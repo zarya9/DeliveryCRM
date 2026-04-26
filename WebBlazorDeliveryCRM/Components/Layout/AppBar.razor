@@ -1,15 +1,50 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject CustomAuthenticationStateProvider AuthState
-@inject ThemeApiService ThemeApi
-@inject IJSRuntime JS
+@inject ChatHubClientService ChatHub
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <div class="dms-appbar">
     <a href="/" class="dms-appbar-logo">@(_companyName ?? "Delivery CRM")</a>
     <div class="dms-appbar-actions">
+        <div style="position: relative;">
+            <button type="button" class="dms-btn-outline" @onclick="ToggleUiSettings">
+                Вид
+            </button>
+            @if (_showUiSettings)
+            {
+                <div class="ui-settings-popover">
+                    <div class="ui-settings-row">
+                        <label class="form-label mb-1">Акцентный цвет</label>
+                        <input type="color" class="form-control form-control-color" @bind="_uiAccent" />
+                    </div>
+                    <div class="ui-settings-row">
+                        <label class="form-label mb-1">Фон</label>
+                        <select class="form-select form-select-sm" @bind="_uiBackground">
+                            <option value="plain">Обычный</option>
+                            <option value="grid">Сетка</option>
+                            <option value="dots">Точки</option>
+                            <option value="gradient">Градиент</option>
+                        </select>
+                    </div>
+                    <div class="ui-settings-row">
+                        <label class="form-label mb-1">Скругление карточек</label>
+                        <input type="range" class="form-range" min="8" max="24" step="1" @bind="_uiRadius" />
+                        <div class="small text-muted">@_uiRadius px</div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-sm btn-primary" @onclick="ApplyUiSettings">Применить</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ResetUiSettings">Сброс</button>
+                    </div>
+                </div>
+            }
+        </div>
+        <button type="button" class="dms-btn-outline theme-toggle-btn" @onclick="ToggleTheme" title="Сменить тему">
+            <span class="theme-toggle-symbol">@(_theme == "dark" ? "☀" : "☾")</span>
+            <span>@(_theme == "dark" ? "Светлая" : "Тёмная")</span>
+        </button>
         @if (_isAuthenticated)
         {
-            <span class="dms-appbar-user">@_userName</span>
             <button type="button" class="dms-btn-outline" @onclick="Logout">Выйти</button>
         }
         else
@@ -21,42 +56,116 @@
 
 @code {
     private bool _isAuthenticated;
-    private string? _userName;
     private string? _companyName;
-    private int? _userId;
+    private string _theme = "light";
+    private bool _showUiSettings;
+    private string _uiAccent = "#008b8b";
+    private string _uiBackground = "plain";
+    private string _uiRadius = "12";
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
+        try
+        {
+            _theme = await JS.InvokeAsync<string>("dmsTheme.get");
+            var settings = await JS.InvokeAsync<UiSettingsDto>("dmsTheme.getSettings");
+            _uiAccent = string.IsNullOrWhiteSpace(settings.Accent) ? "#008b8b" : settings.Accent;
+            _uiBackground = string.IsNullOrWhiteSpace(settings.Background) ? "plain" : settings.Background;
+            _uiRadius = string.IsNullOrWhiteSpace(settings.Radius) ? "12" : settings.Radius;
+        }
+        catch
+        {
+            _theme = "light";
+        }
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         _isAuthenticated = state.User.Identity?.IsAuthenticated ?? false;
         var user = state.User;
-        _userName = user.FindFirst(c => c.Type == System.Security.Claims.ClaimTypes.Email)?.Value
-                    ?? user.FindFirst("email")?.Value
-                    ?? user.Identity?.Name;
         _companyName = user.FindFirst("company")?.Value;
 
-        var idStr = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        if (int.TryParse(idStr, out var id))
+        if (_isAuthenticated)
         {
-            _userId = id;
-            var theme = await ThemeApi.GetThemeAsync(id);
-            if (!string.IsNullOrWhiteSpace(theme))
+            try
             {
-                try
-                {
-                    await JS.InvokeVoidAsync("appTheme.set", theme);
-                }
-                catch { }
+                await ChatHub.StartAsync();
+            }
+            catch
+            {
+                // SignalR не обязателен для отображения страницы
             }
         }
 
         StateHasChanged();
     }
 
+    private async Task ToggleTheme()
+    {
+        try
+        {
+            _theme = await JS.InvokeAsync<string>("dmsTheme.toggle");
+            StateHasChanged();
+        }
+        catch
+        {
+            // ignore theme toggle JS failures
+        }
+    }
+
+    private void ToggleUiSettings()
+    {
+        _showUiSettings = !_showUiSettings;
+    }
+
+    private async Task ApplyUiSettings()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("dmsTheme.applySettings", new
+            {
+                accent = _uiAccent,
+                background = _uiBackground,
+                radius = _uiRadius
+            });
+            _showUiSettings = false;
+        }
+        catch
+        {
+            // ignore JS settings errors
+        }
+    }
+
+    private async Task ResetUiSettings()
+    {
+        try
+        {
+            var settings = await JS.InvokeAsync<UiSettingsDto>("dmsTheme.resetSettings");
+            _uiAccent = string.IsNullOrWhiteSpace(settings.Accent) ? "#008b8b" : settings.Accent;
+            _uiBackground = string.IsNullOrWhiteSpace(settings.Background) ? "plain" : settings.Background;
+            _uiRadius = string.IsNullOrWhiteSpace(settings.Radius) ? "12" : settings.Radius;
+            _showUiSettings = false;
+        }
+        catch
+        {
+            // ignore JS settings errors
+        }
+    }
+
     private async Task Logout()
     {
-        await AuthState.MarkUserAsLoggedOut();
+        try
+        {
+            await ChatHub.StopAsync();
+        }
+        catch { /* ignore */ }
+
+        await AuthState.MarkUserAsLoggedOutAsync();
         Navigation.NavigateTo("/", forceLoad: true);
+    }
+
+    private sealed class UiSettingsDto
+    {
+        public string Accent { get; set; } = string.Empty;
+        public string Background { get; set; } = "plain";
+        public string Radius { get; set; } = "12";
     }
 }

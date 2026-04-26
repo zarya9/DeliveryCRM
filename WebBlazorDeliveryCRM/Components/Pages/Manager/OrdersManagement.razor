@@ -15,13 +15,14 @@
     <h2 class="dms-card-title">Список заказов</h2>
     @if (_orders != null && _orders.Count > 0)
     {
-        <table class="table">
+        <table class="table table-hover align-middle">
             <thead>
                 <tr>
                     <th>№</th>
                     <th>Название</th>
                     <th>Клиент</th>
                     <th>Статус</th>
+                    <th>SLA</th>
                     <th>Курьер</th>
                     <th>Сумма</th>
                     <th>Дата</th>
@@ -34,7 +35,23 @@
                         <td>@o.Order_Number</td>
                         <td>@o.Name</td>
                         <td>@(o.ClientProfile?.User != null ? $"{o.ClientProfile.User.FName} {o.ClientProfile.User.Name}" : "—")</td>
-                        <td>@(o.OrderStatus?.Name ?? "—")</td>
+                        <td>
+                            <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@GetOrderStatusTone(o.OrderStatus?.Name)" />
+                        </td>
+                        <td>
+                            @if (IsSlaRisk(o))
+                            {
+                                <StatusBadge Text="Риск" Tone="danger" />
+                            }
+                            else if (o.Sla_breached_at.HasValue)
+                            {
+                                <StatusBadge Text="Просрочен" Tone="danger" />
+                            }
+                            else
+                            {
+                                <StatusBadge Text="OK" Tone="success" />
+                            }
+                        </td>
                         <td>@(o.CourierProfile != null ? $"{o.CourierProfile.User?.FName} {o.CourierProfile.User?.Name}" : "—")</td>
                         <td>@(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost) ₽</td>
                         <td>@o.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
@@ -57,5 +74,22 @@
         if (!firstRender) return;
         _orders = await OrdersApi.GetAllAsync(null);
         StateHasChanged();
+    }
+
+    private static bool IsSlaRisk(OrderDto o)
+    {
+        if (!o.Sla_due_at.HasValue || !o.Eta_at.HasValue)
+            return false;
+        return o.Eta_at.Value > o.Sla_due_at.Value && !o.Sla_breached_at.HasValue;
+    }
+
+    private static string GetOrderStatusTone(string? status)
+    {
+        var s = (status ?? string.Empty).ToLowerInvariant();
+        if (s.Contains("достав")) return "success";
+        if (s.Contains("отмен")) return "danger";
+        if (s.Contains("в пути") || s.Contains("назнач")) return "primary";
+        if (s.Contains("нов")) return "warning";
+        return "neutral";
     }
 }

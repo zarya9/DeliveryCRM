@@ -1,0 +1,567 @@
+@implements IAsyncDisposable
+@using System.Security.Claims
+@using System.IO
+@using Microsoft.AspNetCore.SignalR.Client
+@using Microsoft.AspNetCore.Components.Web
+@inject ChatHubClientService ChatHubClient
+@inject ChatApiService ChatApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AppNotificationService Notify
+
+<div class="dms-page-header">
+    <h1>Чат</h1>
+    <p class="subtitle">Общий чат компании</p>
+</div>
+
+<div class="dms-card company-chat-panel">
+    <div class="d-flex gap-2 mb-2">
+        <input class="form-control form-control-sm" placeholder="Поиск по сообщениям..." @bind="_search" @bind:event="oninput" />
+    </div>
+
+    <div class="company-chat-messages flex-grow-1 overflow-auto mb-2">
+        @if (FilteredMessages.Count == 0)
+        {
+            <p class="text-muted mb-0">Сообщений пока нет.</p>
+        }
+        else
+        {
+            @foreach (var m in FilteredMessages)
+            {
+                if (_hiddenMine.Contains(m.Id))
+                {
+                    continue;
+                }
+
+                <div class="mb-2 p-2 border rounded-2">
+                    <div class="small text-muted d-flex justify-content-between align-items-center flex-wrap gap-1">
+                        <span>
+                            @(m.IsMine ? "Вы" : $"Пользователь {m.SenderId}")
+                            <span class="ms-1">@m.SentAt.ToLocalTime().ToString("HH:mm")</span>
+                            @if (m.EditedAt.HasValue)
+                            {
+                                <span class="ms-1">(изменено)</span>
+                            }
+                        </span>
+                        @if (m.IsMine)
+                        {
+                            <span class="d-flex gap-1 flex-wrap">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => StartEdit(m.Id)">Ред.</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteForEveryone(m.Id)">Удалить</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => DeleteForMe(m.Id)">Скрыть у меня</button>
+                            </span>
+                        }
+                    </div>
+
+                    @if (_editingMessageId == m.Id)
+                    {
+                        <div class="d-flex gap-2 mt-1 flex-wrap">
+                            <input class="form-control form-control-sm" @bind="_editingText" @bind:event="oninput" />
+                            <button type="button" class="btn btn-sm btn-primary" @onclick="SaveEdit">Сохранить</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelEdit">Отмена</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div>@m.Text</div>
+                        @if (!string.IsNullOrWhiteSpace(m.AttachmentUrl))
+                        {
+                            <div class="mt-2 p-2 border rounded bg-body-tertiary">
+                                <div class="small d-flex align-items-center gap-2">
+                                    <span>@GetFileIcon(m.AttachmentFileName)</span>
+                                    <a href="@m.AttachmentUrl" target="_blank" rel="noopener noreferrer">@m.AttachmentFileName</a>
+                                </div>
+                                @if (m.IsImageAttachment)
+                                {
+                                    <img src="@m.AttachmentUrl" alt="@m.AttachmentFileName" style="max-width: 220px; max-height: 140px;" class="rounded mt-2 border" />
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+            }
+        }
+    </div>
+
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+        <span class="small text-muted">Категория:</span>
+        @foreach (var category in _categories)
+        {
+            <button type="button"
+                    class="btn btn-sm @(string.Equals(_selectedCategory, category, StringComparison.OrdinalIgnoreCase) ? "btn-primary" : "btn-outline-secondary")"
+                    @onclick="() => SelectCategory(category)">
+                @CategoryLabel(category)
+            </button>
+        }
+        <input class="form-control form-control-sm"
+               style="max-width: 260px;"
+               placeholder="Поиск шаблонов..."
+               @bind="_templateSearch"
+               @bind:event="oninput" />
+        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="ToggleTemplateEditor">
+            @(_showTemplateEditor ? "Скрыть шаблоны" : "Мои шаблоны")
+        </button>
+    </div>
+
+    <div class="d-flex flex-wrap gap-1 mb-2">
+        @foreach (var quick in CurrentQuickReplies)
+        {
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ApplyQuickReply(quick)">@quick</button>
+        }
+    </div>
+
+    @if (_showTemplateEditor)
+    {
+        <div class="border rounded p-2 mb-2">
+            <div class="row g-2">
+                <div class="col-md-3">
+                    <select class="form-select form-select-sm" @bind="_templateCategory">
+                        @foreach (var category in _categories)
+                        {
+                            <option value="@category">@CategoryLabel(category)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <input class="form-control form-control-sm" placeholder="Короткий заголовок" @bind="_templateTitle" />
+                </div>
+                <div class="col-md-4">
+                    <input class="form-control form-control-sm" placeholder="Текст шаблона" @bind="_templateContent" />
+                </div>
+                <div class="col-md-2 d-grid">
+                    <button type="button" class="btn btn-sm btn-primary" @onclick="SaveTemplateAsync">Сохранить</button>
+                </div>
+            </div>
+            @if (_editingTemplateId.HasValue)
+            {
+                <div class="small text-muted mt-1">Редактируется шаблон ID @_editingTemplateId</div>
+            }
+            <div class="d-flex flex-wrap gap-1 mt-2">
+                @foreach (var t in FilteredTemplates)
+                {
+                    <div class="border rounded px-2 py-1">
+                        <button type="button" class="btn btn-sm btn-link p-0 me-1" @onclick="() => ApplyQuickReply(t.Content)">@t.Title</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary me-1" @onclick="() => EditTemplate(t)">Ред.</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteTemplateAsync(t.Id)">X</button>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    <div class="d-flex gap-2 align-items-center mb-2 flex-wrap">
+        <InputFile OnChange="OnFileSelected" />
+        @if (!string.IsNullOrWhiteSpace(_attachmentName))
+        {
+            <span class="small text-muted">@GetFileIcon(_attachmentName) @_attachmentName</span>
+        }
+        @if (_uploadingAttachment)
+        {
+            <span class="small text-muted">Загрузка файла...</span>
+        }
+        @if (!string.IsNullOrWhiteSpace(_attachmentUrl) && IsImageFile(_attachmentName))
+        {
+            <img src="@_attachmentUrl" alt="preview" style="max-width: 120px; max-height: 80px;" class="rounded border" />
+        }
+    </div>
+
+    <div class="d-flex gap-2 flex-wrap">
+        <input class="form-control" placeholder="Введите сообщение..."
+               @bind="_newMessage" @bind:event="oninput"
+               @onkeydown="OnKeyDown" />
+        <button type="button" class="btn btn-primary dms-btn-primary" disabled="@(!CanSendMessage)" @onclick="SendMessageAsync">
+            Отправить
+        </button>
+    </div>
+</div>
+
+@code {
+    private readonly List<ChatMessageVm> _messages = new();
+    private readonly HashSet<int> _hiddenMine = new();
+    private string _newMessage = string.Empty;
+    private string _search = string.Empty;
+    private int _roomId = 1;
+    private int _currentUserId;
+    private bool _initialized;
+    private int? _editingMessageId;
+    private string _editingText = string.Empty;
+    private bool _uploadingAttachment;
+    private string? _attachmentUrl;
+    private string? _attachmentName;
+    private readonly string[] _categories = ["greeting", "clarification", "sla", "closing"];
+    private string _selectedCategory = "greeting";
+    private string _templateSearch = string.Empty;
+    private bool _showTemplateEditor;
+    private int? _editingTemplateId;
+    private string _templateCategory = "greeting";
+    private string _templateTitle = string.Empty;
+    private string _templateContent = string.Empty;
+    private readonly List<QuickReplyTemplateDto> _dbTemplates = new();
+    private readonly Dictionary<string, string[]> _defaultRepliesByCategory = new Dictionary<string, string[]>
+    {
+        { "greeting", new[] { "Здравствуйте! Чем могу помочь?", "Добрый день! Я на связи." } },
+        { "clarification", new[] { "Уточните, пожалуйста, номер заказа.", "Нужны детали: адрес и контакт получателя." } },
+        { "sla", new[] { "Есть риск задержки, контролируем SLA.", "Проверяем логистику, вернусь с ETA." } },
+        { "closing", new[] { "Вопрос закрыт, спасибо!", "Если что-то потребуется, пишите." } }
+    };
+
+    private bool CanSendMessage => !string.IsNullOrWhiteSpace(_newMessage) || !string.IsNullOrWhiteSpace(_attachmentUrl);
+    private IEnumerable<QuickReplyTemplateDto> FilteredTemplates =>
+        _dbTemplates.Where(t =>
+            string.Equals(t.Category, _selectedCategory, StringComparison.OrdinalIgnoreCase) &&
+            (string.IsNullOrWhiteSpace(_templateSearch)
+             || t.Title.Contains(_templateSearch, StringComparison.OrdinalIgnoreCase)
+             || t.Content.Contains(_templateSearch, StringComparison.OrdinalIgnoreCase)));
+    private IEnumerable<string> CurrentQuickReplies =>
+        (_defaultRepliesByCategory.TryGetValue(_selectedCategory, out var arr) ? arr : Array.Empty<string>())
+        .Concat(FilteredTemplates.Select(t => t.Content).Distinct());
+
+    private List<ChatMessageVm> FilteredMessages
+        => _messages
+            .Where(m => string.IsNullOrWhiteSpace(_search) ||
+                        m.Text.Contains(_search, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(m => m.SentAt)
+            .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var idStr = state.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(idStr, out _currentUserId))
+            return;
+
+        await LoadHistoryAsync();
+        await LoadTemplatesAsync();
+
+        var connection = await ChatHubClient.GetConnectionAsync();
+
+        connection.On<IncomingMessage>("ReceiveMessage", msg =>
+        {
+            if (msg.chatRoomId != _roomId) return;
+            if (_messages.Any(x => x.Id == msg.id)) return;
+
+            _messages.Add(new ChatMessageVm
+            {
+                Id = msg.id,
+                SenderId = msg.senderId,
+                Text = msg.messageText,
+                AttachmentUrl = msg.attachmentUrl,
+                AttachmentFileName = ExtractFileName(msg.attachmentUrl),
+                IsImageAttachment = IsImageFile(ExtractFileName(msg.attachmentUrl)),
+                SentAt = msg.sentAt,
+                IsMine = msg.senderId == _currentUserId
+            });
+            InvokeAsync(StateHasChanged);
+        });
+
+        connection.On<MessageEditedSignal>("MessageEdited", msg =>
+        {
+            var existing = _messages.FirstOrDefault(x => x.Id == msg.messageId);
+            if (existing is null) return;
+            existing.Text = msg.newText ?? existing.Text;
+            existing.EditedAt = msg.editedAt;
+            InvokeAsync(StateHasChanged);
+        });
+
+        connection.On<MessageDeletedSignal>("MessageDeleted", msg =>
+        {
+            _messages.RemoveAll(x => x.Id == msg.messageId);
+            InvokeAsync(StateHasChanged);
+        });
+
+        await ChatHubClient.StartAsync();
+        await connection.SendAsync("JoinRoom", _roomId);
+        _initialized = true;
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        var history = await ChatApi.GetMessagesAsync(_roomId, 0, 200);
+        _messages.Clear();
+        _messages.AddRange(history
+            .Where(x => !x.Is_deleted)
+            .OrderBy(x => x.Sent_at)
+            .Select(x => new ChatMessageVm
+            {
+                Id = x.ID_ChatMessage,
+                SenderId = x.Sender_id,
+                Text = x.MessageText,
+                AttachmentUrl = x.AttachmentUrl,
+                AttachmentFileName = ExtractFileName(x.AttachmentUrl),
+                IsImageAttachment = IsImageFile(ExtractFileName(x.AttachmentUrl)),
+                SentAt = x.Sent_at,
+                EditedAt = x.Edited_at,
+                IsMine = x.Sender_id == _currentUserId
+            }));
+    }
+
+    private async Task SendMessageAsync()
+    {
+        if (!_initialized) return;
+        var text = _newMessage.Trim();
+        if (string.IsNullOrEmpty(text) && string.IsNullOrWhiteSpace(_attachmentUrl)) return;
+        if (string.IsNullOrEmpty(text)) text = "Файл";
+
+        var ok = await ChatApi.SendMessageAsync(_roomId, text, _attachmentUrl);
+        if (!ok)
+        {
+            Notify.ShowError("Не удалось отправить сообщение.");
+            return;
+        }
+        _newMessage = string.Empty;
+        _attachmentUrl = null;
+        _attachmentName = null;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+            await SendMessageAsync();
+    }
+
+    private void StartEdit(int messageId)
+    {
+        var m = _messages.FirstOrDefault(x => x.Id == messageId && x.IsMine);
+        if (m is null) return;
+        _editingMessageId = messageId;
+        _editingText = m.Text;
+    }
+
+    private async Task SaveEdit()
+    {
+        if (!_editingMessageId.HasValue) return;
+        var text = _editingText.Trim();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            Notify.ShowWarning("Текст сообщения пустой.");
+            return;
+        }
+
+        var ok = await ChatApi.EditMessageAsync(_editingMessageId.Value, text);
+        if (!ok)
+        {
+            Notify.ShowError("Не удалось отредактировать сообщение.");
+            return;
+        }
+        _editingMessageId = null;
+        _editingText = string.Empty;
+    }
+
+    private void CancelEdit()
+    {
+        _editingMessageId = null;
+        _editingText = string.Empty;
+    }
+
+    private async Task DeleteForEveryone(int messageId)
+    {
+        var ok = await ChatApi.DeleteMessageAsync(messageId);
+        if (!ok)
+            Notify.ShowError("Не удалось удалить сообщение.");
+    }
+
+    private void DeleteForMe(int messageId)
+    {
+        _hiddenMine.Add(messageId);
+    }
+
+    private void ApplyQuickReply(string text)
+    {
+        if (string.IsNullOrWhiteSpace(_newMessage))
+            _newMessage = text;
+        else
+            _newMessage = $"{_newMessage} {text}";
+    }
+
+    private async Task LoadTemplatesAsync()
+    {
+        _dbTemplates.Clear();
+        var items = await ChatApi.GetQuickRepliesAsync(_selectedCategory, null);
+        _dbTemplates.AddRange(items);
+        StateHasChanged();
+    }
+
+    private async Task SelectCategory(string category)
+    {
+        _selectedCategory = category;
+        _templateCategory = category;
+        await LoadTemplatesAsync();
+    }
+
+    private void ToggleTemplateEditor()
+    {
+        _showTemplateEditor = !_showTemplateEditor;
+    }
+
+    private async Task SaveTemplateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_templateTitle) || string.IsNullOrWhiteSpace(_templateContent))
+        {
+            Notify.ShowWarning("Заполните название и текст шаблона.");
+            return;
+        }
+
+        var ok = await ChatApi.UpsertQuickReplyAsync(new QuickReplyUpsertRequest
+        {
+            TemplateId = _editingTemplateId,
+            Category = _templateCategory,
+            Title = _templateTitle.Trim(),
+            Content = _templateContent.Trim(),
+            IsActive = true
+        });
+        if (!ok)
+        {
+            Notify.ShowError("Не удалось сохранить шаблон.");
+            return;
+        }
+
+        _editingTemplateId = null;
+        _templateTitle = string.Empty;
+        _templateContent = string.Empty;
+        _selectedCategory = _templateCategory;
+        await LoadTemplatesAsync();
+    }
+
+    private void EditTemplate(QuickReplyTemplateDto t)
+    {
+        _editingTemplateId = t.Id;
+        _templateCategory = t.Category;
+        _templateTitle = t.Title;
+        _templateContent = t.Content;
+        _showTemplateEditor = true;
+    }
+
+    private async Task DeleteTemplateAsync(int id)
+    {
+        var ok = await ChatApi.DeleteQuickReplyAsync(id);
+        if (!ok)
+        {
+            Notify.ShowError("Не удалось удалить шаблон.");
+            return;
+        }
+        if (_editingTemplateId == id)
+        {
+            _editingTemplateId = null;
+            _templateTitle = string.Empty;
+            _templateContent = string.Empty;
+        }
+        await LoadTemplatesAsync();
+    }
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null)
+            return;
+
+        _uploadingAttachment = true;
+        _attachmentName = file.Name;
+        try
+        {
+            var result = await ChatApi.UploadChatAttachmentAsync(file, _currentUserId);
+            if (!result.ok || string.IsNullOrWhiteSpace(result.path))
+            {
+                Notify.ShowError(result.error ?? "Не удалось загрузить файл.");
+                _attachmentUrl = null;
+                _attachmentName = null;
+                return;
+            }
+
+            _attachmentUrl = result.path;
+            Notify.ShowSuccess("Файл прикреплен.");
+        }
+        finally
+        {
+            _uploadingAttachment = false;
+        }
+    }
+
+    private static string CategoryLabel(string category) => category switch
+    {
+        "greeting" => "Приветствие",
+        "clarification" => "Уточнение",
+        "sla" => "SLA/Задержка",
+        "closing" => "Закрытие",
+        _ => category
+    };
+
+    private static bool IsImageFile(string? fileName)
+    {
+        var ext = Path.GetExtension(fileName ?? string.Empty).ToLowerInvariant();
+        return ext is ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp";
+    }
+
+    private static string GetFileIcon(string? fileName)
+    {
+        var ext = Path.GetExtension(fileName ?? string.Empty).ToLowerInvariant();
+        return ext switch
+        {
+            ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp" => "🖼️",
+            ".pdf" => "📕",
+            ".doc" or ".docx" => "📄",
+            ".xls" or ".xlsx" or ".csv" => "📊",
+            ".zip" => "🗜️",
+            _ => "📎"
+        };
+    }
+
+    private static string ExtractFileName(string? urlOrPath)
+    {
+        if (string.IsNullOrWhiteSpace(urlOrPath))
+            return "Вложение";
+        try
+        {
+            if (Uri.TryCreate(urlOrPath, UriKind.Absolute, out var uri))
+                return Path.GetFileName(uri.LocalPath);
+        }
+        catch { }
+        return Path.GetFileName(urlOrPath);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        var connection = ChatHubClient.Connection;
+        if (connection != null && _initialized)
+        {
+            try
+            {
+                await connection.SendAsync("LeaveRoom", _roomId);
+            }
+            catch { }
+        }
+    }
+
+    private sealed class ChatMessageVm
+    {
+        public int Id { get; set; }
+        public int SenderId { get; set; }
+        public string Text { get; set; } = "";
+        public string? AttachmentUrl { get; set; }
+        public string AttachmentFileName { get; set; } = "Вложение";
+        public bool IsImageAttachment { get; set; }
+        public DateTime SentAt { get; set; }
+        public DateTime? EditedAt { get; set; }
+        public bool IsMine { get; set; }
+    }
+
+    private sealed class IncomingMessage
+    {
+        public int id { get; set; }
+        public int chatRoomId { get; set; }
+        public int senderId { get; set; }
+        public string messageText { get; set; } = "";
+        public string? attachmentUrl { get; set; }
+        public DateTime sentAt { get; set; }
+    }
+
+    private sealed class MessageEditedSignal
+    {
+        public int messageId { get; set; }
+        public string? newText { get; set; }
+        public DateTime? editedAt { get; set; }
+    }
+
+    private sealed class MessageDeletedSignal
+    {
+        public int messageId { get; set; }
+    }
+}

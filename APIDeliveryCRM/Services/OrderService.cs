@@ -1,10 +1,14 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
+using APIDeliveryCRM.Hubs;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
+using APIDeliveryCRM.Responses;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace APIDeliveryCRM.Services
@@ -12,10 +16,16 @@ namespace APIDeliveryCRM.Services
     public class OrderService : IOrderService
     {
         private readonly ContextDB _context;
+        private readonly ICommunicationTemplateService _templateService;
+        private readonly INotificationService _notificationService;
+        private readonly IHubContext<ChatHub> _hubContext;
 
-        public OrderService(ContextDB context)
+        public OrderService(ContextDB context, ICommunicationTemplateService templateService, INotificationService notificationService, IHubContext<ChatHub> hubContext)
         {
             _context = context;
+            _templateService = templateService;
+            _notificationService = notificationService;
+            _hubContext = hubContext;
         }
 
         public async Task<Order> GetByIdAsync(int id)
@@ -27,19 +37,38 @@ namespace APIDeliveryCRM.Services
                 .Include(o => o.OrderType)
                 .Include(o => o.PackageType)
                 .Include(o => o.PaymentMethod)
+                .Include(o => o.PickupAddress)
+                .Include(o => o.DeliveryAddress)
+                .Include(o => o.OriginHub)!.ThenInclude(h => h!.Address)
+                .Include(o => o.DestinationHub)!.ThenInclude(h => h!.Address)
+                .Include(o => o.RouteStops).ThenInclude(s => s.Address)
+                .Include(o => o.RouteStops).ThenInclude(s => s.LogisticsHub)
                 .FirstOrDefaultAsync(o => o.ID_Order == id);
         }
 
-        public async Task<IReadOnlyList<Order>> GetAllAsync(int? companyId = null)
+        public async Task<IReadOnlyList<Order>> GetAllAsync(int? companyId = null, DateTime? fromUtc = null, DateTime? toUtc = null)
         {
             var query = _context.Orders
                 .Include(o => o.OrderStatus)
                 .Include(o => o.ClientProfile).ThenInclude(c => c.User)
                 .Include(o => o.CourierProfile).ThenInclude(c => c!.User)
                 .Include(o => o.OrderType)
+                .Include(o => o.RouteStops)
+                .Include(o => o.PickupAddress)
+                .Include(o => o.DeliveryAddress)
                 .AsQueryable();
             if (companyId.HasValue)
                 query = query.Where(o => o.Company_id == companyId.Value);
+            if (fromUtc.HasValue)
+            {
+                var from = fromUtc.Value.ToUniversalTime();
+                query = query.Where(o => o.Created_at >= from);
+            }
+            if (toUtc.HasValue)
+            {
+                var to = toUtc.Value.ToUniversalTime();
+                query = query.Where(o => o.Created_at <= to);
+            }
             return await query.OrderByDescending(o => o.Created_at).Take(500).ToListAsync();
         }
 
@@ -70,17 +99,69 @@ namespace APIDeliveryCRM.Services
 
         public async Task<Order> CreateAsync(CreateOrderRequest request)
         {
-            // Генерируем номер заказа
+            var client = await _context.ClientProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.ID_ClientProfile == request.Client_id);
+            if (client == null)
+                throw new InvalidOperationException("Клиент не найден.");
+
+            var company = await _context.Companies.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.ID_Company == client.Company_id);
+            if (company == null)
+                throw new InvalidOperationException("Компания клиента не найдена.");
+
+            if (company.SubscriptionExpiresAt != default && company.SubscriptionExpiresAt < DateTime.UtcNow)
+                throw new InvalidOperationException("Подписка компании истекла. Продлите тариф для создания заказов.");
+
+            var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+            var monthlyOrders = await _context.Orders
+                .AsNoTracking()
+                .CountAsync(o => o.Company_id == client.Company_id && o.Created_at >= monthStart);
+            if (monthlyOrders >= company.MaxOrdersPerMonth)
+                throw new InvalidOperationException("Достигнут лимит заказов по тарифу за текущий месяц.");
+
+            if (!Enum.IsDefined(typeof(DeliveryRouteKind), request.DeliveryRouteKind))
+                throw new InvalidOperationException("Некорректный тип маршрута доставки.");
+
+            var routeKind = (DeliveryRouteKind)request.DeliveryRouteKind;
+
+            var pickup = await _context.Addresses.FirstOrDefaultAsync(a =>
+                a.ID_Address == request.PickupAddress_id && a.Company_id == client.Company_id);
+            var delivery = await _context.Addresses.FirstOrDefaultAsync(a =>
+                a.ID_Address == request.DeliveryAddress_id && a.Company_id == client.Company_id);
+            if (pickup == null || delivery == null)
+                throw new InvalidOperationException("Адреса забора или доставки не найдены или не принадлежат компании клиента.");
+
+            LogisticsHub? originHub = null;
+            LogisticsHub? destHub = null;
+            if (routeKind == DeliveryRouteKind.ViaHub)
+            {
+                if (!request.OriginHub_id.HasValue || !request.DestinationHub_id.HasValue)
+                    throw new InvalidOperationException("Для доставки через хабы укажите склад отправления и склад назначения.");
+
+                originHub = await _context.LogisticsHubs
+                    .Include(h => h.Address)
+                    .FirstOrDefaultAsync(h =>
+                        h.ID_LogisticsHub == request.OriginHub_id && h.Company_id == client.Company_id);
+                destHub = await _context.LogisticsHubs
+                    .Include(h => h.Address)
+                    .FirstOrDefaultAsync(h =>
+                        h.ID_LogisticsHub == request.DestinationHub_id && h.Company_id == client.Company_id);
+                if (originHub == null || destHub == null)
+                    throw new InvalidOperationException("Один из складов не найден или принадлежит другой компании.");
+            }
+            var stops = OrderRoutePlanner.BuildStops(routeKind, pickup, delivery, originHub, destHub);
+
             var maxOrderNumber = await _context.Orders
                 .Select(o => o.Order_Number)
                 .DefaultIfEmpty(0)
                 .MaxAsync();
-            
+
             var order = new Order
             {
                 Name = request.Name,
                 Description = request.Description,
                 Order_Number = maxOrderNumber + 1,
+                Company_id = client.Company_id,
                 Client_id = request.Client_id,
                 OrderType_id = request.OrderType_id,
                 Status_id = request.Status_id,
@@ -96,10 +177,28 @@ namespace APIDeliveryCRM.Services
                 PaymentMethod_id = request.PaymentMethod_id,
                 Is_paid = false,
                 PickupAddress_id = request.PickupAddress_id,
-                DeliveryAddress_id = request.DeliveryAddress_id
+                DeliveryAddress_id = request.DeliveryAddress_id,
+                DeliveryRouteKind = routeKind,
+                OriginHub_id = routeKind == DeliveryRouteKind.ViaHub ? originHub!.ID_LogisticsHub : null,
+                DestinationHub_id = routeKind == DeliveryRouteKind.ViaHub ? destHub!.ID_LogisticsHub : null,
+                Priority = request.Priority,
+                Sla_due_at = request.RequestedDeliveryAtUtc?.ToUniversalTime(),
+                Eta_at = EstimateEtaUtc(DateTime.UtcNow, request.Priority, hasCourierAssigned: request.Courier_id.HasValue)
             };
 
+            foreach (var stop in stops)
+                order.RouteStops.Add(stop);
+
             _context.Orders.Add(order);
+            await _context.SaveChangesAsync();
+
+            _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+            {
+                Order_id = order.ID_Order,
+                EventType = "ORDER_CREATED",
+                Title = "Заказ создан",
+                Message = "Создан новый заказ и рассчитан начальный ETA."
+            });
             await _context.SaveChangesAsync();
             return order;
         }
@@ -113,28 +212,462 @@ namespace APIDeliveryCRM.Services
 
         public async Task<bool> ChangeStatusAsync(int orderId, int statusId)
         {
-            var order = await _context.Orders.FirstOrDefaultAsync(o => o.ID_Order == orderId);
+            var order = await _context.Orders
+                .Include(o => o.OrderStatus)
+                .FirstOrDefaultAsync(o => o.ID_Order == orderId);
             if (order == null)
             {
                 return false;
             }
 
+            var oldStatusId = order.Status_id;
             order.Status_id = statusId;
+            ApplyMilestoneTimestamps(order, statusId);
+            UpdateSlaFlags(order);
+            order.Eta_at = EstimateEtaUtc(DateTime.UtcNow, order.Priority, order.Courier_id.HasValue);
+            var isSlaRisk = IsSlaRisk(order);
+
+            _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+            {
+                Order_id = order.ID_Order,
+                EventType = "STATUS_CHANGED",
+                Title = "Изменение статуса",
+                Message = $"Статус заказа изменен: {oldStatusId} -> {statusId}",
+                OldStatus_id = oldStatusId,
+                NewStatus_id = statusId
+            });
+
+            await SendStatusAutomationAsync(order, statusId);
+
+            if (isSlaRisk)
+            {
+                _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+                {
+                    Order_id = order.ID_Order,
+                    EventType = "SLA_RISK",
+                    Title = "Риск SLA",
+                    Message = "ETA превышает SLA дедлайн после смены статуса."
+                });
+                await CreateSlaRiskAlertsAsync(order);
+            }
+
             await _context.SaveChangesAsync();
             return true;
         }
 
         public async Task<bool> AssignCourierAsync(int orderId, int courierProfileId)
         {
-            var order = await _context.Orders.FirstOrDefaultAsync(o => o.ID_Order == orderId);
+            var order = await _context.Orders
+                .Include(o => o.PickupAddress)
+                .FirstOrDefaultAsync(o => o.ID_Order == orderId);
             if (order == null)
             {
                 return false;
             }
 
+            var courier = await _context.CourierProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId && c.Company_id == order.Company_id);
+            if (courier == null)
+                return false;
+
+            var allowed = await IsCourierAllowedByZonesAsync(order, courierProfileId);
+            if (!allowed)
+                return false;
+
+            var oldCourierId = order.Courier_id;
             order.Courier_id = courierProfileId;
+            order.Eta_at = EstimateEtaUtc(DateTime.UtcNow, order.Priority, hasCourierAssigned: true);
+
+            _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+            {
+                Order_id = order.ID_Order,
+                EventType = "COURIER_ASSIGNED",
+                Title = "Назначен курьер",
+                Message = $"Курьер {courierProfileId} назначен на заказ.",
+                OldCourier_id = oldCourierId,
+                NewCourier_id = courierProfileId
+            });
+
             await _context.SaveChangesAsync();
             return true;
+        }
+
+        public async Task<bool> ManualOverrideCourierAsync(int orderId, int courierProfileId, string? reason, int? actorUserId = null)
+        {
+            var order = await _context.Orders
+                .Include(o => o.PickupAddress)
+                .FirstOrDefaultAsync(o => o.ID_Order == orderId);
+            if (order == null)
+                return false;
+
+            var courier = await _context.CourierProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId && c.Company_id == order.Company_id);
+            if (courier == null)
+                return false;
+
+            var allowed = await IsCourierAllowedByZonesAsync(order, courierProfileId);
+            if (!allowed)
+                return false;
+
+            var oldCourierId = order.Courier_id;
+            order.Courier_id = courierProfileId;
+            order.Eta_at = EstimateEtaUtc(DateTime.UtcNow, order.Priority, hasCourierAssigned: true);
+
+            _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+            {
+                Order_id = order.ID_Order,
+                EventType = "MANUAL_OVERRIDE",
+                Title = "Ручное переназначение",
+                Message = string.IsNullOrWhiteSpace(reason) ? "Курьер изменен логистом вручную." : reason,
+                OldCourier_id = oldCourierId,
+                NewCourier_id = courierProfileId,
+                ActorUser_id = actorUserId
+            });
+
+            await _context.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<OrderDispatchDto?> AutoDispatchAsync(int orderId)
+        {
+            var order = await _context.Orders
+                .Include(o => o.PickupAddress)
+                .FirstOrDefaultAsync(o => o.ID_Order == orderId);
+            if (order == null)
+                return null;
+
+            var candidates = await _context.CourierProfiles
+                .AsNoTracking()
+                .Where(c => c.Company_id == order.Company_id && c.Is_online)
+                .Select(c => new
+                {
+                    c.ID_CourierProfile,
+                    c.Current_lat,
+                    c.Current_lon,
+                    ActiveOrders = _context.Orders.Count(o => o.Courier_id == c.ID_CourierProfile && o.Delivered_at == null)
+                })
+                .ToListAsync();
+
+            var filteredCandidates = new List<(int CourierId, decimal Lat, decimal Lon, int ActiveOrders)>();
+            foreach (var c in candidates)
+            {
+                if (await IsCourierAllowedByZonesAsync(order, c.ID_CourierProfile))
+                    filteredCandidates.Add((c.ID_CourierProfile, c.Current_lat, c.Current_lon, c.ActiveOrders));
+            }
+
+            if (filteredCandidates.Count == 0)
+                return null;
+
+            var pickupLat = order.PickupAddress?.Latitude;
+            var pickupLon = order.PickupAddress?.Longitude;
+
+            var scored = filteredCandidates
+                .Select(c =>
+                {
+                    decimal? distance = null;
+                    if (pickupLat.HasValue && pickupLon.HasValue)
+                        distance = (decimal)HaversineKm((double)c.Lat, (double)c.Lon, (double)pickupLat.Value, (double)pickupLon.Value);
+
+                    var distanceScore = (double)(distance ?? 30m);
+                    var loadScore = c.ActiveOrders * 4.0;
+                    var urgentBoost = order.Priority == 2 ? -3.0 : order.Priority == 1 ? -1.5 : 0.0;
+                    var total = distanceScore + loadScore + urgentBoost;
+
+                    return new
+                    {
+                        ID_CourierProfile = c.CourierId,
+                        c.ActiveOrders,
+                        DistanceKm = distance,
+                        Score = total
+                    };
+                })
+                .OrderBy(x => x.Score)
+                .ToList();
+
+            var winner = scored.First();
+            var oldCourierId = order.Courier_id;
+            order.Courier_id = winner.ID_CourierProfile;
+            order.Eta_at = EstimateEtaUtc(DateTime.UtcNow, order.Priority, hasCourierAssigned: true);
+
+            var isSlaRisk = IsSlaRisk(order);
+            _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+            {
+                Order_id = order.ID_Order,
+                EventType = "AUTO_DISPATCH",
+                Title = "Авто-диспетчеризация",
+                Message = $"Автоназначение курьера {winner.ID_CourierProfile} (дистанция: {winner.DistanceKm?.ToString("0.0") ?? "n/a"} км, активных заказов: {winner.ActiveOrders}).",
+                OldCourier_id = oldCourierId,
+                NewCourier_id = winner.ID_CourierProfile
+            });
+
+            if (isSlaRisk)
+            {
+                _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+                {
+                    Order_id = order.ID_Order,
+                    EventType = "SLA_RISK",
+                    Title = "Риск SLA",
+                    Message = "Заказ отмечен как риск срыва SLA на этапе автоназначения."
+                });
+                await CreateSlaRiskAlertsAsync(order);
+            }
+
+            await _context.SaveChangesAsync();
+
+            return new OrderDispatchDto
+            {
+                OrderId = order.ID_Order,
+                CourierId = winner.ID_CourierProfile,
+                DistanceKm = winner.DistanceKm,
+                ActiveOrders = winner.ActiveOrders,
+                IsSlaRisk = isSlaRisk,
+                EtaAt = order.Eta_at,
+                DecisionReason = "Минимальный совокупный score: дистанция + текущая загрузка + приоритет SLA."
+            };
+        }
+
+        public async Task<IReadOnlyList<OrderTimelineEvent>> GetTimelineAsync(int orderId)
+        {
+            return await _context.OrderTimelineEvents
+                .Where(e => e.Order_id == orderId)
+                .OrderBy(e => e.Created_at)
+                .ToListAsync();
+        }
+
+        public async Task<OrderEtaDto?> GetEtaAsync(int orderId)
+        {
+            var order = await _context.Orders.AsNoTracking().FirstOrDefaultAsync(o => o.ID_Order == orderId);
+            if (order == null)
+                return null;
+
+            var risk = IsSlaRisk(order);
+            return new OrderEtaDto
+            {
+                OrderId = order.ID_Order,
+                EtaAtUtc = order.Eta_at,
+                SlaDueAtUtc = order.Sla_due_at,
+                IsSlaBreached = order.Sla_breached_at.HasValue || (order.Sla_due_at.HasValue && DateTime.UtcNow > order.Sla_due_at.Value),
+                IsSlaRisk = risk,
+                DelayReason = order.Delay_reason
+            };
+        }
+
+        private static DateTime EstimateEtaUtc(DateTime nowUtc, byte priority, bool hasCourierAssigned)
+        {
+            var baseMinutes = priority switch
+            {
+                2 => 45,
+                1 => 90,
+                _ => 150
+            };
+
+            if (!hasCourierAssigned)
+                baseMinutes += 30;
+
+            return nowUtc.AddMinutes(baseMinutes);
+        }
+
+        private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)
+        {
+            const double R = 6371.0;
+            var dLat = DegreesToRadians(lat2 - lat1);
+            var dLon = DegreesToRadians(lon2 - lon1);
+            var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                    Math.Cos(DegreesToRadians(lat1)) * Math.Cos(DegreesToRadians(lat2)) *
+                    Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+            var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+            return R * c;
+        }
+
+        private static double DegreesToRadians(double deg) => deg * (Math.PI / 180.0);
+
+        private static void ApplyMilestoneTimestamps(Order order, int statusId)
+        {
+            // Базовое соответствие для быстрых интеграций со статусами 3/4/5.
+            if (statusId == 3 && !order.Pickup_started_at.HasValue)
+                order.Pickup_started_at = DateTime.UtcNow;
+            if (statusId == 4 && !order.In_transit_at.HasValue)
+                order.In_transit_at = DateTime.UtcNow;
+            if (statusId == 5 && !order.Delivered_at.HasValue)
+                order.Delivered_at = DateTime.UtcNow;
+        }
+
+        private static void UpdateSlaFlags(Order order)
+        {
+            if (order.Sla_due_at.HasValue && DateTime.UtcNow > order.Sla_due_at.Value && !order.Sla_breached_at.HasValue)
+                order.Sla_breached_at = DateTime.UtcNow;
+        }
+
+        private static bool IsSlaRisk(Order order)
+        {
+            if (!order.Sla_due_at.HasValue || !order.Eta_at.HasValue)
+                return false;
+            return order.Eta_at.Value > order.Sla_due_at.Value;
+        }
+
+        private async Task<bool> IsCourierAllowedByZonesAsync(Order order, int courierProfileId)
+        {
+            var zonesExist = await _context.ServiceAreaZones
+                .AsNoTracking()
+                .AnyAsync(z => z.Company_id == order.Company_id && z.Is_active);
+            if (!zonesExist)
+                return true;
+
+            var lat = order.PickupAddress?.Latitude;
+            var lon = order.PickupAddress?.Longitude;
+            if (!lat.HasValue || !lon.HasValue)
+                return false;
+
+            var zones = await _context.ServiceAreaZoneCouriers
+                .AsNoTracking()
+                .Where(zc => zc.CourierProfile_id == courierProfileId && zc.Zone.Company_id == order.Company_id && zc.Zone.Is_active)
+                .Select(zc => new
+                {
+                    zc.Zone.Center_lat,
+                    zc.Zone.Center_lon,
+                    zc.Zone.Radius_km
+                })
+                .ToListAsync();
+
+            if (zones.Count == 0)
+                return false;
+
+            foreach (var zone in zones)
+            {
+                var distance = HaversineKm((double)zone.Center_lat, (double)zone.Center_lon, (double)lat.Value, (double)lon.Value);
+                if ((decimal)distance <= zone.Radius_km)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private async Task CreateSlaRiskAlertsAsync(Order order)
+        {
+            var typeId = await _context.NotificationTypes
+                .AsNoTracking()
+                .Where(t => t.Name.ToLower().Contains("sla") || t.Name.ToLower().Contains("важн"))
+                .Select(t => t.ID_NotificationType)
+                .FirstOrDefaultAsync();
+
+            if (typeId == 0)
+            {
+                typeId = await _context.NotificationTypes
+                    .AsNoTracking()
+                    .Select(t => t.ID_NotificationType)
+                    .FirstOrDefaultAsync();
+                if (typeId == 0)
+                    return;
+            }
+
+            var receivers = await _context.Users
+                .AsNoTracking()
+                .Where(u => u.Company_id == order.Company_id &&
+                           (u.Role.Name == "Менеджер" || u.Role.Name == "Логист"))
+                .Select(u => u.ID_User)
+                .ToListAsync();
+
+            if (receivers.Count == 0)
+                return;
+
+            foreach (var userId in receivers)
+            {
+                _context.Notifications.Add(new Notification
+                {
+                    Company_id = order.Company_id,
+                    User_id = userId,
+                    Type_id = typeId,
+                    Title = "Риск срыва SLA",
+                    Message = $"Заказ #{order.Order_Number} имеет риск нарушения SLA.",
+                    Order_id = order.ID_Order,
+                    Is_read = false,
+                    Sent_at = DateOnly.FromDateTime(DateTime.UtcNow)
+                });
+            }
+        }
+
+        private async Task SendStatusAutomationAsync(Order order, int statusId)
+        {
+            var template = await _templateService.ResolveForOrderStatusAsync(order.Company_id, statusId);
+            if (template == null)
+                return;
+
+            var statusName = await _context.OrderStatuses
+                .AsNoTracking()
+                .Where(s => s.ID_OrderStatus == statusId)
+                .Select(s => s.Name)
+                .FirstOrDefaultAsync();
+
+            var title = _templateService.Render(template.TitleTemplate, order, statusName);
+            var body = _templateService.Render(template.BodyTemplate, order, statusName);
+
+            var clientUserId = await _context.ClientProfiles
+                .AsNoTracking()
+                .Where(c => c.ID_ClientProfile == order.Client_id)
+                .Select(c => c.User_id)
+                .FirstOrDefaultAsync();
+
+            if (clientUserId > 0)
+            {
+                var typeId = await ResolveNotificationTypeIdAsync();
+                if (typeId > 0)
+                    await _notificationService.SendAsync(clientUserId, typeId, title, body, order.ID_Order, priority: order.Priority, isCritical: order.Priority >= 2, requiresAck: order.Priority >= 2);
+            }
+
+            var chatRoomId = await _context.ChatRooms
+                .AsNoTracking()
+                .Where(cr => cr.Order_id == order.ID_Order)
+                .Select(cr => cr.ID_ChatRoom)
+                .FirstOrDefaultAsync();
+
+            if (chatRoomId > 0)
+            {
+                var systemSenderId = await _context.Users
+                    .AsNoTracking()
+                    .Where(u => u.Company_id == order.Company_id && (u.Role.Name == "Менеджер" || u.Role.Name == "Админ"))
+                    .Select(u => u.ID_User)
+                    .FirstOrDefaultAsync();
+                if (systemSenderId > 0)
+                {
+                    var msg = new ChatMessage
+                    {
+                        ChatRoom_id = chatRoomId,
+                        Sender_id = systemSenderId,
+                        MessageText = body,
+                        Sent_at = DateTime.UtcNow,
+                        Is_deleted = false
+                    };
+                    _context.ChatMessages.Add(msg);
+                    await _context.SaveChangesAsync();
+
+                    await _hubContext.Clients.Group($"ChatRoom_{chatRoomId}").SendAsync("ReceiveMessage", new
+                    {
+                        id = msg.ID_ChatMessage,
+                        chatRoomId,
+                        senderId = systemSenderId,
+                        senderName = "System",
+                        messageText = body,
+                        attachmentUrl = (string?)null,
+                        sentAt = msg.Sent_at
+                    });
+                }
+            }
+        }
+
+        private async Task<int> ResolveNotificationTypeIdAsync()
+        {
+            var id = await _context.NotificationTypes
+                .AsNoTracking()
+                .Where(t => t.Name.ToLower().Contains("статус") || t.Name.ToLower().Contains("заказ"))
+                .Select(t => t.ID_NotificationType)
+                .FirstOrDefaultAsync();
+            if (id != 0)
+                return id;
+
+            return await _context.NotificationTypes
+                .AsNoTracking()
+                .Select(t => t.ID_NotificationType)
+                .FirstOrDefaultAsync();
         }
     }
 }

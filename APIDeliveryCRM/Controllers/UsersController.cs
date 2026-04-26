@@ -1,7 +1,9 @@
 using System.Threading.Tasks;
+using APIDeliveryCRM.ContextDb;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Request;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace APIDeliveryCRM.Controllers
 {
@@ -10,10 +12,31 @@ namespace APIDeliveryCRM.Controllers
     public class UsersController : Controller
     {
         private readonly IUserLoginService _userService;
+        private readonly IUserPresenceService _presenceService;
+        private readonly ContextDB _context;
 
-        public UsersController(IUserLoginService userService)
+        public UsersController(IUserLoginService userService, IUserPresenceService presenceService, ContextDB context)
         {
             _userService = userService;
+            _presenceService = presenceService;
+            _context = context;
+        }
+
+        /// <summary>Список id пользователей компании, у которых есть активное SignalR-подключение (чат).</summary>
+        [HttpGet("online")]
+        public async Task<IActionResult> GetOnlineUsers([FromQuery] int companyId)
+        {
+            var onlineIds = _presenceService.GetOnlineUserIds().ToHashSet();
+            if (onlineIds.Count == 0)
+                return Ok(new List<int>());
+
+            var companyOnlineIds = await _context.Users
+                .AsNoTracking()
+                .Where(u => u.Company_id == companyId && onlineIds.Contains(u.ID_User))
+                .Select(u => u.ID_User)
+                .ToListAsync();
+
+            return Ok(companyOnlineIds);
         }
 
         [HttpGet]

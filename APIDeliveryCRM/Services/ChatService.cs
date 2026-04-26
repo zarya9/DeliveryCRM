@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
+using APIDeliveryCRM.Request;
+using APIDeliveryCRM.Responses;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -318,6 +320,85 @@ namespace APIDeliveryCRM.Services
             });
 
             return new OkObjectResult(new { message = "Все сообщения отмечены как прочитанные" });
+        }
+
+        public async Task<IActionResult> GetQuickReplyTemplatesAsync(int companyId, int userId, string? category = null, string? search = null)
+        {
+            var query = _context.ChatQuickReplyTemplates
+                .AsNoTracking()
+                .Where(t => t.Company_id == companyId && t.User_id == userId && t.Is_active);
+
+            if (!string.IsNullOrWhiteSpace(category))
+                query = query.Where(t => t.Category.ToLower() == category.Trim().ToLower());
+            if (!string.IsNullOrWhiteSpace(search))
+                query = query.Where(t => t.Title.Contains(search) || t.Content.Contains(search));
+
+            var list = await query
+                .OrderBy(t => t.Category)
+                .ThenBy(t => t.Title)
+                .Select(t => new ChatQuickReplyTemplateDto
+                {
+                    Id = t.ID_ChatQuickReplyTemplate,
+                    UserId = t.User_id,
+                    Category = t.Category,
+                    Title = t.Title,
+                    Content = t.Content,
+                    IsActive = t.Is_active,
+                    CreatedAt = t.Created_at
+                })
+                .ToListAsync();
+
+            return new OkObjectResult(list);
+        }
+
+        public async Task<IActionResult> UpsertQuickReplyTemplateAsync(int companyId, int userId, UpsertChatQuickReplyTemplateRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.Content))
+                return new BadRequestObjectResult(new { message = "Title and content are required." });
+
+            ChatQuickReplyTemplate entity;
+            if (request.TemplateId.HasValue)
+            {
+                var existing = await _context.ChatQuickReplyTemplates
+                    .FirstOrDefaultAsync(t => t.ID_ChatQuickReplyTemplate == request.TemplateId.Value
+                                           && t.Company_id == companyId
+                                           && t.User_id == userId);
+                if (existing is null)
+                    return new NotFoundObjectResult(new { message = "Template not found." });
+                entity = existing;
+            }
+            else
+            {
+                entity = new ChatQuickReplyTemplate
+                {
+                    Company_id = companyId,
+                    User_id = userId,
+                    Created_at = DateTime.UtcNow
+                };
+                await _context.ChatQuickReplyTemplates.AddAsync(entity);
+            }
+
+            entity.Category = request.Category.Trim().ToLowerInvariant();
+            entity.Title = request.Title.Trim();
+            entity.Content = request.Content.Trim();
+            entity.Is_active = request.IsActive;
+
+            await _context.SaveChangesAsync();
+            return new OkObjectResult(new { id = entity.ID_ChatQuickReplyTemplate });
+        }
+
+        public async Task<IActionResult> DeleteQuickReplyTemplateAsync(int companyId, int userId, int templateId)
+        {
+            var entity = await _context.ChatQuickReplyTemplates
+                .FirstOrDefaultAsync(t => t.ID_ChatQuickReplyTemplate == templateId
+                                       && t.Company_id == companyId
+                                       && t.User_id == userId);
+            if (entity is null)
+                return new NotFoundObjectResult(new { message = "Template not found." });
+
+            _context.ChatQuickReplyTemplates.Remove(entity);
+            await _context.SaveChangesAsync();
+            return new OkObjectResult(new { message = "Template deleted." });
         }
 
         /// <summary>

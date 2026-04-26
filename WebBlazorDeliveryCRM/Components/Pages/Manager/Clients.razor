@@ -1,10 +1,16 @@
 @page "/manager/clients"
 @using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Components.Shared
 @inject ClientsDetailsApiService ClientsDetailsApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject AppNotificationService Notify
 
-<h3>Клиенты</h3>
+<PageTitle>Клиенты — Менеджер</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Клиенты</h1>
+    <p class="subtitle">Карточка клиента 360: профиль, заказы, заметки и обращения.</p>
+</div>
 
 <div class="card mb-3">
     <div class="card-body">
@@ -46,11 +52,11 @@ else if (_client != null)
                 <p class="card-text">
                     @if (!string.IsNullOrWhiteSpace(_client.Status))
                     {
-                        <span><strong>Статус:</strong> @_client.Status</span>
+                        <span><strong>Статус:</strong> <StatusBadge Text="@_client.Status" Tone="@GetClientStatusTone(_client.Status)" /></span>
                     }
                     @if (!string.IsNullOrWhiteSpace(_client.Segment))
                     {
-                        <span class="ms-3"><strong>Сегмент:</strong> @_client.Segment</span>
+                        <span class="ms-3"><strong>Сегмент:</strong> <StatusBadge Text="@_client.Segment" Tone="info" /></span>
                     }
                 </p>
             }
@@ -86,7 +92,7 @@ else if (_client != null)
                                 <tr>
                                     <td>@o.OrderNumber</td>
                                     <td>@o.Name</td>
-                                    <td>@o.Status</td>
+                                    <td><StatusBadge Text="@o.Status" Tone="@GetOrderStatusTone(o.Status)" /></td>
                                     <td>@o.CreatedAt.ToString("g")</td>
                                     <td>@(o.DeliveredAt?.ToString("g") ?? "-")</td>
                                     <td>@o.EstimatedCost.ToString("N2")</td>
@@ -238,6 +244,32 @@ else if (_client != null)
         {
             _savingNote = false;
         }
+    }
+
+    private static string GetClientStatusTone(string? status)
+    {
+        var s = (status ?? string.Empty).ToLowerInvariant();
+        if (s.Contains("vip") || s.Contains("актив"))
+            return "success";
+        if (s.Contains("проблем") || s.Contains("блок"))
+            return "danger";
+        if (s.Contains("нов"))
+            return "warning";
+        return "neutral";
+    }
+
+    private static string GetOrderStatusTone(string? status)
+    {
+        var s = (status ?? string.Empty).ToLowerInvariant();
+        if (s.Contains("достав"))
+            return "success";
+        if (s.Contains("отмен"))
+            return "danger";
+        if (s.Contains("в пути") || s.Contains("назнач"))
+            return "primary";
+        if (s.Contains("нов"))
+            return "warning";
+        return "neutral";
     }
 }
 

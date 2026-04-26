@@ -35,9 +35,18 @@ namespace APIDeliveryCRM.Model
 
         public DateTime Created_at { get; set; } = DateTime.UtcNow;
         public DateTime? Updated_at { get; set; }
+        public DateTime? Won_at { get; set; }
+        public DateTime? Lost_at { get; set; }
 
         [MaxLength(1000)]
         public string? Comment { get; set; }
+
+        [MaxLength(500)]
+        public string? Lost_reason { get; set; }
+
+        [MaxLength(200)]
+        public string? NextTask_title { get; set; }
+        public DateTime? NextTask_due_at { get; set; }
     }
 }
 

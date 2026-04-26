@@ -1,5 +1,6 @@
 @page "/logistician/monitoring"
 @layout LogisticianLayout
+@using WebBlazorDeliveryCRM.Components.Shared
 
 <PageTitle>Мониторинг — Логист</PageTitle>
 
@@ -8,7 +9,15 @@
     <p class="subtitle">Live-лента событий и уведомления</p>
 </div>
 
+<div class="dms-stat-grid mb-3">
+    <KpiCard Title="Новые события (час)" Value="0" Meta="После подключения потока" />
+    <KpiCard Title="Критичные алерты" Value="0" Meta="SLA и инциденты" />
+</div>
+
 <div class="dms-card">
     <h2 class="dms-card-title">Лента событий</h2>
     <p class="text-muted">Новые заказы, задержки, инциденты (SignalR).</p>
+    <div class="mt-2">
+        <StatusBadge Text="Режим ожидания данных" Tone="info" />
+    </div>
 </div>

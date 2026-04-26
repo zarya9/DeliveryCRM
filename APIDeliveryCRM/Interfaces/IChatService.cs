@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using APIDeliveryCRM.Model;
+using APIDeliveryCRM.Request;
 using Microsoft.AspNetCore.Mvc;
 
 namespace APIDeliveryCRM.Interfaces
@@ -18,6 +19,9 @@ namespace APIDeliveryCRM.Interfaces
         Task<IActionResult> DeleteMessageAsync(int messageId, int userId);
         Task<IActionResult> GetUnreadMessagesCountAsync(int userId, int chatRoomId);
         Task<IActionResult> MarkAllMessagesAsReadAsync(int chatRoomId, int userId);
+        Task<IActionResult> GetQuickReplyTemplatesAsync(int companyId, int userId, string? category = null, string? search = null);
+        Task<IActionResult> UpsertQuickReplyTemplateAsync(int companyId, int userId, UpsertChatQuickReplyTemplateRequest request);
+        Task<IActionResult> DeleteQuickReplyTemplateAsync(int companyId, int userId, int templateId);
     }
 }
 

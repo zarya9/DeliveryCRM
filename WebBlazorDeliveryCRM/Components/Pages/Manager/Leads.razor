@@ -1,6 +1,7 @@
 @page "/manager/leads"
 @layout ManagerLayout
 @using System.Security.Claims
+@using WebBlazorDeliveryCRM.Components.Shared
 @using WebBlazorDeliveryCRM.Services
 @using static WebBlazorDeliveryCRM.Services.LeadsApiService
 @inject LeadsApiService LeadsApi
@@ -28,7 +29,7 @@
             else
             {
                 <div class="table-responsive">
-                    <table class="table table-sm table-striped align-middle">
+                    <table class="table table-sm align-middle">
                         <thead>
                             <tr>
                                 <th>Название</th>
@@ -42,13 +43,13 @@
                         <tbody>
                             @foreach (var l in _leads)
                             {
-                                <tr>
+                                <tr style="cursor: pointer;" @onclick="() => OpenLead(l)">
                                     <td>@l.Name</td>
                                     <td>@l.Contact</td>
                                     <td>@l.Source</td>
-                                    <td>@l.Stage</td>
+                                    <td><StatusBadge Text="@l.Stage" Tone="@GetLeadStageTone(l.Stage)" /></td>
                                     <td>@(string.IsNullOrWhiteSpace(l.ManagerName) ? "—" : l.ManagerName)</td>
-                                    <td>@l.CreatedAt.ToString("g")</td>
+                                    <td>@l.CreatedAt.ToString("dd.MM.yyyy")</td>
                                 </tr>
                             }
                         </tbody>
@@ -100,13 +101,37 @@
             }
 
             <button class="btn btn-primary dms-btn-primary mt-2"
-                    disabled="@_saving || string.IsNullOrWhiteSpace(_newName) || _selectedSourceId == 0 || _selectedStageId == 0"
+                    type="button"
+                    disabled="@_saving"
                     @onclick="SaveLead">
                 @(_saving ? "Сохраняем..." : "Создать лид")
             </button>
         </div>
     </div>
 </div>
+
+@if (_selectedLead is not null)
+{
+    <div class="employee-modal-backdrop" @onclick="CloseLead">
+        <div class="employee-modal" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <h2 class="h5 mb-0">Карточка лида</h2>
+                <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseLead"></button>
+            </div>
+            <p class="mb-2"><strong>Название:</strong> @_selectedLead.Name</p>
+            <p class="mb-2"><strong>Контакт:</strong> @(string.IsNullOrWhiteSpace(_selectedLead.Contact) ? "—" : _selectedLead.Contact)</p>
+            <p class="mb-2"><strong>Источник:</strong> @_selectedLead.Source</p>
+            <p class="mb-2"><strong>Стадия:</strong> <StatusBadge Text="@_selectedLead.Stage" Tone="@GetLeadStageTone(_selectedLead.Stage)" /></p>
+            <p class="mb-2"><strong>Ответственный:</strong> @(string.IsNullOrWhiteSpace(_selectedLead.ManagerName) ? "—" : _selectedLead.ManagerName)</p>
+            <p class="mb-2"><strong>Создан:</strong> @_selectedLead.CreatedAt.ToString("dd.MM.yyyy HH:mm")</p>
+            @if (!string.IsNullOrWhiteSpace(_selectedLead.Comment))
+            {
+                <p class="mb-0"><strong>Комментарий:</strong></p>
+                <p class="text-muted mb-0 mt-1" style="white-space: pre-wrap;">@_selectedLead.Comment</p>
+            }
+        </div>
+    </div>
+}
 
 <div class="dms-card">
     <h2 class="dms-card-title">Воронка по стадиям</h2>
@@ -146,6 +171,8 @@
     private string? _newComment;
     private string? _error;
     private bool _saving;
+    private int _currentUserId;
+    private LeadDto? _selectedLead;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -154,9 +181,16 @@
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         var user = state.User;
         var companyIdStr = user.FindFirst("companyId")?.Value;
+        var userIdStr = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (!int.TryParse(companyIdStr, out _companyId))
         {
             _error = "Не удалось определить компанию пользователя.";
+            StateHasChanged();
+            return;
+        }
+        if (!int.TryParse(userIdStr, out _currentUserId))
+        {
+            _error = "Не удалось определить пользователя.";
             StateHasChanged();
             return;
         }
@@ -198,8 +232,8 @@
         _saving = true;
         try
         {
-            var ok = await LeadsApi.CreateAsync(dto);
-            if (ok)
+            var result = await LeadsApi.CreateAsync(dto, _companyId, _currentUserId);
+            if (result.ok)
             {
                 _newName = string.Empty;
                 _newContact = null;
@@ -211,7 +245,9 @@
             }
             else
             {
-                _error = "Не удалось создать лид.";
+                _error = string.IsNullOrWhiteSpace(result.error)
+                    ? "Не удалось создать лид."
+                    : $"Не удалось создать лид. {result.error}";
                 Notify.ShowError(_error);
             }
         }
@@ -224,6 +260,28 @@
         {
             _saving = false;
         }
+    }
+
+    private void OpenLead(LeadDto l)
+    {
+        _selectedLead = l;
+    }
+
+    private void CloseLead()
+    {
+        _selectedLead = null;
+    }
+
+    private static string GetLeadStageTone(string? stage)
+    {
+        var s = (stage ?? string.Empty).ToLowerInvariant();
+        if (s.Contains("договор") || s.Contains("успеш") || s.Contains("клиент"))
+            return "success";
+        if (s.Contains("потер") || s.Contains("отказ"))
+            return "danger";
+        if (s.Contains("нов") || s.Contains("перв"))
+            return "info";
+        return "primary";
     }
 }
 

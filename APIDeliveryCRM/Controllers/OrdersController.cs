@@ -1,3 +1,5 @@
+using System;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
@@ -18,9 +20,9 @@ namespace APIDeliveryCRM.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> GetAll([FromQuery] int? companyId)
+        public async Task<IActionResult> GetAll([FromQuery] int? companyId, [FromQuery] DateTime? from, [FromQuery] DateTime? to)
         {
-            var orders = await _orderService.GetAllAsync(companyId);
+            var orders = await _orderService.GetAllAsync(companyId, from, to);
             return new OkObjectResult(orders);
         }
 
@@ -53,8 +55,15 @@ namespace APIDeliveryCRM.Controllers
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreateOrderRequest request)
         {
-            var created = await _orderService.CreateAsync(request);
-            return new OkObjectResult(created);
+            try
+            {
+                var created = await _orderService.CreateAsync(request);
+                return new OkObjectResult(created);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return new BadRequestObjectResult(new { message = ex.Message });
+            }
         }
 
         [HttpPut("{id:int}")]
@@ -91,6 +100,49 @@ namespace APIDeliveryCRM.Controllers
             }
 
             return new OkResult();
+        }
+
+        [HttpPost("{id:int}/assign/override")]
+        public async Task<IActionResult> ManualOverrideAssign(int id, [FromQuery] int courierId, [FromQuery] string? reason)
+        {
+            var actorUserId = GetCurrentUserId();
+            var result = await _orderService.ManualOverrideCourierAsync(id, courierId, reason, actorUserId);
+            if (!result)
+                return NotFound();
+
+            return Ok();
+        }
+
+        [HttpPost("{id:int}/auto-dispatch")]
+        public async Task<IActionResult> AutoDispatch(int id)
+        {
+            var result = await _orderService.AutoDispatchAsync(id);
+            if (result == null)
+                return NotFound(new { message = "Заказ не найден или нет доступных онлайн-курьеров." });
+
+            return Ok(result);
+        }
+
+        [HttpGet("{id:int}/timeline")]
+        public async Task<IActionResult> Timeline(int id)
+        {
+            var timeline = await _orderService.GetTimelineAsync(id);
+            return Ok(timeline);
+        }
+
+        [HttpGet("{id:int}/eta")]
+        public async Task<IActionResult> Eta(int id)
+        {
+            var eta = await _orderService.GetEtaAsync(id);
+            if (eta == null)
+                return NotFound();
+            return Ok(eta);
+        }
+
+        private int? GetCurrentUserId()
+        {
+            var v = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return int.TryParse(v, out var id) ? id : null;
         }
     }
 }

@@ -11,6 +11,7 @@ namespace APIDeliveryCRM.Interfaces
         Task<IActionResult> GetAvatarAsync(int userId);
         Task<IActionResult> UploadReportAsync(IFormFile file, int userId, string reportType);
         Task<IActionResult> GetReportAsync(int reportId);
+        Task<IActionResult> UploadChatAttachmentAsync(IFormFile file, int userId);
     }
 }
 

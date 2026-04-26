@@ -1,0 +1,19 @@
+<span class="badge @ResolveClass()">@Text</span>
+
+@code {
+    [Parameter] public string? Text { get; set; }
+    [Parameter] public string Tone { get; set; } = "neutral";
+
+    private string ResolveClass()
+    {
+        return Tone.ToLowerInvariant() switch
+        {
+            "success" => "bg-success",
+            "warning" => "bg-warning text-dark",
+            "danger" => "bg-danger",
+            "info" => "bg-info text-dark",
+            "primary" => "bg-primary",
+            _ => "bg-secondary"
+        };
+    }
+}

@@ -3,7 +3,10 @@
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
 @inject CouriersApiService CouriersApi
+@inject OrdersApiService OrdersApi
+@inject CompanySettingsApiService CompanySettingsApi
 @inject IJSRuntime JS
+@inject IConfiguration Configuration
 
 <PageTitle>Карта — Менеджер</PageTitle>
 
@@ -14,7 +17,44 @@
 
 <div class="dms-card mb-3">
     <h2 class="dms-card-title">Курьеры на карте</h2>
-    <p class="text-muted">Позиции курьеров по данным из API.</p>
+    <p class="text-muted">Позиции курьеров и горячие зоны заказов по данным API.</p>
+    <div class="row g-2 align-items-end mb-2">
+        <div class="col-md-3">
+            <label class="form-label">С даты (UTC)</label>
+            <input class="form-control" type="date" @bind="_periodFrom" @bind:format="yyyy-MM-dd" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">По дату (UTC)</label>
+            <input class="form-control" type="date" @bind="_periodTo" @bind:format="yyyy-MM-dd" />
+        </div>
+        <div class="col-md-6">
+            <button type="button" class="btn btn-primary" @onclick="ApplyPeriodAsync">Обновить карту</button>
+            <button type="button" class="btn btn-outline-secondary ms-1" @onclick="ResetPeriodAsync">Текущий месяц</button>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap gap-3 mb-2">
+        <div class="small text-muted">Заказов с координатами: <strong>@_geoOrdersCount</strong></div>
+        <div class="small text-muted">Доставлено: <strong>@_deliveredCount</strong></div>
+        <div class="small text-muted">Среднее время: <strong>@GetAvgDurationText()</strong></div>
+        <div class="small text-muted">% опозданий (порог @_slaLateHours ч): <strong>@GetLateRateText()</strong></div>
+    </div>
+    <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" id="heat-toggle" checked="@_showHeatmap" @onchange="OnHeatmapToggleChanged" />
+        <label class="form-check-label" for="heat-toggle">Показать тепловую карту заказов</label>
+    </div>
+    <details class="small text-muted mb-2">
+        <summary class="cursor-pointer">Справка: режим труда водителей (РФ)</summary>
+        <p class="mb-0 mt-2">
+            Для <strong>профессиональных перевозок</strong> на грузовых ТС (свыше 3,5 т) и автобусах действуют
+            специальные правила режима труда и отдыха (в т.ч. ст.&nbsp;26 ПДД, подзаконные акты, тахографы):
+            ограничения по непрерывному вождению, суточным и недельным часам, перерывам и отдыху.
+            Курьер на легковом авто для курьерской доставки <strong>может не подпадать</strong> под этот режим,
+            но на отношения с работодателем распространяется <strong>ТК РФ</strong> (нормы рабочего времени, отдыха,
+            учёт времени в зависимости от условий договора).
+            Для диплома и эксплуатации системы закрепите режим в ЛНА/договоре и при необходимости получите
+            юридическую консультацию: нормы меняются, а применимость зависит от вида деятельности и ТС.
+        </p>
+    </details>
     <div id="manager-map" style="height: 480px; width: 100%; border-radius: 8px;"></div>
 </div>
 
@@ -52,31 +92,235 @@
     }
 </div>
 
+<div class="dms-card">
+    <h2 class="dms-card-title">Горячие зоны заказов</h2>
+    <p class="text-muted">Топ зон по количеству заказов за выбранный период (агрегация по сетке координат).</p>
+    @if (_hotZones.Any())
+    {
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Зона</th>
+                    <th>Заказов</th>
+                    <th>Доставлено</th>
+                    <th>Среднее время, ч</th>
+                    <th>% опозданий</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var z in _hotZones)
+                {
+                    <tr>
+                        <td>@z.Zone</td>
+                        <td>@z.Orders</td>
+                        <td>@z.Delivered</td>
+                        <td>@(z.AvgDeliveryHours.HasValue ? z.AvgDeliveryHours.Value.ToString("0.0") : "н/д")</td>
+                        <td>@z.LatePercent.ToString("0.0")%</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <p class="text-muted mb-0">Недостаточно геоданных для построения зон.</p>
+    }
+</div>
+
 @code {
     private List<CourierProfileDto>? _couriers;
+    private List<OrderDto>? _orders;
+    private int _geoOrdersCount;
+    private int _deliveredCount;
+    private double? _avgDeliveryHours;
+    private double _lateRatePercent;
+    private bool _showHeatmap = true;
+    private List<object> _heatPoints = new();
+    private int _slaLateHours = 24;
+    private DateTime _periodFrom;
+    private DateTime _periodTo;
+    private List<HotZoneRow> _hotZones = new();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        _couriers = await CouriersApi.GetAllAsync(null);
+        var sla = await CompanySettingsApi.GetSlaAsync();
+        if (sla != null && sla.SlaLateHours > 0)
+            _slaLateHours = sla.SlaLateHours;
+        var now = DateTime.UtcNow.Date;
+        _periodFrom = new DateTime(now.Year, now.Month, 1);
+        _periodTo = now;
+
+        await ReloadAsync();
         StateHasChanged();
 
-        if (_couriers != null)
+        try
         {
-            var markers = _couriers
-                .Where(c => c.Current_lat != 0 || c.Current_lon != 0)
-                .Select(c => new { lat = (double)c.Current_lat, lon = (double)c.Current_lon, title = $"{c.User?.FName} {c.User?.Name} — {c.CourierStatus?.Name}" })
-                .ToList();
-            try
-            {
-                await JS.InvokeVoidAsync("leafletMap.init", "manager-map", 55.7558, 37.6173, 10);
-                await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
-            }
-            catch
-            {
-                // карта может не инициализироваться при пререндеринге
-            }
+            var osrmUrl = Configuration["Osrm:RouterBaseUrl"];
+            await JS.InvokeVoidAsync("leafletMap.init", "manager-map", 55.7558, 37.6173, 10, null, osrmUrl, false, null);
+            await RefreshMapAsync();
+        }
+        catch
+        {
+            // карта может не инициализироваться при пререндеринге
         }
     }
-}
 
+    private void ComputeGeoMetrics()
+    {
+        var orders = _orders ?? new List<OrderDto>();
+        var geo = orders
+            .SelectMany(o => new[]
+            {
+                CreateGeoPoint(o.PickupAddress?.Latitude, o.PickupAddress?.Longitude, 0.8),
+                CreateGeoPoint(o.DeliveryAddress?.Latitude, o.DeliveryAddress?.Longitude, 1.0)
+            })
+            .Where(x => x != null)
+            .Select(x => x!)
+            .ToList();
+        _heatPoints = geo.Cast<object>().ToList();
+        _geoOrdersCount = orders.Count(o => HasCoordinates(o.PickupAddress) || HasCoordinates(o.DeliveryAddress));
+
+        var delivered = orders.Where(o => o.Delivered_at.HasValue).ToList();
+        _deliveredCount = delivered.Count;
+        _avgDeliveryHours = delivered.Count == 0
+            ? null
+            : delivered.Average(o => Math.Max(0, (o.Delivered_at!.Value - o.Created_at).TotalHours));
+        BuildHotZones(orders);
+
+        if (delivered.Count == 0)
+        {
+            _lateRatePercent = 0;
+            return;
+        }
+
+        var lateThreshold = Math.Max(1, _slaLateHours);
+        var lateCount = delivered.Count(o => (o.Delivered_at!.Value - o.Created_at).TotalHours > lateThreshold);
+        _lateRatePercent = Math.Round(100.0 * lateCount / delivered.Count, 1);
+    }
+
+    private static object? CreateGeoPoint(decimal? lat, decimal? lon, double intensity)
+    {
+        if (!lat.HasValue || !lon.HasValue) return null;
+        return new { lat = (double)lat.Value, lon = (double)lon.Value, intensity };
+    }
+
+    private static bool HasCoordinates(AddressShortDto? a)
+        => a?.Latitude.HasValue == true && a?.Longitude.HasValue == true;
+
+    private string GetAvgDurationText()
+        => _avgDeliveryHours.HasValue ? $"{_avgDeliveryHours.Value:0.0} ч" : "н/д";
+
+    private string GetLateRateText()
+        => $"{_lateRatePercent:0.0}%";
+
+    private async Task ApplyPeriodAsync()
+    {
+        await ReloadAsync();
+        await RefreshMapAsync();
+        StateHasChanged();
+    }
+
+    private async Task ResetPeriodAsync()
+    {
+        var now = DateTime.UtcNow.Date;
+        _periodFrom = new DateTime(now.Year, now.Month, 1);
+        _periodTo = now;
+        await ReloadAsync();
+        await RefreshMapAsync();
+        StateHasChanged();
+    }
+
+    private async Task OnHeatmapToggleChanged(ChangeEventArgs e)
+    {
+        var isChecked = e.Value is bool b && b;
+        _showHeatmap = isChecked;
+        if (_showHeatmap)
+            await JS.InvokeVoidAsync("leafletMap.setHeatPoints", _heatPoints);
+        else
+            await JS.InvokeVoidAsync("leafletMap.clearHeatPoints");
+    }
+
+    private async Task ReloadAsync()
+    {
+        _couriers = await CouriersApi.GetAllAsync(null);
+        var from = DateTime.SpecifyKind(_periodFrom.Date, DateTimeKind.Utc);
+        var to = DateTime.SpecifyKind(_periodTo.Date, DateTimeKind.Utc).AddDays(1).AddTicks(-1);
+        _orders = await OrdersApi.GetAllAsync(null, from, to);
+        ComputeGeoMetrics();
+    }
+
+    private async Task RefreshMapAsync()
+    {
+        var markers = (_couriers ?? new List<CourierProfileDto>())
+            .Where(c => c.Current_lat != 0 || c.Current_lon != 0)
+            .Select(c => new { lat = (double)c.Current_lat, lon = (double)c.Current_lon, title = $"{c.User?.FName} {c.User?.Name} — {c.CourierStatus?.Name}" })
+            .ToList();
+
+        await JS.InvokeVoidAsync("leafletMap.clearMarkers");
+        await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
+        if (_showHeatmap && _heatPoints.Count > 0)
+            await JS.InvokeVoidAsync("leafletMap.setHeatPoints", _heatPoints);
+        else
+            await JS.InvokeVoidAsync("leafletMap.clearHeatPoints");
+    }
+
+    private void BuildHotZones(List<OrderDto> orders)
+    {
+        const double cellSize = 0.05;
+        var lateThreshold = Math.Max(1, _slaLateHours);
+
+        var zones = orders
+            .Select(o =>
+            {
+                var address = HasCoordinates(o.DeliveryAddress) ? o.DeliveryAddress : o.PickupAddress;
+                if (address?.Latitude is null || address.Longitude is null)
+                    return null;
+
+                var lat = (double)address.Latitude.Value;
+                var lon = (double)address.Longitude.Value;
+                var latCell = Math.Floor(lat / cellSize) * cellSize;
+                var lonCell = Math.Floor(lon / cellSize) * cellSize;
+                var deliveredHours = o.Delivered_at.HasValue
+                    ? Math.Max(0, (o.Delivered_at.Value - o.Created_at).TotalHours)
+                    : (double?)null;
+
+                return new
+                {
+                    Key = $"{latCell:0.00}, {lonCell:0.00}",
+                    DeliveredHours = deliveredHours
+                };
+            })
+            .Where(x => x != null)
+            .Select(x => x!)
+            .GroupBy(x => x.Key)
+            .Select(g =>
+            {
+                var deliveredRows = g.Where(x => x.DeliveredHours.HasValue).ToList();
+                var lateDelivered = deliveredRows.Count(x => x.DeliveredHours!.Value > lateThreshold);
+                return new HotZoneRow
+                {
+                    Zone = g.Key,
+                    Orders = g.Count(),
+                    Delivered = deliveredRows.Count,
+                    AvgDeliveryHours = deliveredRows.Count > 0 ? deliveredRows.Average(x => x.DeliveredHours!.Value) : null,
+                    LatePercent = deliveredRows.Count > 0 ? 100.0 * lateDelivered / deliveredRows.Count : 0
+                };
+            })
+            .OrderByDescending(x => x.Orders)
+            .ThenByDescending(x => x.Delivered)
+            .Take(10)
+            .ToList();
+
+        _hotZones = zones;
+    }
+
+    private sealed class HotZoneRow
+    {
+        public string Zone { get; set; } = string.Empty;
+        public int Orders { get; set; }
+        public int Delivered { get; set; }
+        public double? AvgDeliveryHours { get; set; }
+        public double LatePercent { get; set; }
+    }
+}

@@ -2,9 +2,11 @@
 @layout LogisticianLayout
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
 @inject OrdersApiService OrdersApi
 @inject CouriersApiService CouriersApi
 @inject AppNotificationService Notify
+@inject NavigationManager Navigation
 
 <PageTitle>Распределение заказов — Логист</PageTitle>
 
@@ -14,14 +16,8 @@
 </div>
 
 <div class="dms-stat-grid">
-    <div class="dms-stat-card">
-        <div class="dms-stat-value">@_unassignedCount</div>
-        <div class="dms-stat-label">Ожидают назначения</div>
-    </div>
-    <div class="dms-stat-card">
-        <div class="dms-stat-value">@_freeCouriersCount</div>
-        <div class="dms-stat-label">Свободных курьеров</div>
-    </div>
+    <KpiCard Title="Ожидают назначения" Value="@_unassignedCount.ToString()" />
+    <KpiCard Title="Свободных курьеров" Value="@_freeCouriersCount.ToString()" />
 </div>
 
 <div class="dms-card">
@@ -33,6 +29,8 @@
                 <tr>
                     <th>№</th>
                     <th>Название</th>
+                    <th>Маршрут</th>
+                    <th>Точки маршрута</th>
                     <th>Статус</th>
                     <th>Действие</th>
                 </tr>
@@ -40,22 +38,64 @@
             <tbody>
                 @foreach (var o in _unassigned)
                 {
+                    var top3 = GetTopCouriersForOrder(o);
                     <tr>
                         <td>@o.Order_Number</td>
                         <td>@o.Name</td>
-                        <td>@(o.OrderStatus?.Name ?? "—")</td>
+                        <td>@RouteKindLabel(o.DeliveryRouteKind)</td>
                         <td>
-                            <select class="form-select form-select-sm" style="width: auto; display: inline-block;" value="@GetSelectedCourier(o.ID_Order)" @onchange="e => SetSelectedCourier(o.ID_Order, int.TryParse(e.Value?.ToString(), out var v) ? v : 0)">
-                                <option value="0">— Выбрать курьера —</option>
-                                @if (_couriers != null)
-                                {
-                                    @foreach (var c in _couriers)
+                            @if (o.RouteStops is { Count: > 0 })
+                            {
+                                <ol class="mb-0 ps-3 small">
+                                    @foreach (var s in o.RouteStops.OrderBy(x => x.SortOrder))
                                     {
-                                        <option value="@c.ID_CourierProfile">@(c.User?.FName) @(c.User?.Name)</option>
+                                        <li class="text-body">@(string.IsNullOrEmpty(s.Title) ? StopKindLabel(s.Kind) : s.Title)</li>
                                     }
-                                }
-                            </select>
-                            <button class="btn btn-sm btn-primary ms-1" disabled="@(_assigningOrderId == o.ID_Order)" @onclick="() => AssignCourier(o.ID_Order)">Назначить</button>
+                                </ol>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td><StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@GetOrderStatusTone(o.OrderStatus?.Name)" /></td>
+                        <td style="min-width: 280px;">
+                            <div class="d-flex flex-wrap align-items-center gap-1 mb-1">
+                                <select class="form-select form-select-sm" style="width: auto; min-width: 12rem; max-width: 100%;" value="@GetSelectedCourier(o.ID_Order)" @onchange="e => SetSelectedCourier(o.ID_Order, int.TryParse(e.Value?.ToString(), out var v) ? v : 0)">
+                                    <option value="0">— Выбрать курьера —</option>
+                                    @if (_couriers != null)
+                                    {
+                                        @foreach (var c in GetCouriersRankedForOrder(o))
+                                        {
+                                            <option value="@c.ID_CourierProfile">@GetCourierLabel(c, o)</option>
+                                        }
+                                    }
+                                </select>
+                                <button type="button" class="btn btn-sm btn-primary" disabled="@(_assigningOrderId == o.ID_Order)" @onclick="() => AssignCourier(o.ID_Order)">Назначить</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" title="Назначить курьера с максимальным баллом" disabled="@(_assigningOrderId == o.ID_Order || GetRecommendedCourier(o) is null)" @onclick="() => AssignBestCourier(o.ID_Order)">Лучший</button>
+                            </div>
+                            @if (top3.Count > 0)
+                            {
+                                <div class="small border rounded px-2 py-1 bg-body-secondary bg-opacity-25">
+                                    <div class="text-muted text-uppercase" style="font-size: 0.65rem; letter-spacing: 0.04em;">Топ‑3 по баллу</div>
+                                    <ol class="mb-0 ps-3 mt-1">
+                                        @foreach (var row in top3)
+                                        {
+                                            <li class="@(row.Rank == 1 ? "fw-semibold" : null)">
+                                                @CourierShortName(row.Courier) — <span class="text-muted">@row.Score.ToString("0.0")</span>
+                                                @if (row.Rank == 1)
+                                                {
+                                                    <span class="badge text-bg-success ms-1" style="font-size: 0.65rem;">лучший</span>
+                                                }
+                                            </li>
+                                        }
+                                    </ol>
+                                </div>
+                            }
+                            else if (_couriers is { Count: 0 })
+                            {
+                                <div class="small text-warning mt-1">Нет курьеров в компании.</div>
+                            }
                         </td>
                     </tr>
                 }
@@ -76,17 +116,20 @@
             <thead>
                 <tr>
                     <th>ФИО</th>
-                    <th>Статус</th>
-                    <th>Онлайн</th>
+                    <th>Категория допуска (ТС)</th>
+                    <th>Водительское удостоверение</th>
+                    <th>Текущий автомобиль</th>
                 </tr>
             </thead>
             <tbody>
                 @foreach (var c in _couriers)
                 {
-                    <tr>
+                    <tr style="cursor: pointer;" title="Карточка курьера"
+                        @onclick="@(() => Navigation.NavigateTo($"/logistician/couriers/{c.ID_CourierProfile}"))">
                         <td>@(c.User?.FName) @(c.User?.Name)</td>
-                        <td>@(c.CourierStatus?.Name ?? "—")</td>
-                        <td>@(c.Is_online ? "Да" : "Нет")</td>
+                        <td>@(c.VehicleCategory?.Name ?? c.VehicleCategoryName ?? "—")</td>
+                        <td>@(string.IsNullOrWhiteSpace(c.DriverLicense) ? "—" : c.DriverLicense)</td>
+                        <td>@CurrentVehicleLabel(c.ID_CourierProfile)</td>
                     </tr>
                 }
             </tbody>
@@ -106,6 +149,8 @@
     private int _freeCouriersCount;
     private Dictionary<int, int> _orderCourierSelection = new();
     private int _assigningOrderId;
+    private Dictionary<int, int> _courierActiveOrders = new();
+    private List<VehicleDto> _vehicles = new();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -118,18 +163,132 @@
     {
         _orders = await OrdersApi.GetAllAsync(null);
         _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
+        var cid = _couriers.FirstOrDefault()?.Company_id;
+        _vehicles = cid.HasValue
+            ? await CouriersApi.GetVehiclesByCompanyAsync(cid.Value) ?? new List<VehicleDto>()
+            : new List<VehicleDto>();
         _unassigned = _orders?.Where(o => o.Courier_id == null).ToList() ?? new List<OrderDto>();
         _unassignedCount = _unassigned.Count;
         _freeCouriersCount = _couriers.Count(c => c.Is_online);
-        _orderCourierSelection = _unassigned.ToDictionary(x => x.ID_Order, _ => 0);
+        _courierActiveOrders = (_orders ?? new List<OrderDto>())
+            .Where(o => o.Courier_id.HasValue)
+            .GroupBy(o => o.Courier_id!.Value)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        _orderCourierSelection = _unassigned.ToDictionary(
+            x => x.ID_Order,
+            x => GetRecommendedCourier(x)?.ID_CourierProfile ?? 0);
     }
 
     private int GetSelectedCourier(int orderId) => _orderCourierSelection.GetValueOrDefault(orderId);
     private void SetSelectedCourier(int orderId, int courierId) => _orderCourierSelection[orderId] = courierId;
 
-    private async Task AssignCourier(int orderId)
+    private static string RouteKindLabel(string? kind) => kind switch
     {
-        var courierId = GetSelectedCourier(orderId);
+        "LocalUrban" => "Город",
+        "ViaHub" => "Через склады",
+        "DirectIntercity" => "Прямой межгород",
+        _ => "—"
+    };
+
+    private static string StopKindLabel(string? kind) => kind switch
+    {
+        "SenderPickup" => "забор",
+        "Hub" => "склад",
+        "RecipientDelivery" => "получатель",
+        _ => kind ?? "—"
+    };
+
+    private IEnumerable<CourierProfileDto> GetCouriersRankedForOrder(OrderDto order)
+        => (_couriers ?? new List<CourierProfileDto>())
+            .OrderByDescending(c => ScoreCourier(c, order))
+            .ThenByDescending(c => c.Is_online)
+            .ThenByDescending(c => c.Rating);
+
+    private CourierProfileDto? GetRecommendedCourier(OrderDto order)
+        => GetCouriersRankedForOrder(order).FirstOrDefault();
+
+    private List<TopCourierRow> GetTopCouriersForOrder(OrderDto order)
+    {
+        var list = new List<TopCourierRow>();
+        var rank = 1;
+        foreach (var c in GetCouriersRankedForOrder(order).Take(3))
+            list.Add(new TopCourierRow(rank++, c, ScoreCourier(c, order)));
+        return list;
+    }
+
+    private sealed record TopCourierRow(int Rank, CourierProfileDto Courier, decimal Score);
+
+    private static string CourierShortName(CourierProfileDto c)
+    {
+        var s = $"{c.User?.FName} {c.User?.Name}".Trim();
+        return string.IsNullOrEmpty(s) ? $"Курьер #{c.ID_CourierProfile}" : s;
+    }
+
+    private string GetCourierLabel(CourierProfileDto c, OrderDto order)
+    {
+        var km = DistanceToPickupKm(c, order);
+        var load = _courierActiveOrders.TryGetValue(c.ID_CourierProfile, out var cnt) ? cnt : 0;
+        var distancePart = km.HasValue ? $"{km.Value:0.0} км" : "дист. н/д";
+        return $"{c.User?.FName} {c.User?.Name} • рейт {c.Rating:0.0} • загр {load} • {distancePart}";
+    }
+
+    private decimal ScoreCourier(CourierProfileDto c, OrderDto order)
+    {
+        var score = 0m;
+        score += c.Is_online ? 30m : 0m;
+        score += c.Rating * 10m;
+
+        var load = _courierActiveOrders.TryGetValue(c.ID_CourierProfile, out var cnt) ? cnt : 0;
+        score -= load * 8m;
+
+        var km = DistanceToPickupKm(c, order);
+        if (km.HasValue)
+            score -= (decimal)km.Value * 1.2m;
+
+        return score;
+    }
+
+    private static double? DistanceToPickupKm(CourierProfileDto c, OrderDto order)
+    {
+        var lat = (double?)order.PickupAddress?.Latitude;
+        var lon = (double?)order.PickupAddress?.Longitude;
+        if (!lat.HasValue || !lon.HasValue)
+            return null;
+        if (c.Current_lat == 0 && c.Current_lon == 0)
+            return null;
+
+        return HaversineKm((double)c.Current_lat, (double)c.Current_lon, lat.Value, lon.Value);
+    }
+
+    private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double r = 6371.0;
+        static double ToRad(double d) => d * Math.PI / 180.0;
+        var dLat = ToRad(lat2 - lat1);
+        var dLon = ToRad(lon2 - lon1);
+        var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                Math.Cos(ToRad(lat1)) * Math.Cos(ToRad(lat2)) *
+                Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+        return r * c;
+    }
+
+    private async Task AssignBestCourier(int orderId)
+    {
+        var order = _unassigned?.FirstOrDefault(x => x.ID_Order == orderId);
+        var best = order != null ? GetRecommendedCourier(order) : null;
+        if (best == null)
+        {
+            Notify.ShowWarning("Нет курьеров для автоназначения.");
+            return;
+        }
+        await AssignCourier(orderId, best.ID_CourierProfile);
+    }
+
+    private async Task AssignCourier(int orderId, int? courierIdOverride = null)
+    {
+        var courierId = courierIdOverride ?? GetSelectedCourier(orderId);
         if (courierId <= 0) { Notify.ShowWarning("Выберите курьера."); return; }
         _assigningOrderId = orderId;
         try
@@ -140,5 +299,35 @@
         }
         catch (Exception ex) { Notify.ShowError(ex.Message); }
         finally { _assigningOrderId = 0; }
+    }
+
+    private string CurrentVehicleLabel(int courierProfileId)
+    {
+        var v = _vehicles.FirstOrDefault(x => x.CurrentCourier_id == courierProfileId);
+        return v is null ? "—" : FormatVehicleShort(v);
+    }
+
+    private static string FormatVehicleShort(VehicleDto v)
+    {
+        var brand = v.VehicleModel?.VehicleBrand?.Name ?? v.Brand_name ?? "";
+        var model = v.VehicleModel?.Name ?? v.Model_name ?? "";
+        var plate = v.License_plate ?? "";
+        var parts = new[] { brand, model, plate }.Where(s => !string.IsNullOrWhiteSpace(s));
+        var s = string.Join(" ", parts);
+        return string.IsNullOrWhiteSpace(s) ? $"ТС #{v.ID_Vehicle}" : s;
+    }
+
+    private static string GetOrderStatusTone(string? status)
+    {
+        var s = (status ?? string.Empty).ToLowerInvariant();
+        if (s.Contains("достав"))
+            return "success";
+        if (s.Contains("отмен"))
+            return "danger";
+        if (s.Contains("в пути") || s.Contains("назнач"))
+            return "primary";
+        if (s.Contains("нов"))
+            return "warning";
+        return "neutral";
     }
 }

@@ -10,11 +10,14 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<ContextDB>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")), ServiceLifetime.Scoped);
+builder.Services.AddHttpClient();
 
 builder.Services.AddScoped<IUserLoginService, UserLoginService>();
 builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddScoped<ICourierService, CourierService>();
+builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<ILogisticsHubService, LogisticsHubService>();
 builder.Services.AddScoped<IShiftService, ShiftService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IReviewService, ReviewService>();
@@ -25,6 +28,15 @@ builder.Services.AddScoped<IChatService, ChatService>();
 builder.Services.AddScoped<IRoleService, RoleService>();
 builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<ILeadService, LeadService>();
+builder.Services.AddScoped<ISupportTicketService, SupportTicketService>();
+builder.Services.AddScoped<IServiceAreaZoneService, ServiceAreaZoneService>();
+builder.Services.AddScoped<IBillingService, BillingService>();
+builder.Services.AddScoped<ICommunicationTemplateService, CommunicationTemplateService>();
+builder.Services.AddScoped<IReportService, ReportService>();
+builder.Services.AddScoped<IScheduledReportService, ScheduledReportService>();
+builder.Services.AddScoped<ICompanySettingsService, CompanySettingsService>();
+builder.Services.AddSingleton<IUserPresenceService, UserPresenceService>();
+builder.Services.AddHostedService<ScheduledReportWorker>();
 
 // SignalR
 builder.Services.AddSignalR();
@@ -61,10 +73,20 @@ builder.Services.AddAuthentication(options =>
             {
                 context.Token = accessToken;
             }
+
+            if (string.IsNullOrEmpty(context.Token) &&
+                context.Request.Cookies.TryGetValue("auth_token", out var cookieToken) &&
+                !string.IsNullOrEmpty(cookieToken))
+            {
+                context.Token = cookieToken;
+            }
+
             return Task.CompletedTask;
         }
     };
 });
+
+builder.Services.AddAuthorization();
 
 builder.Services.AddControllers()
     .AddJsonOptions(options =>

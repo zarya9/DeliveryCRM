@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APIDeliveryCRM.Model
@@ -21,10 +21,16 @@ namespace APIDeliveryCRM.Model
         public int Category_id { get; set; }
         public VehicleCategory VehicleCategory { get; set; } = null!;
 
-        [Required]
+        /// <summary>Запись из справочника VehicleModels; может быть null, если марка/модель заданы вручную.</summary>
         [ForeignKey(nameof(VehicleModel))]
-        public int Model_id { get; set; }
-        public VehicleModel VehicleModel { get; set; } = null!;
+        public int? Model_id { get; set; }
+        public VehicleModel? VehicleModel { get; set; }
+
+        /// <summary>Марка ТС (ввод вручную логистом).</summary>
+        public string Brand_name { get; set; } = string.Empty;
+
+        /// <summary>Модель ТС (ввод вручную логистом).</summary>
+        public string Model_name { get; set; } = string.Empty;
 
         public DateOnly Year { get; set; }
         public string Color { get; set; }
@@ -45,10 +51,14 @@ namespace APIDeliveryCRM.Model
         public decimal FuelTank_Capacity { get; set; }
         public decimal Current_mileage { get; set; }
         public string Insurance_policy{ get; set; }
+        public DateTime? Insurance_expires_at { get; set; }
+        public DateTime? Registration_expires_at { get; set; }
+        public DateTime? Maintenance_due_at { get; set; }
+        public bool Is_available { get; set; } = true;
 
-        [Required]
+        /// <summary>Курьер, за которым закреплено ТС; null — в автопарке компании без назначения.</summary>
         [ForeignKey(nameof(CourierProfile))]
-        public int CurrentCourier_id { get; set; }
-        public CourierProfile CourierProfile {  get; set; } = null!;
+        public int? CurrentCourier_id { get; set; }
+        public CourierProfile? CourierProfile { get; set; }
     }
 }

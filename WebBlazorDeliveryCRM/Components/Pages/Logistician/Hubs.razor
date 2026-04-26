@@ -1,0 +1,66 @@
+@page "/logistician/hubs"
+@layout LogisticianLayout
+@using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
+@inject LogisticsHubsApiService HubsApi
+
+<PageTitle>Склады (хабы) — Логист</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Склады и сортировочные пункты</h1>
+    <p class="subtitle">Просмотр складов компании. Создание и изменение складов выполняет менеджер.</p>
+</div>
+
+<div class="dms-stat-grid mb-3">
+    <KpiCard Title="Доступных складов" Value="@((_list?.Count ?? 0).ToString())" />
+</div>
+
+<div class="dms-card mb-3">
+    <div class="alert alert-info mb-0">
+        Чтобы добавить склад, откройте раздел менеджера:
+        <a href="/manager/hubs" class="alert-link">Склады — менеджер</a>.
+    </div>
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Список складов компании</h2>
+    @if (_list?.Count > 0)
+    {
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Название</th>
+                        <th>Адрес</th>
+                        <th>ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var h in _list)
+                    {
+                        <tr>
+                            <td>@h.Name</td>
+                            <td>@(h.City ?? "—"), @h.Street</td>
+                            <td>@h.Id</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else
+    {
+        <p class="text-muted">Склады ещё не заведены.</p>
+    }
+</div>
+
+@code {
+    private List<LogisticsHubListItemDto>? _list;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _list = await HubsApi.GetMineAsync();
+        StateHasChanged();
+    }
+}

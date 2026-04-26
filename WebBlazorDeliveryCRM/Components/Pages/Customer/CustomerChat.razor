@@ -1,0 +1,7 @@
+@page "/customer/chat"
+@layout CustomerLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Клиент")]
+
+<PageTitle>Чат — Клиент</PageTitle>
+
+<CompanyChatPanel />

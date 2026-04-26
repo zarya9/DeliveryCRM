@@ -1,6 +1,42 @@
 @inherits LayoutComponentBase
+@using Blazored.Toast.Services
+@inject IJSRuntime JS
 
 <div class="login-layout">
+    <button type="button" class="dms-btn-outline login-theme-btn" @onclick="ToggleTheme" title="Сменить тему">
+        <span class="theme-toggle-symbol">@(_theme == "dark" ? "☀" : "☾")</span>
+    </button>
     @Body
 </div>
-<ToastView />
+<BlazoredToasts />
+
+@code {
+    private string _theme = "light";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _theme = await JS.InvokeAsync<string>("dmsTheme.get");
+            StateHasChanged();
+        }
+        catch
+        {
+            _theme = "light";
+        }
+    }
+
+    private async Task ToggleTheme()
+    {
+        try
+        {
+            _theme = await JS.InvokeAsync<string>("dmsTheme.toggle");
+            StateHasChanged();
+        }
+        catch
+        {
+            // ignore JS errors in readonly theme button
+        }
+    }
+}

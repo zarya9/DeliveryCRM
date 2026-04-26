@@ -13,18 +13,9 @@
 </div>
 
 <div class="dms-stat-grid">
-    <div class="dms-stat-card">
-        <div class="dms-stat-value">@_todayOrders</div>
-        <div class="dms-stat-label">Заказов сегодня</div>
-    </div>
-    <div class="dms-stat-card">
-        <div class="dms-stat-value">@_activeCouriers</div>
-        <div class="dms-stat-label">Активных курьеров</div>
-    </div>
-    <div class="dms-stat-card">
-        <div class="dms-stat-value">@_unassignedCount</div>
-        <div class="dms-stat-label">Ожидают назначения</div>
-    </div>
+    <KpiCard Title="Заказов сегодня" Value="@_todayOrders.ToString()" />
+    <KpiCard Title="Активных курьеров" Value="@_activeCouriers.ToString()" />
+    <KpiCard Title="Ожидают назначения" Value="@_unassignedCount.ToString()" />
 </div>
 
 <div class="dms-card">
@@ -47,7 +38,7 @@
                     <tr>
                         <td>@o.Order_Number</td>
                         <td>@o.Name</td>
-                        <td>@(o.OrderStatus?.Name ?? "—")</td>
+                        <td><StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@GetOrderStatusTone(o.OrderStatus?.Name)" /></td>
                         <td>@(o.CourierProfile != null ? $"{o.CourierProfile.User?.FName} {o.CourierProfile.User?.Name}" : "—")</td>
                         <td>@o.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
                     </tr>
@@ -79,5 +70,15 @@
         _activeCouriers = _couriers.Count(c => c.Is_online);
         _unassignedCount = _orders?.Count(o => o.Courier_id == null) ?? 0;
         StateHasChanged();
+    }
+
+    private static string GetOrderStatusTone(string? status)
+    {
+        var s = (status ?? string.Empty).ToLowerInvariant();
+        if (s.Contains("достав")) return "success";
+        if (s.Contains("отмен")) return "danger";
+        if (s.Contains("в пути") || s.Contains("назнач")) return "primary";
+        if (s.Contains("нов")) return "warning";
+        return "neutral";
     }
 }

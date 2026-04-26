@@ -1,0 +1,29 @@
+@page "/chat"
+@using System.Security.Claims
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (state.User.Identity?.IsAuthenticated != true)
+        {
+            Navigation.NavigateTo("/", forceLoad: true);
+            return;
+        }
+
+        var role = state.User.FindFirst(ClaimTypes.Role)?.Value
+                   ?? state.User.FindFirst("role")?.Value
+                   ?? "";
+
+        var url = role switch
+        {
+            "Менеджер" or "Админ" => "/manager/chat",
+            "Логист" => "/logistician/chat",
+            "Клиент" => "/customer/chat",
+            _ => "/manager/chat"
+        };
+        Navigation.NavigateTo(url, replace: true);
+    }
+}

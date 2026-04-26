@@ -1,18 +1,33 @@
 @page "/manager/employees"
 @layout ManagerLayout
+@implements IDisposable
 @using System.Security.Claims
+@using Microsoft.AspNetCore.SignalR.Client
+@using WebBlazorDeliveryCRM.Models
+@using Microsoft.AspNetCore.Components
 @using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
 @using static WebBlazorDeliveryCRM.Services.EmployeesApiService
 @inject EmployeesApiService EmployeesApi
 @inject RolesApiService RolesApi
+@inject UserPresenceApiService PresenceApi
+@inject ChatHubClientService ChatHub
 @inject AuthenticationStateProvider AuthStateProvider
 @inject AppNotificationService Notify
+@inject NavigationManager Navigation
 
 <PageTitle>Сотрудники — Менеджер</PageTitle>
 
 <div class="dms-page-header">
     <h1>Сотрудники компании</h1>
-    <p class="subtitle">Список сотрудников и создание новых аккаунтов</p>
+    <p class="subtitle">Список сотрудников и создание новых аккаунтов. Индикатор «в сети» обновляется по SignalR без перезагрузки страницы.</p>
+    <StatusBadge Text="@(_hubConnected ? "Presence realtime: подключено" : "Presence realtime: офлайн")"
+                 Tone="@(_hubConnected ? "success" : "warning")" />
+</div>
+
+<div class="dms-stat-grid mb-3">
+    <KpiCard Title="Всего сотрудников" Value="@_employees.Count.ToString()" />
+    <KpiCard Title="Сейчас в сети" Value="@_onlineUserIds.Count.ToString()" />
 </div>
 
 <div class="dms-card mb-3">
@@ -39,14 +54,17 @@
                 {
                     <tr style="cursor: pointer;" @onclick="() => OpenEmployee(e)">
                         <td>
-                            <span class="status-dot @(e.Is_Active ? "status-dot-online" : "status-dot-offline")"></span>
+                            <span class="status-dot @(_onlineUserIds.Contains(e.Id) ? "status-dot-online" : "status-dot-offline")"
+                                  title="@(_onlineUserIds.Contains(e.Id) ? "В сети" : "Не в сети")"></span>
                             @e.FullName
+                            <StatusBadge Text="@(_onlineUserIds.Contains(e.Id) ? "Онлайн" : "Офлайн")"
+                                         Tone="@(_onlineUserIds.Contains(e.Id) ? "success" : "neutral")" />
                             @if (e.Id == _currentUserId)
                             {
                                 <span class="text-muted ms-1">(Вы)</span>
                             }
                         </td>
-                        <td>@e.Role</td>
+                        <td><StatusBadge Text="@e.Role" Tone="@GetRoleTone(e.Role)" /></td>
                         <td>@e.Email</td>
                         <td>@e.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
                     </tr>
@@ -124,10 +142,11 @@
             </div>
             <div class="row g-3 align-items-center">
                 <div class="col-md-3 text-center">
-                    <img src="@(_selectedEmployeeAvatar ?? "/avatars/default.png")"
+                    <img src="@_avatarSrc"
                          alt="Аватар"
                          class="img-fluid rounded-circle"
-                         style="max-width: 96px;" />
+                         style="max-width: 96px;"
+                         @onerror="OnAvatarError" />
                 </div>
                 <div class="col-md-9">
                     <p class="mb-1"><strong>ФИО:</strong> @_selectedEmployee.FullName</p>
@@ -137,7 +156,7 @@
                         <p class="mb-1"><strong>Email:</strong> @_selectedEmployee.Email</p>
                     }
                     <p class="mb-1"><strong>Создан:</strong> @_selectedEmployee.Created_at.ToString("dd.MM.yyyy HH:mm")</p>
-                    <button class="btn btn-outline-primary mt-2">Написать</button>
+                    <button type="button" class="btn btn-outline-primary mt-2" @onclick="GoToChat">Написать</button>
                 </div>
             </div>
         </div>
@@ -150,7 +169,7 @@
     private int _companyId;
     private int? _currentUserId;
     private EmployeeDto? _selectedEmployee;
-    private string? _selectedEmployeeAvatar;
+    private string _avatarSrc = "/avatars/default.png";
 
     private string _fName = "";
     private string _name = "";
@@ -163,6 +182,9 @@
     private string? _error;
     private string? _success;
     private string _searchText = string.Empty;
+    private HashSet<int> _onlineUserIds = new();
+    private IDisposable? _presenceHubSubscription;
+    private bool _hubConnected;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -185,12 +207,45 @@
 
         _roles = await RolesApi.GetAllAsync();
         await LoadEmployees();
+        await LoadPresenceAsync();
+        await StartPresenceSignalRAsync();
         StateHasChanged();
+    }
+
+    private async Task StartPresenceSignalRAsync()
+    {
+        try
+        {
+            var conn = await ChatHub.GetConnectionAsync();
+            await ChatHub.StartAsync();
+            _hubConnected = conn.State == HubConnectionState.Connected;
+            _presenceHubSubscription = conn.On<UserPresenceChangedDto>("UserPresenceChanged", payload =>
+            {
+                return InvokeAsync(() =>
+                {
+                    if (payload.Online)
+                        _onlineUserIds.Add(payload.UserId);
+                    else
+                        _onlineUserIds.Remove(payload.UserId);
+                    StateHasChanged();
+                });
+            });
+        }
+        catch
+        {
+            /* SignalR недоступен — остаётся актуальный снимок из LoadPresenceAsync */
+            _hubConnected = false;
+        }
     }
 
     private async Task LoadEmployees()
     {
         _employees = await EmployeesApi.GetByCompanyAsync(_companyId);
+    }
+
+    private async Task LoadPresenceAsync()
+    {
+        _onlineUserIds = await PresenceApi.GetOnlineUserIdsAsync(_companyId);
     }
 
     private async Task SaveEmployee()
@@ -295,12 +350,40 @@
     private void OpenEmployee(EmployeeDto e)
     {
         _selectedEmployee = e;
-        _selectedEmployeeAvatar = "/avatars/default.png"; // пока один аватар по умолчанию
+        _avatarSrc = $"/avatars/{e.Id}.png";
+    }
+
+    private void OnAvatarError()
+    {
+        if (_avatarSrc != "/avatars/default.png")
+            _avatarSrc = "/avatars/default.png";
+    }
+
+    private void GoToChat()
+    {
+        Navigation.NavigateTo("/manager/chat");
     }
 
     private void CloseEmployee()
     {
         _selectedEmployee = null;
+    }
+
+    private static string GetRoleTone(string? role)
+    {
+        var r = (role ?? string.Empty).ToLowerInvariant();
+        if (r.Contains("админ"))
+            return "danger";
+        if (r.Contains("менедж"))
+            return "primary";
+        if (r.Contains("логист"))
+            return "info";
+        return "neutral";
+    }
+
+    public void Dispose()
+    {
+        _presenceHubSubscription?.Dispose();
     }
 }
 

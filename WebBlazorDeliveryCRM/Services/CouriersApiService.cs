@@ -32,4 +32,42 @@ public class CouriersApiService
     {
         return await _http.GetFromJsonAsync<List<OrderDto>>($"/api/Couriers/{courierId}/orders");
     }
+
+    public async Task<List<VehicleDto>?> GetVehiclesByCompanyAsync(int companyId)
+    {
+        try
+        {
+            var resp = await _http.GetAsync($"/api/Couriers/vehicles?companyId={companyId}");
+            if (!resp.IsSuccessStatusCode)
+                return null;
+            return await resp.Content.ReadFromJsonAsync<List<VehicleDto>>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Назначить ТС курьеру (CurrentCourier_id на стороне API).</summary>
+    public async Task<(bool ok, string? error)> AssignVehicleAsync(int courierProfileId, int vehicleId)
+    {
+        var resp = await _http.PostAsync($"/api/Couriers/{courierProfileId}/assign-vehicle?vehicleId={vehicleId}", null);
+        if (resp.IsSuccessStatusCode)
+            return (true, null);
+        var body = await resp.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body);
+    }
+
+    public async Task<(bool ok, string? error)> UpdateDocumentsAsync(int courierProfileId, string? driverLicense, string? passportData)
+    {
+        var resp = await _http.PutAsJsonAsync($"/api/Couriers/{courierProfileId}/documents", new
+        {
+            driverLicense,
+            passportData
+        });
+        if (resp.IsSuccessStatusCode)
+            return (true, null);
+        var body = await resp.Content.ReadAsStringAsync();
+        return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body);
+    }
 }

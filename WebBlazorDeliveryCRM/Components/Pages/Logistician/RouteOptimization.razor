@@ -2,23 +2,69 @@
 @layout LogisticianLayout
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using System.Net.Http.Json
 @inject CouriersApiService CouriersApi
+@inject OrdersApiService OrdersApi
 @inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject IConfiguration Configuration
+@inject IHttpClientFactory HttpClientFactory
 
 <PageTitle>Маршруты — Логист</PageTitle>
 
 <div class="dms-page-header">
     <h1>Карта оптимизации маршрутов</h1>
-    <p class="subtitle">Курьеры на карте, построение маршрутов</p>
+    <p class="subtitle">Курьеры на карте; маршрут — OSRM + Leaflet Routing Machine (панель шагов на русском, как в классическом LRM).</p>
 </div>
 
 <div class="dms-card mb-3">
     <h2 class="dms-card-title">Карта курьеров и маршрутов</h2>
     <p class="text-muted">
-        Позиции курьеров в реальном времени (координаты с API).
-        Щёлкните по двум точкам на карте: сначала старт, затем финиш — между ними построится маршрут по алгоритму A*.
+        Позиции курьеров (API). Два клика по карте: <strong>старт</strong> и <strong>финиш</strong> — строится маршрут по дорогам; справа — пошаговые инструкции на выбранном языке (по умолчанию русский), как при использовании <code>L.Routing.control</code> + <code>language</code> / <code>Formatter</code> из <a href="https://ru.stackoverflow.com/questions/1597647/" target="_blank" rel="noopener">обсуждения Leaflet + OSM</a>.
     </p>
     <div id="logistician-map" style="height: 480px; width: 100%; border-radius: 8px;"></div>
+</div>
+
+<div class="dms-card mb-3">
+    <h2 class="dms-card-title">Маршрут по адресам (любое количество точек)</h2>
+    <p class="text-muted">
+        Добавьте минимум две точки. Адреса геокодируются через Nominatim, затем маршрут строится по дорогам через OSRM.
+    </p>
+    @for (var i = 0; i < _routePoints.Count; i++)
+    {
+        var idx = i;
+        <div class="d-flex gap-2 align-items-center mb-2 p-2 border rounded flex-wrap">
+            <span class="text-muted" title="Порядок точек">↕</span>
+            <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn btn-outline-secondary" disabled="@(idx == 0)" @onclick="(() => MovePointUp(idx))" title="Выше">↑</button>
+                <button type="button" class="btn btn-outline-secondary" disabled="@(idx >= _routePoints.Count - 1)" @onclick="(() => MovePointDown(idx))" title="Ниже">↓</button>
+            </div>
+            <input class="form-control"
+                   placeholder="Введите адрес точки..."
+                   @bind="_routePoints[idx].Address"
+                   disabled="@(_routePoints[idx].Source == "courier")" />
+            <span class="badge text-bg-secondary">@_routePoints[idx].Source</span>
+            <button class="btn btn-outline-danger"
+                    disabled="@(_routePoints.Count <= 2)"
+                    @onclick="(() => RemovePoint(idx))">
+                Удалить
+            </button>
+        </div>
+    }
+    <div class="d-flex gap-2 mt-3">
+        <button class="btn btn-outline-secondary" @onclick="AddAddress">+ Точка</button>
+        <button class="btn btn-outline-info" disabled="@_isBuildingRoute" @onclick="ImportFromCouriersAsync">Импорт из курьеров</button>
+        <button class="btn btn-outline-info" disabled="@_isBuildingRoute" @onclick="ImportFromOrdersAsync">Импорт из заказов</button>
+        <button class="btn btn-outline-warning" disabled="@_isBuildingRoute" @onclick="OptimizeRouteOrderAsync">Оптимизировать порядок</button>
+        <button class="btn btn-primary" disabled="@_isBuildingRoute" @onclick="BuildRouteFromPointsAsync">
+            @(_isBuildingRoute ? "Строю..." : "Построить маршрут")
+        </button>
+        <button class="btn btn-outline-secondary" @onclick="ClearCustomRouteAsync">Очистить маршрут</button>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(_routeMessage))
+    {
+        <div class="mt-2 text-muted">@_routeMessage</div>
+    }
 </div>
 
 <div class="dms-card">
@@ -39,7 +85,8 @@
             <tbody>
                 @foreach (var c in _couriers)
                 {
-                    <tr>
+                    <tr style="cursor: pointer;" title="Карточка курьера"
+                        @onclick="@(() => Navigation.NavigateTo($"/logistician/couriers/{c.ID_CourierProfile}"))">
                         <td>@(c.User?.FName) @(c.User?.Name)</td>
                         <td>@c.Rating</td>
                         <td>@(c.CourierStatus?.Name ?? "—")</td>
@@ -59,6 +106,14 @@
 
 @code {
     private List<CourierProfileDto>? _couriers;
+    private readonly List<RoutePointInput> _routePoints = new()
+    {
+        new() { Address = "Москва, Красная площадь", Source = "manual" },
+        new() { Address = "Москва, ВДНХ", Source = "manual" }
+    };
+    private readonly Dictionary<string, (double lat, double lon)> _geocodeCache = new(StringComparer.OrdinalIgnoreCase);
+    private bool _isBuildingRoute;
+    private string? _routeMessage;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -78,10 +133,275 @@
                 .ToList();
             try
             {
-                await JS.InvokeVoidAsync("leafletMap.init", "logistician-map", 55.7558, 37.6173, 10, null);
+                var osrmUrl = Configuration["Osrm:RouterBaseUrl"];
+                var routeLang = Configuration["Map:RouteLanguage"];
+                await JS.InvokeVoidAsync("leafletMap.init", "logistician-map", 55.7558, 37.6173, 10, null, osrmUrl, true, routeLang);
                 await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
             }
             catch { /* map may fail */ }
         }
+    }
+
+    private void AddAddress() => _routePoints.Add(new RoutePointInput { Address = string.Empty, Source = "manual" });
+
+    private void RemovePoint(int index)
+    {
+        if (index < 0 || index >= _routePoints.Count) return;
+        if (_routePoints.Count <= 2) return;
+        _routePoints.RemoveAt(index);
+    }
+
+    private void MovePointUp(int index)
+    {
+        if (index <= 0 || index >= _routePoints.Count) return;
+        var item = _routePoints[index];
+        _routePoints.RemoveAt(index);
+        _routePoints.Insert(index - 1, item);
+    }
+
+    private void MovePointDown(int index)
+    {
+        if (index < 0 || index >= _routePoints.Count - 1) return;
+        var item = _routePoints[index];
+        _routePoints.RemoveAt(index);
+        _routePoints.Insert(index + 1, item);
+    }
+
+    private async Task BuildRouteFromPointsAsync()
+    {
+        var activePoints = _routePoints
+            .Where(p => p.Lat.HasValue || p.Lon.HasValue || !string.IsNullOrWhiteSpace(p.Address))
+            .ToList();
+
+        if (activePoints.Count < 2)
+        {
+            _routeMessage = "Нужно минимум две заполненные точки.";
+            return;
+        }
+
+        _isBuildingRoute = true;
+        _routeMessage = "Геокодирую адреса...";
+        StateHasChanged();
+
+        try
+        {
+            var points = new List<object>();
+            for (var i = 0; i < activePoints.Count; i++)
+            {
+                var p = await ResolvePointCoordinatesAsync(activePoints[i]);
+                if (p is null)
+                {
+                    _routeMessage = $"Не удалось найти точку: {activePoints[i].Address}";
+                    return;
+                }
+
+                points.Add(new
+                {
+                    lat = p.Value.lat,
+                    lon = p.Value.lon,
+                    title = $"{i + 1}. {activePoints[i].Address}"
+                });
+            }
+
+            await JS.InvokeVoidAsync("leafletMap.setRouteWaypoints", points);
+            _routeMessage = $"Маршрут построен: {points.Count} точек.";
+        }
+        catch
+        {
+            _routeMessage = "Ошибка построения маршрута.";
+        }
+        finally
+        {
+            _isBuildingRoute = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ImportFromCouriersAsync()
+    {
+        if (_couriers == null)
+            _couriers = await CouriersApi.GetAllAsync(null);
+
+        var items = _couriers?
+            .Where(c => c.Current_lat != 0 || c.Current_lon != 0)
+            .Select(c => new RoutePointInput
+            {
+                Address = $"{c.User?.FName} {c.User?.Name}".Trim(),
+                Source = "courier",
+                Lat = (double)c.Current_lat,
+                Lon = (double)c.Current_lon
+            })
+            .ToList() ?? new List<RoutePointInput>();
+
+        if (items.Count == 0)
+        {
+            _routeMessage = "Не найдено координат курьеров для импорта.";
+            return;
+        }
+
+        _routePoints.Clear();
+        _routePoints.AddRange(items);
+        _routeMessage = $"Импортировано из курьеров: {items.Count} точек.";
+    }
+
+    private async Task ImportFromOrdersAsync()
+    {
+        var orders = await OrdersApi.GetAllAsync(null) ?? new List<OrderDto>();
+        var addresses = orders
+            .Select(o => o.ClientProfile?.Default_address?.Trim())
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(50)
+            .ToList();
+
+        if (addresses.Count == 0)
+        {
+            _routeMessage = "У заказов не найдено адресов для импорта.";
+            return;
+        }
+
+        _routePoints.Clear();
+        foreach (var a in addresses)
+        {
+            _routePoints.Add(new RoutePointInput
+            {
+                Address = a!,
+                Source = "order"
+            });
+        }
+        _routeMessage = $"Импортировано из заказов: {_routePoints.Count} точек.";
+    }
+
+    private async Task OptimizeRouteOrderAsync()
+    {
+        var activePoints = _routePoints
+            .Where(p => p.Lat.HasValue || p.Lon.HasValue || !string.IsNullOrWhiteSpace(p.Address))
+            .ToList();
+
+        if (activePoints.Count < 3)
+        {
+            _routeMessage = "Для оптимизации нужно минимум 3 точки.";
+            return;
+        }
+
+        _isBuildingRoute = true;
+        _routeMessage = "Оптимизирую порядок точек...";
+        StateHasChanged();
+        try
+        {
+            for (var i = 0; i < activePoints.Count; i++)
+            {
+                var resolved = await ResolvePointCoordinatesAsync(activePoints[i]);
+                if (resolved is null)
+                {
+                    _routeMessage = $"Не удалось геокодировать: {activePoints[i].Address}";
+                    return;
+                }
+            }
+
+            var ordered = OptimizeNearestNeighbor(activePoints);
+            _routePoints.Clear();
+            _routePoints.AddRange(ordered);
+            _routeMessage = "Порядок точек оптимизирован (ближайший сосед).";
+        }
+        finally
+        {
+            _isBuildingRoute = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ClearCustomRouteAsync()
+    {
+        _routeMessage = null;
+        await JS.InvokeVoidAsync("leafletMap.clearRoute");
+    }
+
+    private async Task<(double lat, double lon)?> ResolvePointCoordinatesAsync(RoutePointInput p)
+    {
+        if (p.Lat.HasValue && p.Lon.HasValue)
+            return (p.Lat.Value, p.Lon.Value);
+
+        if (string.IsNullOrWhiteSpace(p.Address))
+            return null;
+
+        var geo = await GeocodeAddressAsync(p.Address);
+        if (geo is null) return null;
+        p.Lat = geo.Value.lat;
+        p.Lon = geo.Value.lon;
+        return geo;
+    }
+
+    private async Task<(double lat, double lon)?> GeocodeAddressAsync(string address)
+    {
+        try
+        {
+            if (_geocodeCache.TryGetValue(address, out var cached))
+                return cached;
+
+            var encoded = Uri.EscapeDataString(address);
+            var url = $"https://nominatim.openstreetmap.org/search?format=json&q={encoded}&accept-language=ru";
+            var client = HttpClientFactory.CreateClient("UnauthorizedClient");
+            client.DefaultRequestHeaders.UserAgent.Clear();
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("WebBlazorDeliveryCRM/1.0");
+
+            var response = await client.GetFromJsonAsync<NominatimResponse[]>(url);
+            if (response is { Length: > 0 })
+            {
+                var res = (response[0].lat, response[0].lon);
+                _geocodeCache[address] = res;
+                return res;
+            }
+        }
+        catch
+        {
+            // ignored: user gets friendly message in BuildRouteFromAddressesAsync
+        }
+        return null;
+    }
+
+    private static List<RoutePointInput> OptimizeNearestNeighbor(List<RoutePointInput> points)
+    {
+        var remaining = new List<RoutePointInput>(points.Skip(1));
+        var ordered = new List<RoutePointInput> { points[0] };
+        while (remaining.Count > 0)
+        {
+            var current = ordered[^1];
+            var nearest = remaining
+                .OrderBy(p => HaversineKm(current.Lat!.Value, current.Lon!.Value, p.Lat!.Value, p.Lon!.Value))
+                .First();
+            ordered.Add(nearest);
+            remaining.Remove(nearest);
+        }
+        return ordered;
+    }
+
+    private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double R = 6371.0;
+        var dLat = DegreesToRadians(lat2 - lat1);
+        var dLon = DegreesToRadians(lon2 - lon1);
+        var a =
+            Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+            Math.Cos(DegreesToRadians(lat1)) * Math.Cos(DegreesToRadians(lat2)) *
+            Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+        return R * c;
+    }
+
+    private static double DegreesToRadians(double deg) => deg * Math.PI / 180.0;
+
+    private sealed class NominatimResponse
+    {
+        public double lat { get; set; }
+        public double lon { get; set; }
+    }
+
+    private sealed class RoutePointInput
+    {
+        public string Address { get; set; } = string.Empty;
+        public string Source { get; set; } = "manual";
+        public double? Lat { get; set; }
+        public double? Lon { get; set; }
     }
 }

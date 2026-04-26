@@ -1,0 +1,144 @@
+@page "/manager/hubs"
+@layout ManagerLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Менеджер,Админ")]
+@using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
+@inject LogisticsHubsApiService HubsApi
+@inject AppNotificationService Notify
+
+<PageTitle>Склады (хабы) — Менеджер</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Склады и сортировочные пункты</h1>
+    <p class="subtitle">Создание складов доступно менеджеру. Используются для маршрутов «через хабы».</p>
+</div>
+
+<div class="dms-stat-grid mb-3">
+    <KpiCard Title="Складов в системе" Value="@((_list?.Count ?? 0).ToString())" />
+</div>
+
+<div class="dms-card mb-3">
+    <h2 class="dms-card-title">Новый склад</h2>
+    <div class="row g-3">
+        <div class="col-md-4">
+            <label class="form-label">Название</label>
+            <input class="form-control" @bind="_name" placeholder="Склад Север" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Город</label>
+            <input class="form-control" @bind="_city" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Улица</label>
+            <input class="form-control" @bind="_street" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Дом</label>
+            <input class="form-control" @bind="_house" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Квартира / офис</label>
+            <input class="form-control" @bind="_flat" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Регион</label>
+            <input class="form-control" @bind="_region" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Индекс</label>
+            <input class="form-control" @bind="_postal" />
+        </div>
+        <div class="col-12">
+            <button type="button" class="btn btn-primary dms-btn-primary mt-1" disabled="@_saving" @onclick="SaveHub">Сохранить склад</button>
+        </div>
+    </div>
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Список складов компании</h2>
+    @if (_list?.Count > 0)
+    {
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Название</th>
+                        <th>Адрес</th>
+                        <th>ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var h in _list)
+                    {
+                        <tr>
+                            <td>@h.Name</td>
+                            <td>@(h.City ?? "—"), @h.Street</td>
+                            <td>@h.Id</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else
+    {
+        <p class="text-muted">Склады ещё не заведены.</p>
+    }
+</div>
+
+@code {
+    private List<LogisticsHubListItemDto>? _list;
+    private string _name = "";
+    private string _street = "";
+    private string _house = "";
+    private string? _flat;
+    private string? _city;
+    private string? _region;
+    private string? _postal;
+    private bool _saving;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await Reload();
+        StateHasChanged();
+    }
+
+    private async Task Reload()
+    {
+        _list = await HubsApi.GetMineAsync();
+    }
+
+    private async Task SaveHub()
+    {
+        if (string.IsNullOrWhiteSpace(_name) || string.IsNullOrWhiteSpace(_street) || string.IsNullOrWhiteSpace(_house))
+        {
+            Notify.ShowWarning("Укажите название, улицу и дом.");
+            return;
+        }
+        _saving = true;
+        try
+        {
+            var ok = await HubsApi.CreateAsync(new CreateLogisticsHubApiRequest
+            {
+                Name = _name.Trim(),
+                Street = _street.Trim(),
+                House = _house.Trim(),
+                Flat = _flat,
+                City = _city,
+                Region = _region,
+                PostalCode = _postal
+            });
+            if (ok)
+            {
+                Notify.ShowSuccess("Склад создан.");
+                _name = _street = _house = "";
+                _flat = _city = _region = _postal = null;
+                await Reload();
+            }
+            else Notify.ShowError("Не удалось создать склад.");
+        }
+        catch (Exception ex) { Notify.ShowError(ex.Message); }
+        finally { _saving = false; }
+    }
+}

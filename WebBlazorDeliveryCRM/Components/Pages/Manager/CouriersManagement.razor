@@ -2,44 +2,58 @@
 @layout ManagerLayout
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
 @inject CouriersApiService CouriersApi
+@inject NavigationManager Navigation
 
 <PageTitle>Курьеры — Менеджер</PageTitle>
 
 <div class="dms-page-header">
     <h1>Управление курьерами</h1>
-    <p class="subtitle">Список курьеров компании</p>
+    <p class="subtitle">Список курьеров — откройте карточку для редактирования документов и назначения ТС</p>
 </div>
 
 <div class="dms-card">
-    <h2 class="dms-card-title">Курьеры</h2>
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <h2 class="dms-card-title mb-0">Курьеры</h2>
+        <input class="form-control"
+               style="max-width: 260px;"
+               placeholder="Поиск по ФИО"
+               value="@_searchText"
+               @oninput="OnSearchInput" />
+    </div>
     @if (_couriers != null && _couriers.Count > 0)
     {
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>ФИО</th>
-                    <th>Рейтинг</th>
-                    <th>Статус</th>
-                    <th>Онлайн</th>
-                    <th>Доставок</th>
-                    <th>Последняя активность</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var c in _couriers)
-                {
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
                     <tr>
-                        <td>@(c.User?.FName) @(c.User?.Name)</td>
-                        <td>@c.Rating</td>
-                        <td>@(c.CourierStatus?.Name ?? "—")</td>
-                        <td>@(c.Is_online ? "Да" : "Нет")</td>
-                        <td>@c.Total_deliveries</td>
-                        <td>@c.LastActivity_at.ToString("dd.MM.yyyy HH:mm")</td>
+                        <th>ФИО</th>
+                        <th>Рейтинг</th>
+                        <th>Доставок</th>
+                        <th>KPI</th>
+                        <th>Активность</th>
                     </tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (var c in _couriers.Where(FilterCourier))
+                    {
+                        <tr style="cursor: pointer;" title="Открыть карточку"
+                            @onclick="@(() => Navigation.NavigateTo($"/manager/couriers/{c.ID_CourierProfile}"))">
+                            <td>
+                                <span class="status-dot @(c.Is_online ? "status-dot-online" : "status-dot-offline")"></span>
+                                @(c.User?.FName) @(c.User?.Name)
+                                <StatusBadge Text="@(c.Is_online ? "Онлайн" : "Офлайн")" Tone="@(c.Is_online ? "success" : "neutral")" />
+                            </td>
+                            <td>@c.Rating.ToString("0.0")</td>
+                            <td>@c.Total_deliveries</td>
+                            <td>@KpiLabel(c)</td>
+                            <td>@c.LastActivity_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     }
     else
     {
@@ -49,11 +63,33 @@
 
 @code {
     private List<CourierProfileDto>? _couriers;
+    private string _searchText = string.Empty;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
         _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
         StateHasChanged();
+    }
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        _searchText = e.Value?.ToString() ?? "";
+    }
+
+    private bool FilterCourier(CourierProfileDto c)
+    {
+        if (string.IsNullOrWhiteSpace(_searchText)) return true;
+        var q = _searchText.Trim().ToLowerInvariant();
+        var fullName = $"{c.User?.FName} {c.User?.Name}".ToLowerInvariant();
+        return fullName.Contains(q);
+    }
+
+    private static string KpiLabel(CourierProfileDto c)
+    {
+        if (c.Total_deliveries <= 0)
+            return "—";
+        var r = (double)c.Rating;
+        return $"{r:0.0} / {c.Total_deliveries} доставок";
     }
 }

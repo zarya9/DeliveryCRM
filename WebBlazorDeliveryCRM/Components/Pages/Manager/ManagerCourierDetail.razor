@@ -1,0 +1,284 @@
+@page "/manager/couriers/{CourierId:int}"
+@layout ManagerLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Менеджер,Админ")]
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject CouriersApiService CouriersApi
+@inject NavigationManager Navigation
+@inject AppNotificationService Notify
+
+<PageTitle>Курьер — Менеджер</PageTitle>
+
+<div class="dms-page-header">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <a href="/manager/couriers" class="btn btn-outline-secondary btn-sm">← К списку</a>
+    </div>
+    <h1>Карточка курьера</h1>
+    <p class="subtitle">Документы, транспорт и заказы</p>
+</div>
+
+@if (_loading)
+{
+    <p class="text-muted">Загрузка…</p>
+}
+else if (_courier is null)
+{
+    <div class="alert alert-warning">Курьер не найден или нет доступа.</div>
+}
+else
+{
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <div class="dms-card h-100">
+                <h2 class="dms-card-title">Профиль</h2>
+                <p class="mb-1"><strong>ФИО:</strong> @FullName(_courier)</p>
+                <p class="mb-1"><strong>Рейтинг:</strong> @_courier.Rating</p>
+                <p class="mb-1"><strong>Доставок всего:</strong> @_courier.Total_deliveries</p>
+                <p class="mb-1"><strong>Последняя активность:</strong> @_courier.LastActivity_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</p>
+                <p class="mb-0"><strong>Координаты:</strong> @_courier.Current_lat.ToString("0.00"), @_courier.Current_lon.ToString("0.00")</p>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="dms-card h-100">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                    <h2 class="dms-card-title mb-0">Документы и допуски</h2>
+                    @if (!_editingDocs)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => _editingDocs = true">Редактировать</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-sm btn-primary" disabled="@_savingDocs" @onclick="SaveDocumentsAsync">
+                            @(_savingDocs ? "Сохранение…" : "Сохранить")
+                        </button>
+                    }
+                </div>
+                @if (!_editingDocs)
+                {
+                    <p class="mb-1"><strong>Категория ТС (допуск):</strong> @(CategoryName(_courier))</p>
+                    <p class="mb-1"><strong>График работы:</strong> @(ScheduleName(_courier))</p>
+                    <p class="mb-1"><strong>Водительское удостоверение:</strong> @(string.IsNullOrWhiteSpace(_courier.DriverLicense) ? "—" : _courier.DriverLicense)</p>
+                    <p class="mb-0"><strong>Паспорт / данные:</strong> @(string.IsNullOrWhiteSpace(_courier.Passport_data) ? "—" : _courier.Passport_data)</p>
+                }
+                else
+                {
+                    <p class="small text-muted">Категория ТС и график задаются в справочниках; здесь можно обновить текст документов.</p>
+                    <div class="mb-2">
+                        <label class="form-label">Водительское удостоверение</label>
+                        <input class="form-control" @bind="_editDriverLicense" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Паспорт / данные</label>
+                        <textarea class="form-control" rows="3" @bind="_editPassport"></textarea>
+                    </div>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CancelEditDocs">Отмена</button>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="dms-card mt-3">
+        <h2 class="dms-card-title">Автомобиль</h2>
+        @if (_assignedVehicles.Count > 0)
+        {
+            <p class="mb-2"><strong>Сейчас закреплено:</strong></p>
+            <ul class="mb-3">
+                @foreach (var v in _assignedVehicles)
+                {
+                    <li>@FormatVehicleLabel(v)</li>
+                }
+            </ul>
+        }
+        else
+        {
+            <p class="text-muted mb-3">За курьером не закреплено ни одного ТС в системе.</p>
+        }
+
+        <label class="form-label">Назначить / сменить автомобиль</label>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <select class="form-select" style="max-width: 420px;" @bind="_selectedVehicleId">
+                <option value="0">— выберите ТС компании —</option>
+                @foreach (var v in _vehicles.OrderBy(x => x.License_plate))
+                {
+                    <option value="@v.ID_Vehicle">@FormatVehicleLabel(v)</option>
+                }
+            </select>
+            <button type="button" class="btn btn-primary dms-btn-primary" disabled="@(_assigning || _selectedVehicleId == 0)" @onclick="AssignVehicle">
+                @(_assigning ? "Сохранение…" : "Назначить")
+            </button>
+        </div>
+        <p class="text-muted small mt-2 mb-0">Текущий водитель на выбранном ТС будет заменён на этого курьера.</p>
+    </div>
+
+    <div class="dms-card mt-3">
+        <h2 class="dms-card-title">Заказы, назначенные курьеру</h2>
+        @if (_orders is { Count: > 0 })
+        {
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>№</th>
+                            <th>Название</th>
+                            <th>Статус</th>
+                            <th>Создан</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var o in _orders)
+                        {
+                            <tr>
+                                <td>@o.Order_Number</td>
+                                <td>@o.Name</td>
+                                <td>@(o.OrderStatus?.Name ?? "—")</td>
+                                <td>@o.Created_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else
+        {
+            <p class="text-muted mb-0">Нет заказов в работе у этого курьера.</p>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public int CourierId { get; set; }
+
+    private CourierProfileDto? _courier;
+    private List<VehicleDto> _vehicles = new();
+    private List<VehicleDto> _assignedVehicles = new();
+    private List<OrderDto>? _orders;
+    private int _selectedVehicleId;
+    private bool _assigning;
+    private bool _loading = true;
+    private bool _editingDocs;
+    private bool _savingDocs;
+    private string _editDriverLicense = "";
+    private string _editPassport = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _courier = await CouriersApi.GetProfileAsync(CourierId);
+            if (_courier is null)
+            {
+                _vehicles = new();
+                _assignedVehicles = new();
+                _orders = new();
+                return;
+            }
+
+            _vehicles = await CouriersApi.GetVehiclesByCompanyAsync(_courier.Company_id) ?? new();
+            _assignedVehicles = _vehicles.Where(v => v.CurrentCourier_id == CourierId).ToList();
+            _orders = await CouriersApi.GetActiveOrdersAsync(CourierId) ?? new();
+            if (_assignedVehicles.Count == 1)
+                _selectedVehicleId = _assignedVehicles[0].ID_Vehicle;
+
+            _editDriverLicense = _courier.DriverLicense ?? "";
+            _editPassport = _courier.Passport_data ?? "";
+            _editingDocs = false;
+        }
+        catch (Exception ex)
+        {
+            Notify.ShowError($"Ошибка загрузки карточки курьера: {ex.Message}");
+            _vehicles = new();
+            _assignedVehicles = new();
+            _orders = new();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void CancelEditDocs()
+    {
+        _editingDocs = false;
+        if (_courier is not null)
+        {
+            _editDriverLicense = _courier.DriverLicense ?? "";
+            _editPassport = _courier.Passport_data ?? "";
+        }
+    }
+
+    private async Task SaveDocumentsAsync()
+    {
+        if (_courier is null) return;
+        _savingDocs = true;
+        try
+        {
+            var (ok, err) = await CouriersApi.UpdateDocumentsAsync(CourierId, _editDriverLicense, _editPassport);
+            if (ok)
+            {
+                Notify.ShowSuccess("Данные сохранены.");
+                _editingDocs = false;
+                await LoadAsync();
+            }
+            else
+                Notify.ShowError(string.IsNullOrWhiteSpace(err) ? "Не удалось сохранить." : err);
+        }
+        finally
+        {
+            _savingDocs = false;
+        }
+    }
+
+    private async Task AssignVehicle()
+    {
+        if (_selectedVehicleId <= 0 || _courier is null)
+        {
+            Notify.ShowWarning("Выберите транспортное средство.");
+            return;
+        }
+        _assigning = true;
+        try
+        {
+            var (ok, err) = await CouriersApi.AssignVehicleAsync(CourierId, _selectedVehicleId);
+            if (ok)
+            {
+                Notify.ShowSuccess("Автомобиль назначен.");
+                await LoadAsync();
+            }
+            else
+                Notify.ShowError(string.IsNullOrWhiteSpace(err) ? "Не удалось назначить ТС." : err);
+        }
+        catch (Exception ex)
+        {
+            Notify.ShowError(ex.Message);
+        }
+        finally
+        {
+            _assigning = false;
+        }
+    }
+
+    private static string FullName(CourierProfileDto c)
+        => $"{c.User?.FName} {c.User?.Name}".Trim();
+
+    private static string CategoryName(CourierProfileDto c)
+        => c.VehicleCategory?.Name ?? c.VehicleCategoryName ?? "—";
+
+    private static string ScheduleName(CourierProfileDto c)
+        => c.ScheduleType?.Name ?? c.ScheduleName ?? "—";
+
+    private static string FormatVehicleLabel(VehicleDto v)
+    {
+        var brand = v.VehicleModel?.VehicleBrand?.Name ?? v.Brand_name ?? "";
+        var model = v.VehicleModel?.Name ?? v.Model_name ?? "";
+        var plate = v.License_plate ?? "";
+        var parts = new[] { brand, model, plate }.Where(s => !string.IsNullOrWhiteSpace(s));
+        var s = string.Join(" ", parts);
+        return string.IsNullOrWhiteSpace(s) ? $"ТС #{v.ID_Vehicle}" : s;
+    }
+}

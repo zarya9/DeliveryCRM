@@ -1,0 +1,14 @@
+<div class="dms-card dms-stat-card h-100">
+    <div class="dms-stat-title">@Title</div>
+    <div class="dms-stat-value">@Value</div>
+    @if (!string.IsNullOrWhiteSpace(Meta))
+    {
+        <div class="dms-stat-meta">@Meta</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public string? Meta { get; set; }
+}

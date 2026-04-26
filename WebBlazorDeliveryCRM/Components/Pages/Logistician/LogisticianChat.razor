@@ -1,0 +1,7 @@
+@page "/logistician/chat"
+@layout LogisticianLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Логист,Админ")]
+
+<PageTitle>Чат — Логист</PageTitle>
+
+<CompanyChatPanel />

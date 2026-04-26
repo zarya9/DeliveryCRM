@@ -1,9 +1,15 @@
 @page "/manager/analytics"
 @layout ManagerLayout
+@attribute [Authorize(Roles = "Менеджер,Админ")]
+@using ApexCharts
+@using Microsoft.AspNetCore.Authorization
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
-@inject OrdersApiService OrdersApi
-@inject CouriersApiService CouriersApi
+@inject ReportsApiService ReportsApi
+@inject CompanySettingsApiService CompanySettingsApi
+@inject AppNotificationService Notify
+@inject IJSRuntime JS
+@using Microsoft.JSInterop
 
 <PageTitle>Аналитика — Менеджер</PageTitle>
 
@@ -12,46 +18,132 @@
     <p class="subtitle">Глубокая аналитика и финансы</p>
 </div>
 
-<div class="dms-stat-grid">
-    <div class="dms-stat-card">
-        <div class="dms-stat-value">@_ordersToday</div>
-        <div class="dms-stat-label">Заказов сегодня</div>
+<div class="dms-card mb-3">
+    <h2 class="dms-card-title">Период отчёта</h2>
+    <div class="row g-2 align-items-end flex-wrap">
+        <div class="col-md-3">
+            <label class="form-label">С даты (UTC)</label>
+            <input class="form-control" type="date" @bind="_periodFrom" @bind:format="yyyy-MM-dd" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">По дату (UTC)</label>
+            <input class="form-control" type="date" @bind="_periodTo" @bind:format="yyyy-MM-dd" />
+        </div>
+        <div class="col-md-3">
+            <button type="button" class="btn btn-primary" @onclick="ApplyPeriodAsync">Отчёт</button>
+            <button type="button" class="btn btn-outline-secondary ms-1" @onclick="ResetPeriodAsync">Текущий месяц</button>
+        </div>
+        <div class="col-md-3">
+            <button type="button" class="btn btn-outline-success" disabled="@_exporting" @onclick="ExportExcelAsync">
+                @(_exporting ? "Формирую…" : "Скачать Excel")
+            </button>
+        </div>
     </div>
-    <div class="dms-stat-card">
-        <div class="dms-stat-value">@_ordersThisMonth</div>
-        <div class="dms-stat-label">Заказов в этом месяце</div>
-    </div>
-    <div class="dms-stat-card">
-        <div class="dms-stat-value">@_onTimePercent.ToString("0")@("%")</div>
-        <div class="dms-stat-label">Доставлены вовремя</div>
-    </div>
-    <div class="dms-stat-card">
-        <div class="dms-stat-value">@_avgDeliveryHours.ToString("0.0")</div>
-        <div class="dms-stat-label">Среднее время доставки, ч</div>
+    <div class="small text-muted mt-2">
+        Фактический период в данных: <strong>@_data.PeriodFromUtc.ToString("dd.MM.yyyy HH:mm")</strong> —
+        <strong>@_data.PeriodToUtc.ToString("dd.MM.yyyy HH:mm")</strong> (UTC).
     </div>
 </div>
 
 <div class="dms-card">
+    <h2 class="dms-card-title">SLA настройки компании</h2>
+    <div class="row g-3 align-items-end sla-settings-row">
+        <div class="col-12 col-md-4 col-lg-3">
+            <label class="form-label">Вовремя (часы)</label>
+            <input class="form-control" type="number" min="1" max="168" @bind="_slaOnTimeHours" />
+        </div>
+        <div class="col-12 col-md-4 col-lg-3">
+            <label class="form-label">Критичное опоздание (часы)</label>
+            <input class="form-control" type="number" min="1" max="720" @bind="_slaLateHours" />
+        </div>
+        <div class="col-12 col-md-auto">
+            <button type="button" class="btn btn-primary dms-btn-primary" @onclick="SaveSlaAsync">Сохранить SLA</button>
+        </div>
+    </div>
+    <div class="small text-muted mt-2">
+        KPI «вовремя» по доставкам за период: порог <strong>@_data.SlaOnTimeHours ч</strong>.
+        «Опоздания %»: дольше <strong>@_data.SlaLateHours ч</strong> от создания заказа до доставки.
+    </div>
+</div>
+
+<div class="dms-stat-grid">
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_data.OrdersCreatedInPeriod</div>
+        <div class="dms-stat-label">Заказов создано (период)</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_data.RevenueDeliveredInPeriod.ToString("N0")</div>
+        <div class="dms-stat-label">Выручка (доставлено, период)</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_data.OnTimePercent.ToString("0")@("%")</div>
+        <div class="dms-stat-label">Вовремя (SLA)</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_data.LatePercent.ToString("0")@("%")</div>
+        <div class="dms-stat-label">Опоздания</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_data.AvgDeliveryHours.ToString("0.0")</div>
+        <div class="dms-stat-label">Среднее время доставки, ч</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_data.PaidDeliveredCount</div>
+        <div class="dms-stat-label">Оплаченных доставок</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_data.PaidSharePercent.ToString("0.0")@("%")</div>
+        <div class="dms-stat-label">Доля оплаченных доставок</div>
+    </div>
+</div>
+
+@if (_data.LatePercent >= 20)
+{
+    <div class="alert alert-danger mt-3">
+        <strong>Внимание:</strong> доля опозданий @(_data.LatePercent.ToString("0.0"))% превышает порог 20%.
+        Рекомендуется проверить загрузку курьеров, геозоны и SLA-настройки.
+    </div>
+}
+else if (_data.LatePercent >= 10)
+{
+    <div class="alert alert-warning mt-3">
+        Доля опозданий @(_data.LatePercent.ToString("0.0"))% выше целевого уровня.
+    </div>
+}
+
+<div class="dms-card">
     <h2 class="dms-card-title">Финансы</h2>
+    @if (_dailyChartItems.Any())
+    {
+        <div class="mb-3">
+            <ApexChart TItem="DailyChartItem" Title="Динамика по дням (период)" Height="320">
+                <ApexPointSeries TItem="DailyChartItem"
+                                 Name="Выручка (₽)"
+                                 Items="_dailyChartItems"
+                                 SeriesType="SeriesType.Bar"
+                                 XValue="x => x.Day"
+                                 YValue="x => (decimal)x.Revenue" />
+                <ApexPointSeries TItem="DailyChartItem"
+                                 Name="Заказы"
+                                 Items="_dailyChartItems"
+                                 SeriesType="SeriesType.Line"
+                                 XValue="x => x.Day"
+                                 YValue="x => (decimal)x.Count" />
+            </ApexChart>
+        </div>
+    }
     <div class="row">
         <div class="col-md-4">
             <div class="mb-2">
-                <strong>Выручка сегодня:</strong>
-                @_revenueToday.ToString("N0") ₽
-            </div>
-            <div class="mb-2">
-                <strong>Выручка за месяц:</strong>
-                @_revenueThisMonth.ToString("N0") ₽
-            </div>
-            <div class="mb-2">
-                <strong>Средний чек (месяц):</strong>
-                @_avgCheckThisMonth.ToString("N0") ₽
+                <strong>Средний чек (доставлено):</strong>
+                @_data.AvgCheckDeliveredInPeriod.ToString("N0") ₽
             </div>
         </div>
         <div class="col-md-8">
-            <h3 class="h6">Динамика заказов за 7 дней</h3>
-            @if (_ordersByDay.Any())
+            <h3 class="h6">Таблица по дням</h3>
+            @if (_data.OrdersByDay.Any())
             {
+                <div class="dms-table-scroll">
                 <table class="table table-sm mb-0">
                     <thead>
                         <tr>
@@ -61,7 +153,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var row in _ordersByDay.OrderBy(r => r.Date))
+                        @foreach (var row in _data.OrdersByDay.OrderBy(r => r.Date))
                         {
                             <tr>
                                 <td>@row.Date.ToString("dd.MM")</td>
@@ -71,6 +163,7 @@
                         }
                     </tbody>
                 </table>
+                </div>
             }
             else
             {
@@ -82,7 +175,7 @@
 
 <div class="dms-card">
     <h2 class="dms-card-title">Статусы заказов</h2>
-    @if (_statusRows.Any())
+    @if (_data.StatusRows.Any())
     {
         <table class="table table-sm">
             <thead>
@@ -93,7 +186,7 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (var row in _statusRows)
+                @foreach (var row in _data.StatusRows)
                 {
                     <tr>
                         <td>@row.Status</td>
@@ -112,7 +205,7 @@
 
 <div class="dms-card">
     <h2 class="dms-card-title">Топ курьеров по доставкам</h2>
-    @if (_courierRows.Any())
+    @if (_data.CourierRows.Any())
     {
         <table class="table table-sm">
             <thead>
@@ -124,7 +217,7 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (var c in _courierRows)
+                @foreach (var c in _data.CourierRows)
                 {
                     <tr>
                         <td>@c.Name</td>
@@ -142,137 +235,180 @@
     }
 </div>
 
+<div class="dms-card">
+    <h2 class="dms-card-title">Топ клиентов по выручке</h2>
+    @if (_data.ClientRows.Any())
+    {
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Клиент</th>
+                    <th>Заказов</th>
+                    <th>Выручка</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in _data.ClientRows)
+                {
+                    <tr>
+                        <td>@c.Name</td>
+                        <td>@c.Orders</td>
+                        <td>@c.Revenue.ToString("N0") ₽</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <p class="text-muted mb-0">Нет данных по клиентам.</p>
+    }
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Эффективность менеджеров по лидам</h2>
+    @if (_data.ManagerRows.Any())
+    {
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Менеджер</th>
+                    <th>Лидов</th>
+                    <th>Конверсий</th>
+                    <th>Конверсия</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _data.ManagerRows)
+                {
+                    <tr>
+                        <td>@row.Manager</td>
+                        <td>@row.Leads</td>
+                        <td>@row.Conversions</td>
+                        <td>@row.ConversionPercent.ToString("0.0")%</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <div class="small text-muted">
+            Конверсия считается по стадиям, содержащим ключевые слова: «договор», «сделк», «клиент», «заказ», «успеш».
+        </div>
+    }
+    else
+    {
+        <p class="text-muted mb-0">Нет данных по лидам менеджеров.</p>
+    }
+</div>
+
 @code {
-    private List<OrderDto> _orders = new();
-    private List<CourierProfileDto> _couriers = new();
-
-    private int _ordersToday;
-    private int _ordersThisMonth;
-    private decimal _revenueToday;
-    private decimal _revenueThisMonth;
-    private decimal _avgCheckThisMonth;
-    private double _avgDeliveryHours;
-    private double _onTimePercent;
-
-    private List<OrdersByDayRow> _ordersByDay = new();
-    private List<StatusRow> _statusRows = new();
-    private List<CourierRow> _courierRows = new();
+    private FinanceDashboardDto _data = new();
+    private List<DailyChartItem> _dailyChartItems = new();
+    private int _slaOnTimeHours = 4;
+    private int _slaLateHours = 24;
+    private DateTime _periodFrom;
+    private DateTime _periodTo;
+    private bool _exporting;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-
-        _orders = await OrdersApi.GetAllAsync(null) ?? new List<OrderDto>();
-        _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
-
-        ComputeMetrics();
+        var now = DateTime.UtcNow.Date;
+        _periodFrom = new DateTime(now.Year, now.Month, 1);
+        _periodTo = now;
+        await ReloadAsync();
         StateHasChanged();
     }
 
-    private void ComputeMetrics()
+    private async Task ApplyPeriodAsync()
     {
-        if (_orders.Count == 0)
+        await ReloadAsync();
+        StateHasChanged();
+    }
+
+    private async Task ResetPeriodAsync()
+    {
+        var now = DateTime.UtcNow.Date;
+        _periodFrom = new DateTime(now.Year, now.Month, 1);
+        _periodTo = now;
+        await ReloadAsync();
+        StateHasChanged();
+    }
+
+    private async Task ExportExcelAsync()
+    {
+        _exporting = true;
+        try
+        {
+            var from = DateTime.SpecifyKind(_periodFrom.Date, DateTimeKind.Utc);
+            var to = DateTime.SpecifyKind(_periodTo.Date, DateTimeKind.Utc);
+            var bytes = await ReportsApi.GetFinanceExcelAsync(from, to);
+            if (bytes == null || bytes.Length == 0)
+            {
+                Notify.ShowError("Не удалось сформировать отчёт. Проверьте авторизацию и доступ к API.");
+                return;
+            }
+            var name = $"finance-report-{from:yyyy-MM-dd}-{to:yyyy-MM-dd}.xlsx";
+            await using var ms = new MemoryStream(bytes);
+            using var streamRef = new DotNetStreamReference(ms);
+            await JS.InvokeVoidAsync("fileDownload.saveFromStream", streamRef, name,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            Notify.ShowSuccess("Файл готов к загрузке.");
+        }
+        catch (Exception ex)
+        {
+            Notify.ShowError(ex.Message);
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        var settings = await CompanySettingsApi.GetSlaAsync();
+        if (settings != null)
+        {
+            _slaOnTimeHours = settings.SlaOnTimeHours;
+            _slaLateHours = settings.SlaLateHours;
+        }
+
+        var from = DateTime.SpecifyKind(_periodFrom.Date, DateTimeKind.Utc);
+        var to = DateTime.SpecifyKind(_periodTo.Date, DateTimeKind.Utc);
+        _data = await ReportsApi.GetFinanceDashboardAsync(from, to) ?? new FinanceDashboardDto();
+        _dailyChartItems = _data.OrdersByDay
+            .OrderBy(x => x.Date)
+            .Select(x => new DailyChartItem
+            {
+                Day = x.Date.ToString("dd.MM"),
+                Revenue = (double)x.Revenue,
+                Count = x.Count
+            })
+            .ToList();
+    }
+
+    private async Task SaveSlaAsync()
+    {
+        var updated = await CompanySettingsApi.UpdateSlaAsync(new UpdateCompanySlaSettingsDto
+        {
+            SlaOnTimeHours = _slaOnTimeHours,
+            SlaLateHours = _slaLateHours
+        });
+        if (updated == null)
+        {
+            Notify.ShowError("Не удалось обновить SLA настройки.");
             return;
-
-        var today = DateTime.Today;
-        var monthStart = new DateTime(today.Year, today.Month, 1);
-
-        _ordersToday = _orders.Count(o => o.Created_at.Date == today);
-        _ordersThisMonth = _orders.Count(o => o.Created_at >= monthStart);
-
-        var delivered = _orders.Where(o => o.Delivered_at.HasValue).ToList();
-
-        _revenueToday = delivered
-            .Where(o => o.Delivered_at!.Value.Date == today)
-            .Sum(o => o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost);
-
-        _revenueThisMonth = delivered
-            .Where(o => o.Delivered_at!.Value >= monthStart)
-            .Sum(o => o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost);
-
-        var monthOrders = delivered.Where(o => o.Delivered_at!.Value >= monthStart).ToList();
-        _avgCheckThisMonth = monthOrders.Count > 0
-            ? monthOrders.Average(o => (o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost))
-            : 0;
-
-        var withDeliveryTime = delivered
-            .Where(o => o.Delivered_at!.Value > o.Created_at)
-            .ToList();
-
-        _avgDeliveryHours = withDeliveryTime.Count > 0
-            ? withDeliveryTime.Average(o => (o.Delivered_at!.Value - o.Created_at).TotalHours)
-            : 0;
-
-        var slaLimit = TimeSpan.FromHours(4);
-        var onTimeCount = withDeliveryTime.Count(o => (o.Delivered_at!.Value - o.Created_at) <= slaLimit);
-        _onTimePercent = withDeliveryTime.Count > 0
-            ? onTimeCount * 100.0 / withDeliveryTime.Count
-            : 0;
-
-        _ordersByDay = _orders
-            .GroupBy(o => o.Created_at.Date)
-            .OrderByDescending(g => g.Key)
-            .Take(7)
-            .Select(g => new OrdersByDayRow
-            {
-                Date = g.Key,
-                Count = g.Count(),
-                Revenue = g.Where(o => o.Delivered_at.HasValue)
-                    .Sum(o => o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost)
-            })
-            .ToList();
-
-        var total = _orders.Count;
-        _statusRows = _orders
-            .GroupBy(o => o.OrderStatus?.Name ?? "Неизвестно")
-            .Select(g => new StatusRow
-            {
-                Status = g.Key,
-                Count = g.Count(),
-                Share = total > 0 ? g.Count() * 100.0 / total : 0
-            })
-            .OrderByDescending(r => r.Count)
-            .ToList();
-
-        _courierRows = _couriers
-            .Select(c =>
-            {
-                var courierOrders = delivered.Where(o => o.Courier_id == c.ID_CourierProfile).ToList();
-                var revenue = courierOrders.Sum(o => o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost);
-                return new CourierRow
-                {
-                    Name = $"{c.User?.FName} {c.User?.Name}".Trim(),
-                    Delivered = courierOrders.Count,
-                    Revenue = revenue,
-                    Rating = c.Rating
-                };
-            })
-            .Where(c => c.Delivered > 0 || c.Revenue > 0)
-            .OrderByDescending(c => c.Delivered)
-            .ThenByDescending(c => c.Revenue)
-            .Take(10)
-            .ToList();
+        }
+        _slaOnTimeHours = updated.SlaOnTimeHours;
+        _slaLateHours = updated.SlaLateHours;
+        await ReloadAsync();
+        Notify.ShowSuccess("SLA настройки обновлены.");
     }
 
-    private sealed class OrdersByDayRow
+    private sealed class DailyChartItem
     {
-        public DateTime Date { get; set; }
+        public string Day { get; set; } = string.Empty;
+        public double Revenue { get; set; }
         public int Count { get; set; }
-        public decimal Revenue { get; set; }
-    }
-
-    private sealed class StatusRow
-    {
-        public string Status { get; set; } = "";
-        public int Count { get; set; }
-        public double Share { get; set; }
-    }
-
-    private sealed class CourierRow
-    {
-        public string Name { get; set; } = "";
-        public int Delivered { get; set; }
-        public decimal Revenue { get; set; }
-        public decimal Rating { get; set; }
     }
 }

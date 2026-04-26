@@ -1,0 +1,109 @@
+@page "/manager/communication-templates"
+@layout ManagerLayout
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject CommunicationTemplatesApiService Api
+
+<PageTitle>Шаблоны коммуникаций</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Шаблоны коммуникаций</h1>
+    <p class="subtitle">Автосообщения клиенту при смене статуса заказа.</p>
+</div>
+
+<div class="dms-card mb-4">
+    <h2 class="dms-card-title">Добавить / обновить шаблон</h2>
+    <div class="row g-3">
+        <div class="col-md-4">
+            <label class="form-label">Код</label>
+            <input class="form-control" @bind="_model.Code" placeholder="ORDER_STATUS_CHANGED" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Trigger Status ID (опц.)</label>
+            <input class="form-control" type="number" @bind="_model.TriggerStatus_id" />
+        </div>
+        <div class="col-md-4 d-flex align-items-end">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" @bind="_model.Is_active" id="activeCheck" />
+                <label class="form-check-label" for="activeCheck">Активен</label>
+            </div>
+        </div>
+        <div class="col-12">
+            <label class="form-label">Заголовок</label>
+            <input class="form-control" @bind="_model.TitleTemplate" placeholder="Заказ №{orderNumber}: статус {statusName}" />
+        </div>
+        <div class="col-12">
+            <label class="form-label">Текст</label>
+            <textarea class="form-control" rows="5" @bind="_model.BodyTemplate" placeholder="Ваш заказ №{orderNumber} теперь в статусе {statusName}. ETA: {eta}."></textarea>
+            <div class="form-text">Плейсхолдеры: {orderNumber}, {statusName}, {eta}, {delayReason}, {priority}</div>
+        </div>
+        <div class="col-12">
+            <button class="btn btn-primary" @onclick="SaveTemplate">Сохранить</button>
+        </div>
+    </div>
+</div>
+
+<div class="dms-card">
+    <h2 class="dms-card-title">Текущие шаблоны</h2>
+    @if (_items.Count == 0)
+    {
+        <p class="text-muted mb-0">Шаблонов пока нет.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th>Код</th>
+                        <th>Status ID</th>
+                        <th>Активен</th>
+                        <th>Заголовок</th>
+                        <th>Текст</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var t in _items)
+                    {
+                        <tr>
+                            <td>@t.Code</td>
+                            <td>@(t.TriggerStatus_id?.ToString() ?? "—")</td>
+                            <td>@(t.Is_active ? "Да" : "Нет")</td>
+                            <td>@t.TitleTemplate</td>
+                            <td>@t.BodyTemplate</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly UpsertCommunicationTemplateRequestDto _model = new()
+    {
+        Code = "ORDER_STATUS_CHANGED",
+        TitleTemplate = "Заказ №{orderNumber}: статус {statusName}",
+        BodyTemplate = "Ваш заказ №{orderNumber} теперь в статусе {statusName}. ETA: {eta}.",
+        Is_active = true
+    };
+
+    private List<CommunicationTemplateDto> _items = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        _items = await Api.GetMineAsync();
+        StateHasChanged();
+    }
+
+    private async Task SaveTemplate()
+    {
+        await Api.UpsertAsync(_model);
+        await Reload();
+    }
+}

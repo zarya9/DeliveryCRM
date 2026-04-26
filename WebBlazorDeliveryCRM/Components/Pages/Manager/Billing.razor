@@ -1,0 +1,247 @@
+@page "/manager/billing"
+@layout ManagerLayout
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject BillingApiService BillingApi
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<PageTitle>Оплата и тариф</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Оплата и тариф</h1>
+    <p class="subtitle">Управление подпиской компании, выбор тарифа и история счетов.</p>
+</div>
+
+<div class="dms-stat-grid mb-4">
+    <KpiCard Title="Текущий тариф"
+             Value="@(Subscription?.PlanName ?? "—")"
+             Meta="@PlanMeta" />
+    <KpiCard Title="Статус подписки"
+             Value="@(Subscription?.Status ?? "—")"
+             Meta="@RenewMeta" />
+    <KpiCard Title="Оплачено до"
+             Value="@((Subscription?.CurrentPeriodEndAt).HasValue ? Subscription!.CurrentPeriodEndAt.ToString("dd.MM.yyyy") : "—")"
+             Meta="UTC" />
+</div>
+
+<div class="dms-card mb-4">
+    <h2 class="dms-card-title">Тарифы</h2>
+    @if (Loading)
+    {
+        <p class="text-muted">Загрузка…</p>
+    }
+    else if (Plans.Count == 0)
+    {
+        <p class="text-muted">Нет доступных тарифов.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th>Тариф</th>
+                        <th>Цена / месяц</th>
+                        <th>Лимит пользователей</th>
+                        <th>Лимит заказов / месяц</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in Plans)
+                    {
+                        <tr>
+                            <td><strong>@p.Name</strong> <span class="text-muted">(@p.Code)</span></td>
+                            <td>@p.MonthlyPrice @("RUB")</td>
+                            <td>@p.MaxUsers</td>
+                            <td>@p.MaxOrdersPerMonth</td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-primary" @onclick="() => StartCheckout(p.Code)">Оплатить</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<div class="dms-card">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h2 class="dms-card-title mb-0">Счета</h2>
+        <div class="d-flex gap-2">
+            <select class="form-select form-select-sm" style="min-width: 170px;" @bind="StatusFilter">
+                <option value="">Все статусы</option>
+                <option value="paid">Только оплаченные</option>
+                <option value="pending">Только ожидающие</option>
+                <option value="failed">Только неуспешные</option>
+            </select>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Reload">Обновить</button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="ToggleAutoRefresh">
+                @(AutoRefresh ? "Автообновление: вкл" : "Автообновление: выкл")
+            </button>
+        </div>
+    </div>
+    @if (FilteredInvoices.Count == 0)
+    {
+        <p class="text-muted mb-0">Счетов для выбранного фильтра нет.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th>Номер</th>
+                        <th>Тариф</th>
+                        <th>Сумма</th>
+                        <th>Статус</th>
+                        <th>Выставлен</th>
+                        <th>Срок</th>
+                        <th>Оплачен</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var i in FilteredInvoices)
+                    {
+                        <tr>
+                            <td>@i.Number</td>
+                            <td>@i.PlanName</td>
+                            <td>@i.Amount @i.Currency</td>
+                            <td>
+                                <StatusBadge Text="@i.Status" Tone="@GetInvoiceStatusTone(i.Status)" />
+                            </td>
+                            <td>@i.IssuedAt.ToString("dd.MM.yyyy HH:mm")</td>
+                            <td>@i.DueAt.ToString("dd.MM.yyyy HH:mm")</td>
+                            <td>@(i.PaidAt.HasValue ? i.PaidAt.Value.ToString("dd.MM.yyyy HH:mm") : "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private bool Loading = true;
+    private List<SubscriptionPlanDto> Plans = new();
+    private CompanySubscriptionDto? Subscription;
+    private List<BillingInvoiceDto> Invoices = new();
+    private string StatusFilter = string.Empty;
+    private bool AutoRefresh;
+    private PeriodicTimer? _timer;
+    private CancellationTokenSource? _refreshCts;
+    private string PlanMeta => $"Код: {Subscription?.PlanCode ?? "—"}";
+    private string RenewMeta => $"Автопродление: {(Subscription?.AutoRenew == true ? "вкл" : "выкл")}";
+
+    private List<BillingInvoiceDto> FilteredInvoices =>
+        string.IsNullOrWhiteSpace(StatusFilter)
+            ? Invoices
+            : Invoices.Where(i => string.Equals(i.Status, StatusFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var uri = new Uri(Navigation.Uri, UriKind.Absolute);
+        if (uri.Query.Contains("refresh=1", StringComparison.OrdinalIgnoreCase))
+            AutoRefresh = true;
+
+        await LoadAll();
+        if (AutoRefresh)
+            StartAutoRefreshLoop();
+    }
+
+    private async Task Reload()
+    {
+        await LoadAll();
+    }
+
+    private async Task LoadAll()
+    {
+        Loading = true;
+        StateHasChanged();
+        try
+        {
+            Plans = await BillingApi.GetPlansAsync();
+            Subscription = await BillingApi.GetSubscriptionAsync();
+            Invoices = await BillingApi.GetInvoicesAsync();
+        }
+        finally
+        {
+            Loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task StartCheckout(string planCode)
+    {
+        var checkout = await BillingApi.CreateCheckoutAsync(new CreateCheckoutSessionRequestDto
+        {
+            PlanCode = planCode,
+            PeriodMonths = 1
+        });
+        if (checkout is null || string.IsNullOrWhiteSpace(checkout.CheckoutUrl))
+            return;
+
+        await JS.InvokeVoidAsync("open", checkout.CheckoutUrl, "_blank");
+        await Reload();
+    }
+
+    private string GetInvoiceStatusTone(string? status)
+    {
+        return (status ?? string.Empty).ToLowerInvariant() switch
+        {
+            "paid" => "success",
+            "pending" => "warning",
+            "failed" => "danger",
+            "canceled" => "neutral",
+            _ => "neutral"
+        };
+    }
+
+    private void ToggleAutoRefresh()
+    {
+        AutoRefresh = !AutoRefresh;
+        if (AutoRefresh)
+            StartAutoRefreshLoop();
+        else
+            StopAutoRefreshLoop();
+    }
+
+    private void StartAutoRefreshLoop()
+    {
+        StopAutoRefreshLoop();
+        _refreshCts = new CancellationTokenSource();
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+        _ = RunAutoRefreshAsync(_refreshCts.Token);
+    }
+
+    private async Task RunAutoRefreshAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (_timer is not null && await _timer.WaitForNextTickAsync(ct))
+            {
+                await LoadAll();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void StopAutoRefreshLoop()
+    {
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        _refreshCts = null;
+        _timer?.Dispose();
+        _timer = null;
+    }
+
+    public void Dispose()
+    {
+        StopAutoRefreshLoop();
+    }
+}

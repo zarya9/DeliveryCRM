@@ -4,21 +4,27 @@
 @using WebBlazorDeliveryCRM.Services
 @inject CouriersApiService CouriersApi
 @inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+@implements IDisposable
 
 <PageTitle>Курьеры — Логист</PageTitle>
 
 <div class="dms-page-header">
     <h1>Управление курьерами</h1>
-    <p class="subtitle">Список курьеров и загрузка</p>
+    <p class="subtitle">Список курьеров — откройте карточку для назначения ТС и просмотра данных</p>
 </div>
 
 <div class="dms-card">
     <div class="d-flex justify-content-between align-items-center mb-2">
         <h2 class="dms-card-title">Курьеры</h2>
-        <input class="form-control"
-               style="max-width: 260px;"
-               placeholder="Поиск по ФИО"
-               @bind="_searchText" />
+        <div class="d-flex gap-2">
+            <input class="form-control"
+                   style="max-width: 260px;"
+                   placeholder="Поиск по ФИО"
+                   value="@_searchText"
+                   @oninput="OnSearchInput" />
+            <button class="btn btn-outline-secondary btn-sm" @onclick="ReloadAsync">Обновить</button>
+        </div>
     </div>
     @if (_couriers != null && _couriers.Count > 0)
     {
@@ -27,29 +33,31 @@
                 <tr>
                     <th>ФИО</th>
                     <th>Рейтинг</th>
-                    <th>Статус</th>
-                    <th>Онлайн</th>
                     <th>Доставок</th>
-                    <th>Координаты</th>
+                    <th>KPI</th>
+                    <th>Категория допуска</th>
+                    <th>Текущий автомобиль</th>
                 </tr>
             </thead>
             <tbody>
                 @foreach (var c in _couriers.Where(FilterCourier))
                 {
-                    <tr>
+                    <tr style="cursor: pointer;" title="Открыть карточку"
+                        @onclick="@(() => Navigation.NavigateTo($"/logistician/couriers/{c.ID_CourierProfile}"))">
                         <td>
                             <span class="status-dot @(c.Is_online ? "status-dot-online" : "status-dot-offline")"></span>
                             @(c.User?.FName) @(c.User?.Name)
+                            <StatusBadge Text="@(c.Is_online ? "Онлайн" : "Офлайн")" Tone="@(c.Is_online ? "success" : "neutral")" />
                             @if (c.User_id == _currentUserId)
                             {
                                 <span class="text-muted ms-1">(Вы)</span>
                             }
                         </td>
                         <td>@c.Rating</td>
-                        <td>@(c.CourierStatus?.Name ?? "—")</td>
-                        <td>@(c.Is_online ? "Да" : "Нет")</td>
                         <td>@c.Total_deliveries</td>
-                        <td>@c.Current_lat.ToString("0.00"), @c.Current_lon.ToString("0.00")</td>
+                        <td>@KpiLabel(c)</td>
+                        <td>@(c.VehicleCategory?.Name ?? c.VehicleCategoryName ?? "—")</td>
+                        <td>@CurrentVehicleLabel(c.ID_CourierProfile)</td>
                     </tr>
                 }
             </tbody>
@@ -63,20 +71,39 @@
 
 @code {
     private List<CourierProfileDto>? _couriers;
+    private List<VehicleDto> _vehicles = new();
     private string _searchText = string.Empty;
     private int? _currentUserId;
+    private PeriodicTimer? _refreshTimer;
+    private CancellationTokenSource? _refreshCts;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
+        await ReloadAsync();
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         var userIdStr = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (int.TryParse(userIdStr, out var uid))
         {
             _currentUserId = uid;
         }
+        StartAutoRefreshLoop();
         StateHasChanged();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
+        var cid = _couriers.FirstOrDefault()?.Company_id;
+        _vehicles = cid.HasValue
+            ? await CouriersApi.GetVehiclesByCompanyAsync(cid.Value) ?? new List<VehicleDto>()
+            : new List<VehicleDto>();
+        StateHasChanged();
+    }
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        _searchText = e.Value?.ToString() ?? "";
     }
 
     private bool FilterCourier(CourierProfileDto c)
@@ -85,5 +112,64 @@
         var q = _searchText.Trim().ToLowerInvariant();
         var fullName = $"{c.User?.FName} {c.User?.Name}".ToLowerInvariant();
         return fullName.Contains(q);
+    }
+
+    private string CurrentVehicleLabel(int courierProfileId)
+    {
+        var v = _vehicles.FirstOrDefault(x => x.CurrentCourier_id == courierProfileId);
+        return v is null ? "—" : FormatVehicleShort(v);
+    }
+
+    private static string FormatVehicleShort(VehicleDto v)
+    {
+        var brand = v.VehicleModel?.VehicleBrand?.Name ?? v.Brand_name ?? "";
+        var model = v.VehicleModel?.Name ?? v.Model_name ?? "";
+        var plate = v.License_plate ?? "";
+        var parts = new[] { brand, model, plate }.Where(s => !string.IsNullOrWhiteSpace(s));
+        var s = string.Join(" ", parts);
+        return string.IsNullOrWhiteSpace(s) ? $"ТС #{v.ID_Vehicle}" : s;
+    }
+
+    private static string KpiLabel(CourierProfileDto c)
+    {
+        if (c.Total_deliveries <= 0)
+            return "—";
+        return $"{(double)c.Rating:0.0} / {c.Total_deliveries}";
+    }
+
+    private void StartAutoRefreshLoop()
+    {
+        StopAutoRefreshLoop();
+        _refreshCts = new CancellationTokenSource();
+        _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        _ = RunAutoRefreshAsync(_refreshCts.Token);
+    }
+
+    private async Task RunAutoRefreshAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (_refreshTimer is not null && await _refreshTimer.WaitForNextTickAsync(ct))
+            {
+                await ReloadAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void StopAutoRefreshLoop()
+    {
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        _refreshCts = null;
+        _refreshTimer?.Dispose();
+        _refreshTimer = null;
+    }
+
+    public void Dispose()
+    {
+        StopAutoRefreshLoop();
     }
 }

@@ -1,59 +1,51 @@
 using System.Security.Claims;
 using System.IdentityModel.Tokens.Jwt;
-using Blazored.LocalStorage;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.JSInterop;
 
 namespace WebBlazorDeliveryCRM.Services;
 
+/// <summary>Состояние входа только из HttpOnly-cookie (читается на сервере из запроса).</summary>
 public class CustomAuthenticationStateProvider : AuthenticationStateProvider
 {
-    private const string TokenKey = "auth_token";
-    private readonly ILocalStorageService _localStorage;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IJSRuntime _js;
 
-    public CustomAuthenticationStateProvider(ILocalStorageService localStorage)
+    public CustomAuthenticationStateProvider(IHttpContextAccessor httpContextAccessor, IJSRuntime js)
     {
-        _localStorage = localStorage;
+        _httpContextAccessor = httpContextAccessor;
+        _js = js;
     }
 
-    public override async Task<AuthenticationState> GetAuthenticationStateAsync()
+    public override Task<AuthenticationState> GetAuthenticationStateAsync()
     {
-        string? token;
-        try
-        {
-            token = await _localStorage.GetItemAsync<string>(TokenKey);
-        }
-        catch (InvalidOperationException)
-        {
-            // Prerendering: JS interop unavailable — assume not authenticated; state will be re-evaluated when interactive.
-            return new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity()));
-        }
-
+        var token = _httpContextAccessor.HttpContext?.Request.Cookies[AuthCookieConstants.CookieName];
         if (string.IsNullOrEmpty(token))
         {
-            return new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity()));
+            return Task.FromResult(new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity())));
         }
 
         var identity = GetIdentityFromToken(token);
         if (identity == null)
         {
-            try { await _localStorage.RemoveItemAsync(TokenKey); } catch { /* ignore during prerender */ }
-            return new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity()));
+            return Task.FromResult(new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity())));
         }
 
-        return new AuthenticationState(new ClaimsPrincipal(identity));
+        return Task.FromResult(new AuthenticationState(new ClaimsPrincipal(identity)));
     }
 
-    public async Task MarkUserAsAuthenticated(string token)
+    /// <summary>Сброс cookie через браузерный fetch и обновление UI (без localStorage).</summary>
+    public async Task MarkUserAsLoggedOutAsync()
     {
-        await _localStorage.SetItemAsync(TokenKey, token);
-        var identity = GetIdentityFromToken(token);
-        NotifyAuthenticationStateChanged(Task.FromResult(
-            new AuthenticationState(new ClaimsPrincipal(identity!))));
-    }
+        try
+        {
+            await _js.InvokeVoidAsync("deliveryCrmAuth.clearSession");
+        }
+        catch
+        {
+            /* circuit / JS недоступен */
+        }
 
-    public async Task MarkUserAsLoggedOut()
-    {
-        await _localStorage.RemoveItemAsync(TokenKey);
         NotifyAuthenticationStateChanged(Task.FromResult(
             new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity()))));
     }
@@ -64,8 +56,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider
         {
             var handler = new JwtSecurityTokenHandler();
             var jwt = handler.ReadJwtToken(token);
-            var identity = new ClaimsIdentity(jwt.Claims, "jwt");
-            return identity;
+            return new ClaimsIdentity(jwt.Claims, "jwt");
         }
         catch
         {

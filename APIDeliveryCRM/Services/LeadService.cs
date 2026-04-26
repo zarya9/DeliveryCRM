@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
@@ -38,7 +39,12 @@ namespace APIDeliveryCRM.Services
                 ManagerUserId = l.ManagerUser_id,
                 ManagerName = l.Manager != null ? l.Manager.FName + " " + l.Manager.Name : null,
                 CreatedAt = l.Created_at,
-                Comment = l.Comment
+                Comment = l.Comment,
+                LostReason = l.Lost_reason,
+                WonAt = l.Won_at,
+                LostAt = l.Lost_at,
+                NextTaskTitle = l.NextTask_title,
+                NextTaskDueAtUtc = l.NextTask_due_at
             }).ToList();
 
             return new OkObjectResult(dto);
@@ -82,7 +88,9 @@ namespace APIDeliveryCRM.Services
                 LeadSource_id = request.LeadSourceId,
                 LeadStage_id = request.LeadStageId,
                 ManagerUser_id = managerUserId,
-                Comment = request.Comment
+                Comment = request.Comment,
+                NextTask_title = string.IsNullOrWhiteSpace(request.NextTaskTitle) ? "Первичный контакт с клиентом" : request.NextTaskTitle.Trim(),
+                NextTask_due_at = request.NextTaskDueAtUtc?.ToUniversalTime() ?? DateTime.UtcNow.AddDays(1)
             };
 
             _context.Leads.Add(lead);
@@ -109,6 +117,101 @@ namespace APIDeliveryCRM.Services
             await _context.SaveChangesAsync();
 
             return new OkObjectResult(new { message = "Стадия лида обновлена" });
+        }
+
+        public async Task<IActionResult> MarkLostAsync(int leadId, string reason)
+        {
+            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.ID_Lead == leadId);
+            if (lead == null)
+                return new NotFoundObjectResult(new { message = "Лид не найден" });
+
+            lead.Lost_at = DateTime.UtcNow;
+            lead.Won_at = null;
+            lead.Lost_reason = string.IsNullOrWhiteSpace(reason) ? "Без указания причины" : reason.Trim();
+            lead.Updated_at = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            return new OkObjectResult(new { message = "Лид отмечен как потерян" });
+        }
+
+        public async Task<IActionResult> MarkWonAsync(int leadId)
+        {
+            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.ID_Lead == leadId);
+            if (lead == null)
+                return new NotFoundObjectResult(new { message = "Лид не найден" });
+
+            lead.Won_at = DateTime.UtcNow;
+            lead.Lost_at = null;
+            lead.Lost_reason = null;
+            lead.Updated_at = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            return new OkObjectResult(new { message = "Лид отмечен как успешный" });
+        }
+
+        public async Task<IActionResult> GetAnalyticsAsync(int companyId, DateTime? fromUtc = null, DateTime? toUtc = null)
+        {
+            var query = _context.Leads
+                .AsNoTracking()
+                .Include(l => l.Stage)
+                .Where(l => l.Company_id == companyId)
+                .AsQueryable();
+
+            if (fromUtc.HasValue)
+            {
+                var from = fromUtc.Value.ToUniversalTime();
+                query = query.Where(l => l.Created_at >= from);
+            }
+
+            if (toUtc.HasValue)
+            {
+                var to = toUtc.Value.ToUniversalTime();
+                query = query.Where(l => l.Created_at <= to);
+            }
+
+            var leads = await query.ToListAsync();
+            var total = leads.Count;
+            var won = leads.Count(l => l.Won_at.HasValue);
+            var lost = leads.Count(l => l.Lost_at.HasValue);
+            var conversion = total == 0 ? 0 : Math.Round((double)won / total * 100, 2);
+
+            var funnel = leads
+                .GroupBy(l => l.Stage.Name)
+                .Select(g => new { stage = g.Key, count = g.Count() })
+                .OrderByDescending(x => x.count)
+                .ToList();
+
+            var lostReasons = leads
+                .Where(l => !string.IsNullOrWhiteSpace(l.Lost_reason))
+                .GroupBy(l => l.Lost_reason!)
+                .Select(g => new { reason = g.Key, count = g.Count() })
+                .OrderByDescending(x => x.count)
+                .Take(10)
+                .ToList();
+
+            var upcomingTasks = leads
+                .Where(l => l.NextTask_due_at.HasValue && l.NextTask_due_at.Value >= DateTime.UtcNow)
+                .OrderBy(l => l.NextTask_due_at)
+                .Take(20)
+                .Select(l => new
+                {
+                    leadId = l.ID_Lead,
+                    leadName = l.Name,
+                    taskTitle = l.NextTask_title,
+                    dueAt = l.NextTask_due_at
+                })
+                .ToList();
+
+            return new OkObjectResult(new
+            {
+                total,
+                won,
+                lost,
+                conversionPercent = conversion,
+                funnel,
+                topLostReasons = lostReasons,
+                upcomingTasks
+            });
         }
     }
 }

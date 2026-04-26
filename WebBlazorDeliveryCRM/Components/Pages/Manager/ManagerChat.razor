@@ -1,0 +1,7 @@
+@page "/manager/chat"
+@layout ManagerLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Менеджер,Админ")]
+
+<PageTitle>Чат — Менеджер</PageTitle>
+
+<CompanyChatPanel />

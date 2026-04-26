@@ -3,11 +3,10 @@
 @layout LoginLayout
 @attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
 @inject AuthApiService AuthApi
-@inject CustomAuthenticationStateProvider AuthState
 @inject AuthenticationStateProvider AuthStateProvider
-@inject ChatHubClientService ChatHub
 @inject NavigationManager Navigation
 @inject AppNotificationService Notify
+@inject IJSRuntime JS
 
 <PageTitle>Вход</PageTitle>
 
@@ -92,16 +91,7 @@
             }
 
             var token = result.Token;
-            await AuthState.MarkUserAsAuthenticated(token);
-
-            try
-            {
-                await ChatHub.StartAsync();
-            }
-            catch
-            {
-                // SignalR не обязателен для входа
-            }
+            await JS.InvokeVoidAsync("deliveryCrmAuth.setSessionToken", token);
 
             Notify.ShowSuccess("Вход выполнен.");
             _ = Notify.RequestPushPermissionAsync();

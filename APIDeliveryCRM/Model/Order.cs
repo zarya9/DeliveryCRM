@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APIDeliveryCRM.Model
@@ -49,6 +49,25 @@ namespace APIDeliveryCRM.Model
         public decimal Final_cost { get; set; }
         public DateTime Created_at { get; set; }
         public DateTime? Delivered_at { get; set; }
+        public DateTime? Pickup_started_at { get; set; }
+        public DateTime? In_transit_at { get; set; }
+        public DateTime? Arrived_at { get; set; }
+
+        /// <summary>Плановое время доставки (для SLA-контроля).</summary>
+        public DateTime? Sla_due_at { get; set; }
+
+        /// <summary>Когда заказ впервые пересек SLA-границу.</summary>
+        public DateTime? Sla_breached_at { get; set; }
+
+        /// <summary>ETA в UTC, обновляется при изменении статуса/назначении.</summary>
+        public DateTime? Eta_at { get; set; }
+
+        /// <summary>Причина просрочки (ручной ввод менеджера/логиста).</summary>
+        [MaxLength(1000)]
+        public string? Delay_reason { get; set; }
+
+        /// <summary>Приоритет заказа: 0 обычный, 1 срочный, 2 критический.</summary>
+        public byte Priority { get; set; } = 0;
 
         [Required]
         [ForeignKey(nameof(PaymentMethod))]
@@ -66,6 +85,21 @@ namespace APIDeliveryCRM.Model
         public int DeliveryAddress_id { get; set; }
         public Address DeliveryAddress { get; set; }
 
+        /// <summary>Схема доставки: город / через хабы / прямой межгород.</summary>
+        public DeliveryRouteKind DeliveryRouteKind { get; set; } = DeliveryRouteKind.LocalUrban;
+
+        [ForeignKey(nameof(OriginHub))]
+        public int? OriginHub_id { get; set; }
+        public LogisticsHub? OriginHub { get; set; }
+
+        [ForeignKey(nameof(DestinationHub))]
+        public int? DestinationHub_id { get; set; }
+        public LogisticsHub? DestinationHub { get; set; }
+
         public ICollection<ChatRoom> ChatRooms { get; set; } = new List<ChatRoom>();
+
+        /// <summary>Упорядоченный список точек маршрута (порядок = SortOrder).</summary>
+        public ICollection<OrderRouteStop> RouteStops { get; set; } = new List<OrderRouteStop>();
+        public ICollection<OrderTimelineEvent> TimelineEvents { get; set; } = new List<OrderTimelineEvent>();
     }
 }

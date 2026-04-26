@@ -3,17 +3,17 @@ html, body {
 }
 
 a, .btn-link {
-    color: #006bb7;
+    color: var(--dms-primary);
 }
 
 .btn-primary {
-    color: #fff;
-    background-color: #1b6ec2;
-    border-color: #1861ac;
+    color: var(--dms-page-bg);
+    background-color: var(--dms-primary);
+    border-color: var(--dms-primary);
 }
 
 .btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
-  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
+  box-shadow: 0 0 0 0.1rem var(--dms-page-bg), 0 0 0 0.25rem var(--dms-primary);
 }
 
 .content {
@@ -64,7 +64,7 @@ h1:focus {
 .sidebar-nav {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 6px;
 }
 .sidebar-link {
     display: flex;
@@ -73,18 +73,59 @@ h1:focus {
     padding: 0.65rem 1rem;
     margin: 0 0.5rem;
     border-radius: 6px;
-    color: rgba(255,255,255,0.85);
+    color: var(--dms-sidebar-fg);
     text-decoration: none;
     font-size: 0.9375rem;
 }
 .sidebar-link:hover {
     background: var(--dms-sidebar-accent, rgba(255,255,255,0.08));
-    color: #fff;
+    color: var(--dms-sidebar-fg);
 }
 .sidebar-link.active {
     background: var(--dms-sidebar-active, rgba(255,255,255,0.15));
-    color: #fff;
+    color: var(--dms-sidebar-fg);
     font-weight: 500;
+}
+
+/* Таблицы: в тёмной теме убираем «тёмный» текст на полосатых строках Bootstrap */
+[data-theme="dark"] .table {
+    --bs-table-bg: transparent;
+    --bs-table-color: var(--dms-text);
+    color: var(--dms-text);
+}
+[data-theme="dark"] .table > :not(caption) > * > * {
+    color: var(--dms-text);
+    background-color: transparent;
+}
+[data-theme="dark"] .table-striped > tbody > tr:nth-of-type(odd) > * {
+    color: var(--dms-text);
+    background-color: rgba(255, 255, 255, 0.04);
+}
+
+.company-chat-panel {
+    max-height: min(620px, 75vh);
+    display: flex;
+    flex-direction: column;
+}
+.company-chat-messages {
+    max-height: 420px;
+    border: 1px solid var(--dms-card-border);
+    border-radius: 8px;
+    padding: 0.75rem;
+}
+
+.dms-table-scroll {
+    max-height: 280px;
+    overflow-y: auto;
+    border: 1px solid var(--dms-card-border);
+    border-radius: var(--dms-radius, 8px);
+}
+.dms-table-scroll .table {
+    margin-bottom: 0;
+}
+
+.sla-settings-row {
+    row-gap: 0.75rem;
 }
 .sidebar-link .icon {
     opacity: 0.9;
@@ -101,12 +142,12 @@ h1:focus {
     min-width: 44px;
     min-height: 44px;
     justify-content: center;
-    color: #64748b;
+    color: var(--dms-text-muted);
     text-decoration: none;
     font-size: 0.75rem;
 }
 .mobile-nav .mobile-nav-item.active {
-    color: #0f172a;
+    color: var(--dms-text);
     font-weight: 600;
 }
 .mobile-nav .mobile-nav-item .mobile-nav-icon {
@@ -202,10 +243,17 @@ h1:focus {
     align-items: center;
     justify-content: center;
     background: var(--dms-page-bg, #f1f5f9);
+    position: relative;
 }
 .login-page {
     width: 100%;
     padding: 1rem;
+}
+
+.login-theme-btn {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
 }
 
 .status-dot {
@@ -239,4 +287,117 @@ h1:focus {
     box-shadow: 0 20px 40px rgba(15, 23, 42, 0.35);
     max-width: 520px;
     width: 100%;
+}
+
+/* Leaflet Routing Machine: панель маршрута поверх карты (Mud/AppBar ~1100+) */
+.leaflet-routing-container {
+    z-index: 1200 !important;
+}
+
+/* Neutral theme overrides for common Bootstrap controls */
+.form-control,
+.form-select {
+    background-color: var(--dms-card-bg);
+    color: var(--dms-text);
+    border-color: var(--dms-card-border);
+}
+
+.form-control::placeholder {
+    color: var(--dms-text-light);
+}
+
+.table {
+    color: var(--dms-text);
+}
+
+.table > :not(caption) > * > * {
+    background-color: transparent;
+    border-bottom-color: var(--dms-card-border);
+}
+
+body {
+    transition: background-color 0.2s ease, background-image 0.2s ease;
+}
+
+body.bg-plain {
+    background-image: none;
+}
+
+body.bg-grid {
+    background-image:
+        linear-gradient(to right, rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+    background-size: 22px 22px;
+}
+
+body.bg-dots {
+    background-image: radial-gradient(rgba(148, 163, 184, 0.28) 1px, transparent 1px);
+    background-size: 16px 16px;
+}
+
+body.bg-gradient {
+    background-image: linear-gradient(140deg, rgba(37, 99, 235, 0.08), rgba(20, 184, 166, 0.08));
+}
+
+.ui-settings-popover {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    width: min(340px, 92vw);
+    z-index: 1300;
+    background: var(--dms-card-bg);
+    border: 1px solid var(--dms-card-border);
+    border-radius: var(--dms-radius-lg, 12px);
+    box-shadow: var(--dms-card-shadow, 0 4px 18px rgba(0, 0, 0, 0.15));
+    padding: 0.9rem;
+}
+
+.ui-settings-row {
+    margin-bottom: 0.65rem;
+}
+
+.table-hover > tbody > tr:hover > * {
+    background-color: rgba(37, 99, 235, 0.06);
+}
+
+[data-theme="dark"] .table-hover > tbody > tr:hover > * {
+    background-color: rgba(148, 163, 184, 0.12);
+}
+
+.badge {
+    border-radius: 999px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+.not-found-page {
+    min-height: 62vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    text-align: center;
+}
+
+.not-found-code {
+    font-size: clamp(3rem, 9vw, 7rem);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: var(--dms-text-light, #94a3b8);
+    line-height: 1;
+}
+
+.not-found-title {
+    font-size: clamp(3rem, 12vw, 9rem);
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    margin: 0;
+    line-height: 0.9;
+    color: var(--dms-primary, #2563eb);
+}
+
+.not-found-subtitle {
+    margin: 0 0 0.5rem 0;
+    color: var(--dms-text-muted, #64748b);
 }

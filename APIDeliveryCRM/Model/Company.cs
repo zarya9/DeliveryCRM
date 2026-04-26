@@ -34,6 +34,8 @@ namespace APIDeliveryCRM.Model
         public int MaxUsers { get; set; } = 10;
         public int MaxOrdersPerMonth { get; set; } = 1000;
         public DateTime SubscriptionExpiresAt { get; set; }
+        public int SlaOnTimeHours { get; set; } = 4;
+        public int SlaLateHours { get; set; } = 24;
 
         [MaxLength(500)]
         public string? AzureStorageConnectionString { get; set; }

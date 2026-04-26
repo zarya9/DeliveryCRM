@@ -1,0 +1,94 @@
+@page "/admin/audit"
+@layout ManagerLayout
+@using System.Security.Claims
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject AuditApiService AuditApi
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Аудит — Админ</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Журнал аудита</h1>
+    <p class="subtitle">Действия пользователей по компании (создание ТС, назначение курьерам и т.д.)</p>
+</div>
+
+@if (!_isAdmin)
+{
+    <div class="alert alert-warning">Раздел доступен только роли «Админ».</div>
+}
+else if (_loading)
+{
+    <p class="text-muted">Загрузка…</p>
+}
+else if (_rows is null)
+{
+    <div class="alert alert-danger">Не удалось загрузить журнал. Проверьте вход.</div>
+}
+else if (_rows.Count == 0)
+{
+    <p class="text-muted">Записей пока нет.</p>
+}
+else
+{
+    <div class="table-responsive dms-card p-0">
+        <table class="table table-sm table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>Время (UTC)</th>
+                    <th>Таблица</th>
+                    <th>Id записи</th>
+                    <th>Действие</th>
+                    <th>Пользователь</th>
+                    <th>Описание</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _rows)
+                {
+                    <tr>
+                        <td>@r.Created_at.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td>@r.TableName</td>
+                        <td>@r.RecordId</td>
+                        <td>@r.Action</td>
+                        <td>@(string.IsNullOrWhiteSpace(r.UserName) ? (r.User_id?.ToString() ?? "—") : r.UserName)</td>
+                        <td style="max-width: 420px;">@(r.Description ?? "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<AuditLogRowDto>? _rows;
+    private bool _loading = true;
+    private bool _isAdmin;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        var role = state.User.FindFirst(ClaimTypes.Role)?.Value
+                   ?? state.User.FindFirst("role")?.Value
+                   ?? state.User.FindFirst("http://schemas.microsoft.com/ws/2008/06/identity/claims/role")?.Value;
+        _isAdmin = string.Equals(role, "Админ", StringComparison.Ordinal);
+        if (!_isAdmin)
+        {
+            _loading = false;
+            return;
+        }
+
+        try
+        {
+            _rows = await AuditApi.GetLogsAsync(500);
+        }
+        catch
+        {
+            _rows = null;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

@@ -1,5 +1,9 @@
+using System;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
+using APIDeliveryCRM.Request;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace APIDeliveryCRM.Controllers
@@ -52,6 +56,52 @@ namespace APIDeliveryCRM.Controllers
             return new OkObjectResult(orders);
         }
 
+        [HttpGet("vehicles")]
+        public async Task<IActionResult> GetVehiclesByCompany([FromQuery] int companyId)
+        {
+            var list = await _courierService.GetVehiclesByCompanyAsync(companyId);
+            return new OkObjectResult(list);
+        }
+
+        [Authorize(Roles = "Менеджер,Админ")]
+        [HttpPut("{id:int}/documents")]
+        public async Task<IActionResult> UpdateDocuments(int id, [FromBody] UpdateCourierDocumentsRequest? body)
+        {
+            try
+            {
+                await _courierService.UpdateCourierDocumentsAsync(
+                    id,
+                    body?.DriverLicense,
+                    body?.PassportData);
+                return new OkResult();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
+        [Authorize(Roles = "Логист,Админ,Менеджер")]
+        [HttpPost("{id:int}/assign-vehicle")]
+        public async Task<IActionResult> AssignVehicle(int id, [FromQuery] int vehicleId)
+        {
+            try
+            {
+                var userId = ParseUserId(User);
+                var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+                await _courierService.AssignVehicleAsync(id, vehicleId, userId, ip);
+                return new OkResult();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpPost("{id:int}/location")]
         public async Task<IActionResult> UpdateLocation(int id, [FromQuery] decimal lat, [FromQuery] decimal lon)
         {
@@ -83,6 +133,12 @@ namespace APIDeliveryCRM.Controllers
             }
 
             return new OkResult();
+        }
+
+        private static int? ParseUserId(ClaimsPrincipal user)
+        {
+            var v = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return int.TryParse(v, out var id) ? id : null;
         }
     }
 }

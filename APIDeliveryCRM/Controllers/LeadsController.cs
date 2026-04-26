@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Request;
@@ -30,17 +29,11 @@ namespace APIDeliveryCRM.Controllers
         }
 
         [HttpPost]
-        public async Task<IActionResult> Create([FromBody] CreateLeadRequest request)
+        public async Task<IActionResult> Create(
+            [FromBody] CreateLeadRequest request,
+            [FromQuery] int companyId,
+            [FromQuery] int managerUserId)
         {
-            var companyIdStr = User.FindFirst("companyId")?.Value;
-            var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-            if (!int.TryParse(companyIdStr, out var companyId) ||
-                !int.TryParse(userIdStr, out var managerUserId))
-            {
-                return BadRequest(new { message = "Не удалось определить компанию или пользователя" });
-            }
-
             return await _leadService.CreateAsync(request, companyId, managerUserId);
         }
 
@@ -48,6 +41,24 @@ namespace APIDeliveryCRM.Controllers
         public async Task<IActionResult> UpdateStage(int id, [FromQuery] int stageId)
         {
             return await _leadService.UpdateStageAsync(id, stageId);
+        }
+
+        [HttpPost("{id:int}/lost")]
+        public async Task<IActionResult> MarkLost(int id, [FromQuery] string reason)
+        {
+            return await _leadService.MarkLostAsync(id, reason);
+        }
+
+        [HttpPost("{id:int}/won")]
+        public async Task<IActionResult> MarkWon(int id)
+        {
+            return await _leadService.MarkWonAsync(id);
+        }
+
+        [HttpGet("analytics")]
+        public async Task<IActionResult> Analytics([FromQuery] int companyId, [FromQuery] DateTime? from, [FromQuery] DateTime? to)
+        {
+            return await _leadService.GetAnalyticsAsync(companyId, from, to);
         }
     }
 }

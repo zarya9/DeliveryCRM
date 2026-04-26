@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APIDeliveryCRM.Model
@@ -32,6 +32,10 @@ namespace APIDeliveryCRM.Model
         public Order Order { get; set; }
 
         public bool Is_read { get; set; }
+        public byte Priority { get; set; } = 0;
+        public bool Is_critical { get; set; }
+        public bool Requires_ack { get; set; }
+        public DateTime? Acknowledged_at { get; set; }
         public DateOnly Sent_at { get; set; }
     }
 }

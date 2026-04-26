@@ -1,11 +1,13 @@
 using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
     public class FilesController : Controller
     {
         private readonly IFileService _fileService;
@@ -43,6 +45,12 @@ namespace APIDeliveryCRM.Controllers
         public async Task<IActionResult> GetReport(int reportId)
         {
             return await _fileService.GetReportAsync(reportId);
+        }
+
+        [HttpPost("chat-attachment")]
+        public async Task<IActionResult> UploadChatAttachment(IFormFile file, [FromQuery] int userId)
+        {
+            return await _fileService.UploadChatAttachmentAsync(file, userId);
         }
     }
 }

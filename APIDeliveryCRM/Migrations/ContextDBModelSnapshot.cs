@@ -140,6 +140,103 @@ namespace APIDeliveryCRM.Migrations
                     b.ToTable("AuditLogs");
                 });
 
+            modelBuilder.Entity("APIDeliveryCRM.Model.BillingInvoice", b =>
+                {
+                    b.Property<int>("ID_BillingInvoice")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_BillingInvoice"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric");
+
+                    b.Property<int>("Company_id")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("Due_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("Issued_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("Paid_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("PeriodMonths")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("SubscriptionPlan_id")
+                        .HasColumnType("integer");
+
+                    b.HasKey("ID_BillingInvoice");
+
+                    b.HasIndex("Company_id");
+
+                    b.HasIndex("SubscriptionPlan_id");
+
+                    b.ToTable("BillingInvoices");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.BillingWebhookEvent", b =>
+                {
+                    b.Property<int>("ID_BillingWebhookEvent")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_BillingWebhookEvent"));
+
+                    b.Property<string>("EventKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("EventName")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("PaymentId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("PaymentStatus")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("Processed_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("RawBody")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.HasKey("ID_BillingWebhookEvent");
+
+                    b.HasIndex("Provider", "EventKey")
+                        .IsUnique();
+
+                    b.ToTable("BillingWebhookEvents");
+                });
+
             modelBuilder.Entity("APIDeliveryCRM.Model.ChatMessage", b =>
                 {
                     b.Property<int>("ID_ChatMessage")
@@ -214,6 +311,50 @@ namespace APIDeliveryCRM.Migrations
                     b.HasIndex("User_id");
 
                     b.ToTable("ChatParticipants");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ChatQuickReplyTemplate", b =>
+                {
+                    b.Property<int>("ID_ChatQuickReplyTemplate")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_ChatQuickReplyTemplate"));
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int>("Company_id")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("Created_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Is_active")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("User_id")
+                        .HasColumnType("integer");
+
+                    b.HasKey("ID_ChatQuickReplyTemplate");
+
+                    b.HasIndex("Company_id");
+
+                    b.HasIndex("User_id");
+
+                    b.ToTable("ChatQuickReplyTemplates");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.ChatRoom", b =>
@@ -423,6 +564,45 @@ namespace APIDeliveryCRM.Migrations
                     b.ToTable("ClientStatuses");
                 });
 
+            modelBuilder.Entity("APIDeliveryCRM.Model.CommunicationTemplate", b =>
+                {
+                    b.Property<int>("ID_CommunicationTemplate")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_CommunicationTemplate"));
+
+                    b.Property<string>("BodyTemplate")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<int>("Company_id")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Is_active")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("TitleTemplate")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int?>("TriggerStatus_id")
+                        .HasColumnType("integer");
+
+                    b.HasKey("ID_CommunicationTemplate");
+
+                    b.HasIndex("Company_id");
+
+                    b.ToTable("CommunicationTemplates");
+                });
+
             modelBuilder.Entity("APIDeliveryCRM.Model.Company", b =>
                 {
                     b.Property<int>("ID_Company")
@@ -476,6 +656,12 @@ namespace APIDeliveryCRM.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
+                    b.Property<int>("SlaLateHours")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SlaOnTimeHours")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Subdomain")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -491,6 +677,49 @@ namespace APIDeliveryCRM.Migrations
                     b.HasKey("ID_Company");
 
                     b.ToTable("Companies");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.CompanySubscription", b =>
+                {
+                    b.Property<int>("ID_CompanySubscription")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_CompanySubscription"));
+
+                    b.Property<bool>("AutoRenew")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("Canceled_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Company_id")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CurrentPeriodEnd_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CurrentPeriodStart_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("Started_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<int>("SubscriptionPlan_id")
+                        .HasColumnType("integer");
+
+                    b.HasKey("ID_CompanySubscription");
+
+                    b.HasIndex("Company_id");
+
+                    b.HasIndex("SubscriptionPlan_id");
+
+                    b.ToTable("CompanySubscriptions");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.CourierFuelCard", b =>
@@ -824,6 +1053,13 @@ namespace APIDeliveryCRM.Migrations
                     b.Property<int>("LeadStage_id")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("Lost_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Lost_reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
                     b.Property<int?>("ManagerUser_id")
                         .HasColumnType("integer");
 
@@ -832,7 +1068,17 @@ namespace APIDeliveryCRM.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<DateTime?>("NextTask_due_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("NextTask_title")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<DateTime?>("Updated_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("Won_at")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("ID_Lead");
@@ -923,6 +1169,34 @@ namespace APIDeliveryCRM.Migrations
                     b.ToTable("Logins");
                 });
 
+            modelBuilder.Entity("APIDeliveryCRM.Model.LogisticsHub", b =>
+                {
+                    b.Property<int>("ID_LogisticsHub")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_LogisticsHub"));
+
+                    b.Property<int>("Address_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Company_id")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("ID_LogisticsHub");
+
+                    b.HasIndex("Address_id");
+
+                    b.HasIndex("Company_id");
+
+                    b.ToTable("LogisticsHubs");
+                });
+
             modelBuilder.Entity("APIDeliveryCRM.Model.ManagerProfile", b =>
                 {
                     b.Property<int>("ID_ManagerProfile")
@@ -991,8 +1265,14 @@ namespace APIDeliveryCRM.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_Notification"));
 
+                    b.Property<DateTime?>("Acknowledged_at")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("Company_id")
                         .HasColumnType("integer");
+
+                    b.Property<bool>("Is_critical")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("Is_read")
                         .HasColumnType("boolean");
@@ -1004,6 +1284,12 @@ namespace APIDeliveryCRM.Migrations
                     b.Property<int?>("Order_id")
                         .IsRequired()
                         .HasColumnType("integer");
+
+                    b.Property<byte>("Priority")
+                        .HasColumnType("smallint");
+
+                    b.Property<bool>("Requires_ack")
+                        .HasColumnType("boolean");
 
                     b.Property<DateOnly>("Sent_at")
                         .HasColumnType("date");
@@ -1060,6 +1346,9 @@ namespace APIDeliveryCRM.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_Order"));
 
+                    b.Property<DateTime?>("Arrived_at")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("Client_id")
                         .HasColumnType("integer");
 
@@ -1072,24 +1361,40 @@ namespace APIDeliveryCRM.Migrations
                     b.Property<DateTime>("Created_at")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Delay_reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<DateTime?>("Delivered_at")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("DeliveryAddress_id")
                         .HasColumnType("integer");
 
+                    b.Property<byte>("DeliveryRouteKind")
+                        .HasColumnType("smallint");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int?>("DestinationHub_id")
+                        .HasColumnType("integer");
+
                     b.Property<decimal>("Estimated_cost")
                         .HasColumnType("numeric");
+
+                    b.Property<DateTime?>("Eta_at")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<decimal>("Final_cost")
                         .HasColumnType("numeric");
 
                     b.Property<decimal>("Height")
                         .HasColumnType("numeric");
+
+                    b.Property<DateTime?>("In_transit_at")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("Is_paid")
                         .HasColumnType("boolean");
@@ -1110,6 +1415,9 @@ namespace APIDeliveryCRM.Migrations
                     b.Property<int>("Order_Number")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("OriginHub_id")
+                        .HasColumnType("integer");
+
                     b.Property<int>("PackageType_id")
                         .HasColumnType("integer");
 
@@ -1118,6 +1426,18 @@ namespace APIDeliveryCRM.Migrations
 
                     b.Property<int>("PickupAddress_id")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime?>("Pickup_started_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<byte>("Priority")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTime?>("Sla_breached_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("Sla_due_at")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("Status_id")
                         .HasColumnType("integer");
@@ -1138,9 +1458,13 @@ namespace APIDeliveryCRM.Migrations
 
                     b.HasIndex("DeliveryAddress_id");
 
+                    b.HasIndex("DestinationHub_id");
+
                     b.HasIndex("OrderStatusID_OrderStatus");
 
                     b.HasIndex("OrderType_id");
+
+                    b.HasIndex("OriginHub_id");
 
                     b.HasIndex("PackageType_id");
 
@@ -1151,6 +1475,52 @@ namespace APIDeliveryCRM.Migrations
                     b.HasIndex("Status_id");
 
                     b.ToTable("Orders");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.OrderRouteStop", b =>
+                {
+                    b.Property<int>("ID_OrderRouteStop")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_OrderRouteStop"));
+
+                    b.Property<int>("Address_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("AssignedCourier_id")
+                        .HasColumnType("integer");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("smallint");
+
+                    b.Property<int?>("LogisticsHub_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Order_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("ID_OrderRouteStop");
+
+                    b.HasIndex("Address_id");
+
+                    b.HasIndex("AssignedCourier_id");
+
+                    b.HasIndex("LogisticsHub_id");
+
+                    b.HasIndex("Order_id");
+
+                    b.ToTable("OrderRouteStops");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.OrderStatus", b =>
@@ -1173,6 +1543,55 @@ namespace APIDeliveryCRM.Migrations
                     b.HasKey("ID_OrderStatus");
 
                     b.ToTable("OrderStatuses");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.OrderTimelineEvent", b =>
+                {
+                    b.Property<int>("ID_OrderTimelineEvent")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_OrderTimelineEvent"));
+
+                    b.Property<int?>("ActorUser_id")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("Created_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(1500)
+                        .HasColumnType("character varying(1500)");
+
+                    b.Property<int?>("NewCourier_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("NewStatus_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("OldCourier_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("OldStatus_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Order_id")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("ID_OrderTimelineEvent");
+
+                    b.HasIndex("Order_id");
+
+                    b.ToTable("OrderTimelineEvents");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.OrderType", b =>
@@ -1253,6 +1672,51 @@ namespace APIDeliveryCRM.Migrations
                     b.HasKey("ID_PaymentMethod");
 
                     b.ToTable("PaymentMethods", (string)null);
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.PaymentTransaction", b =>
+                {
+                    b.Property<int>("ID_PaymentTransaction")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_PaymentTransaction"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric");
+
+                    b.Property<int>("BillingInvoice_id")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("Created_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FailureReason")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ProviderPaymentId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime?>("Succeeded_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("ID_PaymentTransaction");
+
+                    b.HasIndex("BillingInvoice_id");
+
+                    b.ToTable("PaymentTransactions");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.Report", b =>
@@ -1415,6 +1879,112 @@ namespace APIDeliveryCRM.Migrations
                     b.ToTable("ScheduleTypes");
                 });
 
+            modelBuilder.Entity("APIDeliveryCRM.Model.ScheduledReportJob", b =>
+                {
+                    b.Property<int>("ID_ScheduledReportJob")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_ScheduledReportJob"));
+
+                    b.Property<int>("Company_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("DayOfMonth")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("DayOfWeek")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Frequency")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<bool>("Is_active")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LastRun_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("NextRun_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReportType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("TimeUtc")
+                        .IsRequired()
+                        .HasMaxLength(5)
+                        .HasColumnType("character varying(5)");
+
+                    b.HasKey("ID_ScheduledReportJob");
+
+                    b.HasIndex("Company_id");
+
+                    b.ToTable("ScheduledReportJobs");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ServiceAreaZone", b =>
+                {
+                    b.Property<int>("ID_ServiceAreaZone")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_ServiceAreaZone"));
+
+                    b.Property<decimal>("Center_lat")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("Center_lon")
+                        .HasColumnType("numeric");
+
+                    b.Property<int>("Company_id")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Is_active")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<decimal>("Radius_km")
+                        .HasColumnType("numeric");
+
+                    b.HasKey("ID_ServiceAreaZone");
+
+                    b.HasIndex("Company_id");
+
+                    b.ToTable("ServiceAreaZones");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ServiceAreaZoneCourier", b =>
+                {
+                    b.Property<int>("ID_ServiceAreaZoneCourier")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_ServiceAreaZoneCourier"));
+
+                    b.Property<int>("CourierProfile_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ServiceAreaZone_id")
+                        .HasColumnType("integer");
+
+                    b.HasKey("ID_ServiceAreaZoneCourier");
+
+                    b.HasIndex("CourierProfile_id");
+
+                    b.HasIndex("ServiceAreaZone_id");
+
+                    b.ToTable("ServiceAreaZoneCouriers");
+                });
+
             modelBuilder.Entity("APIDeliveryCRM.Model.ShiftAssignment", b =>
                 {
                     b.Property<int>("ID_ShiftAssignment")
@@ -1467,6 +2037,114 @@ namespace APIDeliveryCRM.Migrations
                     b.HasKey("ID_ShiftStatus");
 
                     b.ToTable("ShiftStatuses");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.SubscriptionPlan", b =>
+                {
+                    b.Property<int>("ID_SubscriptionPlan")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_SubscriptionPlan"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MaxOrdersPerMonth")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MaxUsers")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("MonthlyPrice")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("ID_SubscriptionPlan");
+
+                    b.ToTable("SubscriptionPlans");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.SupportTicket", b =>
+                {
+                    b.Property<int>("ID_SupportTicket")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_SupportTicket"));
+
+                    b.Property<byte>("Category")
+                        .HasColumnType("smallint");
+
+                    b.Property<int?>("ClientProfile_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Company_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CreatedByUser_id")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("Created_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Delay_reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTime?>("FirstResponse_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("Order_id")
+                        .HasColumnType("integer");
+
+                    b.Property<byte>("Priority")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTime?>("Resolved_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ResponsibleUser_id")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("Sla_due_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("ID_SupportTicket");
+
+                    b.HasIndex("ClientProfile_id");
+
+                    b.HasIndex("Company_id");
+
+                    b.HasIndex("CreatedByUser_id");
+
+                    b.HasIndex("Order_id");
+
+                    b.HasIndex("ResponsibleUser_id");
+
+                    b.ToTable("SupportTickets");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.TransmissionType", b =>
@@ -1547,6 +2225,10 @@ namespace APIDeliveryCRM.Migrations
                     b.Property<int>("BodyType_id")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Brand_name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<decimal>("Cargo_volume")
                         .HasColumnType("numeric");
 
@@ -1560,7 +2242,7 @@ namespace APIDeliveryCRM.Migrations
                     b.Property<int>("Company_id")
                         .HasColumnType("integer");
 
-                    b.Property<int>("CurrentCourier_id")
+                    b.Property<int?>("CurrentCourier_id")
                         .HasColumnType("integer");
 
                     b.Property<decimal>("Current_mileage")
@@ -1572,19 +2254,35 @@ namespace APIDeliveryCRM.Migrations
                     b.Property<int>("FuelType_id")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("Insurance_expires_at")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Insurance_policy")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<bool>("Is_available")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("License_plate")
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTime?>("Maintenance_due_at")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<decimal>("Max_cargo_weight")
                         .HasColumnType("numeric");
 
-                    b.Property<int>("Model_id")
+                    b.Property<int?>("Model_id")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Model_name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("Registration_expires_at")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("VIN")
                         .IsRequired()
@@ -1813,6 +2511,25 @@ namespace APIDeliveryCRM.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("APIDeliveryCRM.Model.BillingInvoice", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("Company_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.SubscriptionPlan", "Plan")
+                        .WithMany()
+                        .HasForeignKey("SubscriptionPlan_id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Plan");
+                });
+
             modelBuilder.Entity("APIDeliveryCRM.Model.ChatMessage", b =>
                 {
                     b.HasOne("APIDeliveryCRM.Model.ChatRoom", "ChatRoom")
@@ -1847,6 +2564,25 @@ namespace APIDeliveryCRM.Migrations
                         .IsRequired();
 
                     b.Navigation("ChatRoom");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ChatQuickReplyTemplate", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("Company_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.User", "User")
+                        .WithMany()
+                        .HasForeignKey("User_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
 
                     b.Navigation("User");
                 });
@@ -1943,6 +2679,36 @@ namespace APIDeliveryCRM.Migrations
                     b.Navigation("PaymentMethod");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.CommunicationTemplate", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("Company_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.CompanySubscription", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("Company_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.SubscriptionPlan", "Plan")
+                        .WithMany()
+                        .HasForeignKey("SubscriptionPlan_id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Plan");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.CourierFuelCard", b =>
@@ -2129,6 +2895,25 @@ namespace APIDeliveryCRM.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("APIDeliveryCRM.Model.LogisticsHub", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.Address", "Address")
+                        .WithMany()
+                        .HasForeignKey("Address_id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("Company_id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Address");
+
+                    b.Navigation("Company");
+                });
+
             modelBuilder.Entity("APIDeliveryCRM.Model.ManagerProfile", b =>
                 {
                     b.HasOne("APIDeliveryCRM.Model.Company", "Company")
@@ -2208,6 +2993,11 @@ namespace APIDeliveryCRM.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("APIDeliveryCRM.Model.LogisticsHub", "DestinationHub")
+                        .WithMany()
+                        .HasForeignKey("DestinationHub_id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("APIDeliveryCRM.Model.OrderStatus", null)
                         .WithMany("Orders")
                         .HasForeignKey("OrderStatusID_OrderStatus");
@@ -2217,6 +3007,11 @@ namespace APIDeliveryCRM.Migrations
                         .HasForeignKey("OrderType_id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.LogisticsHub", "OriginHub")
+                        .WithMany()
+                        .HasForeignKey("OriginHub_id")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("APIDeliveryCRM.Model.PackageType", "PackageType")
                         .WithMany()
@@ -2250,15 +3045,74 @@ namespace APIDeliveryCRM.Migrations
 
                     b.Navigation("DeliveryAddress");
 
+                    b.Navigation("DestinationHub");
+
                     b.Navigation("OrderStatus");
 
                     b.Navigation("OrderType");
+
+                    b.Navigation("OriginHub");
 
                     b.Navigation("PackageType");
 
                     b.Navigation("PaymentMethod");
 
                     b.Navigation("PickupAddress");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.OrderRouteStop", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.Address", "Address")
+                        .WithMany()
+                        .HasForeignKey("Address_id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.CourierProfile", "AssignedCourier")
+                        .WithMany()
+                        .HasForeignKey("AssignedCourier_id")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("APIDeliveryCRM.Model.LogisticsHub", "LogisticsHub")
+                        .WithMany()
+                        .HasForeignKey("LogisticsHub_id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("APIDeliveryCRM.Model.Order", "Order")
+                        .WithMany("RouteStops")
+                        .HasForeignKey("Order_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Address");
+
+                    b.Navigation("AssignedCourier");
+
+                    b.Navigation("LogisticsHub");
+
+                    b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.OrderTimelineEvent", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.Order", "Order")
+                        .WithMany("TimelineEvents")
+                        .HasForeignKey("Order_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.PaymentTransaction", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.BillingInvoice", "Invoice")
+                        .WithMany()
+                        .HasForeignKey("BillingInvoice_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Invoice");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.Report", b =>
@@ -2323,6 +3177,47 @@ namespace APIDeliveryCRM.Migrations
                     b.Navigation("UserTarget");
                 });
 
+            modelBuilder.Entity("APIDeliveryCRM.Model.ScheduledReportJob", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("Company_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ServiceAreaZone", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("Company_id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ServiceAreaZoneCourier", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.CourierProfile", "Courier")
+                        .WithMany()
+                        .HasForeignKey("CourierProfile_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.ServiceAreaZone", "Zone")
+                        .WithMany("Couriers")
+                        .HasForeignKey("ServiceAreaZone_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Courier");
+
+                    b.Navigation("Zone");
+                });
+
             modelBuilder.Entity("APIDeliveryCRM.Model.ShiftAssignment", b =>
                 {
                     b.HasOne("APIDeliveryCRM.Model.Company", "Company")
@@ -2348,6 +3243,46 @@ namespace APIDeliveryCRM.Migrations
                     b.Navigation("Order");
 
                     b.Navigation("Shift");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.SupportTicket", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.ClientProfile", "ClientProfile")
+                        .WithMany()
+                        .HasForeignKey("ClientProfile_id")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("APIDeliveryCRM.Model.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("Company_id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUser_id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.Order", "Order")
+                        .WithMany()
+                        .HasForeignKey("Order_id")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("APIDeliveryCRM.Model.User", "ResponsibleUser")
+                        .WithMany()
+                        .HasForeignKey("ResponsibleUser_id")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ClientProfile");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Order");
+
+                    b.Navigation("ResponsibleUser");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.User", b =>
@@ -2392,8 +3327,7 @@ namespace APIDeliveryCRM.Migrations
                     b.HasOne("APIDeliveryCRM.Model.CourierProfile", "CourierProfile")
                         .WithMany()
                         .HasForeignKey("CurrentCourier_id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("APIDeliveryCRM.Model.FuelType", "FuelType")
                         .WithMany()
@@ -2404,8 +3338,7 @@ namespace APIDeliveryCRM.Migrations
                     b.HasOne("APIDeliveryCRM.Model.VehicleModel", "VehicleModel")
                         .WithMany()
                         .HasForeignKey("Model_id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Company");
 
@@ -2531,6 +3464,10 @@ namespace APIDeliveryCRM.Migrations
             modelBuilder.Entity("APIDeliveryCRM.Model.Order", b =>
                 {
                     b.Navigation("ChatRooms");
+
+                    b.Navigation("RouteStops");
+
+                    b.Navigation("TimelineEvents");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.OrderStatus", b =>
@@ -2541,6 +3478,11 @@ namespace APIDeliveryCRM.Migrations
             modelBuilder.Entity("APIDeliveryCRM.Model.ReportStatus", b =>
                 {
                     b.Navigation("Reports");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ServiceAreaZone", b =>
+                {
+                    b.Navigation("Couriers");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.ShiftStatus", b =>

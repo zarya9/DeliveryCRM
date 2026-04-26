@@ -1,18 +1,17 @@
-using Blazored.LocalStorage;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR.Client;
 
 namespace WebBlazorDeliveryCRM.Services;
 
 public class ChatHubClientService : IAsyncDisposable
 {
-    private const string TokenKey = "auth_token";
-    private readonly ILocalStorageService _localStorage;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IConfiguration _configuration;
     private HubConnection? _hubConnection;
 
-    public ChatHubClientService(ILocalStorageService localStorage, IConfiguration configuration)
+    public ChatHubClientService(IHttpContextAccessor httpContextAccessor, IConfiguration configuration)
     {
-        _localStorage = localStorage;
+        _httpContextAccessor = httpContextAccessor;
         _configuration = configuration;
     }
 
@@ -31,10 +30,10 @@ public class ChatHubClientService : IAsyncDisposable
         _hubConnection = new HubConnectionBuilder()
             .WithUrl(hubUrl, options =>
             {
-                options.AccessTokenProvider = async () =>
+                options.AccessTokenProvider = () =>
                 {
-                    var token = await _localStorage.GetItemAsync<string>(TokenKey);
-                    return token;
+                    var token = _httpContextAccessor.HttpContext?.Request.Cookies[AuthCookieConstants.CookieName];
+                    return Task.FromResult<string?>(token);
                 };
             })
             .WithAutomaticReconnect()

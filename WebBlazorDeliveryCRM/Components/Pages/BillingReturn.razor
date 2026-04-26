@@ -1,0 +1,33 @@
+@page "/billing/return"
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@inject NavigationManager Navigation
+
+<PageTitle>Возврат из оплаты</PageTitle>
+
+<div class="d-flex justify-content-center align-items-center" style="min-height: 65vh;">
+    <div class="dms-card" style="max-width: 36rem; width: 100%;">
+        <h1 class="dms-card-title mb-2">Оплата обрабатывается</h1>
+        <p class="text-muted mb-3">
+            Платеж отправлен в систему. Статус может обновиться не мгновенно после webhook от провайдера.
+        </p>
+        <div class="alert alert-info mb-3">
+            Откройте страницу биллинга и нажмите обновить, если статус счета не сменился автоматически.
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" @onclick="GoToBilling">Перейти в оплату и тариф</button>
+            <button class="btn btn-outline-secondary" @onclick="GoHome">На главную</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private void GoToBilling()
+    {
+        Navigation.NavigateTo("/manager/billing?refresh=1", forceLoad: true);
+    }
+
+    private void GoHome()
+    {
+        Navigation.NavigateTo("/", forceLoad: true);
+    }
+}

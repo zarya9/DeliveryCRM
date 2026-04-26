@@ -117,7 +117,9 @@ namespace APIDeliveryCRM.Services
                         SubscriptionPlan = "Pro",
                         MaxUsers = 100,
                         MaxOrdersPerMonth = 10000,
-                        SubscriptionExpiresAt = DateTime.UtcNow.AddYears(1)
+                        SubscriptionExpiresAt = DateTime.UtcNow.AddYears(1),
+                        SlaOnTimeHours = 4,
+                        SlaLateHours = 24
                     };
                     _context.Companies.Add(defaultCompany);
                     await _context.SaveChangesAsync();
@@ -217,7 +219,9 @@ namespace APIDeliveryCRM.Services
                         SubscriptionPlan = "Pro",
                         MaxUsers = 100,
                         MaxOrdersPerMonth = 10000,
-                        SubscriptionExpiresAt = DateTime.UtcNow.AddYears(1)
+                        SubscriptionExpiresAt = DateTime.UtcNow.AddYears(1),
+                        SlaOnTimeHours = 4,
+                        SlaLateHours = 24
                     };
                     _context.Companies.Add(defaultCompany);
                     await _context.SaveChangesAsync();
@@ -313,7 +317,9 @@ namespace APIDeliveryCRM.Services
                         SubscriptionPlan = "Pro",
                         MaxUsers = 100,
                         MaxOrdersPerMonth = 10000,
-                        SubscriptionExpiresAt = DateTime.UtcNow.AddYears(1)
+                        SubscriptionExpiresAt = DateTime.UtcNow.AddYears(1),
+                        SlaOnTimeHours = 4,
+                        SlaLateHours = 24
                     };
                     _context.Companies.Add(defaultCompany);
                     await _context.SaveChangesAsync();
@@ -423,7 +429,9 @@ namespace APIDeliveryCRM.Services
                         SubscriptionPlan = "Pro",
                         MaxUsers = 100,
                         MaxOrdersPerMonth = 10000,
-                        SubscriptionExpiresAt = DateTime.UtcNow.AddYears(1)
+                        SubscriptionExpiresAt = DateTime.UtcNow.AddYears(1),
+                        SlaOnTimeHours = 4,
+                        SlaLateHours = 24
                     };
                     _context.Companies.Add(defaultCompany);
                     await _context.SaveChangesAsync();

@@ -1,0 +1,224 @@
+@page "/logistician/vehicles/add"
+@layout LogisticianLayout
+@using System.Security.Claims
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject VehiclesApiService VehiclesApi
+@inject CouriersApiService CouriersApi
+@inject AuthenticationStateProvider AuthState
+@inject AppNotificationService Notify
+@inject NavigationManager Nav
+
+<PageTitle>Новое ТС — Логист</PageTitle>
+
+<div class="dms-page-header">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <a href="/logistician/couriers" class="btn btn-outline-secondary btn-sm">← К курьерам</a>
+    </div>
+    <h1>Добавить транспорт</h1>
+    <p class="subtitle">
+        Из справочников выбираются только <strong>категория</strong>, <strong>тип кузова</strong> и <strong>топливо</strong> (таблицы VehicleCategories, VehicleBodyTypes, FuelTypes).
+        Марка, модель, госномер, VIN и прочие параметры — вручную (поля таблицы Vehicles).
+    </p>
+</div>
+
+@if (_loading)
+{
+    <p class="text-muted">Загрузка справочников…</p>
+}
+else if (_lookups is null)
+{
+    <div class="alert alert-warning">Не удалось загрузить справочники. Проверьте вход и права (логист / менеджер).</div>
+}
+else
+{
+    <div class="dms-card">
+        <h2 class="dms-card-title">Параметры ТС</h2>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">Гос. номер *</label>
+                <input class="form-control" @bind="_req.License_plate" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">VIN *</label>
+                <input class="form-control" @bind="_req.VIN" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Год выпуска *</label>
+                <input type="number" class="form-control" @bind="_year" min="1980" max="2100" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Категория * <span class="text-muted small">(справочник)</span></label>
+                <select class="form-select" @bind="_req.Category_id">
+                    <option value="0">—</option>
+                    @foreach (var c in _lookups.Categories)
+                    {
+                        <option value="@c.Id">@c.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Марка *</label>
+                <input class="form-control" placeholder="Например: Toyota" @bind="_req.Brand_name" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Модель *</label>
+                <input class="form-control" placeholder="Например: Camry" @bind="_req.Model_name" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Кузов * <span class="text-muted small">(справочник)</span></label>
+                <select class="form-select" @bind="_req.BodyType_id">
+                    <option value="0">—</option>
+                    @foreach (var b in _lookups.BodyTypes)
+                    {
+                        <option value="@b.Id">@b.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Цвет</label>
+                <input class="form-control" @bind="_req.Color" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Топливо * <span class="text-muted small">(справочник)</span></label>
+                <select class="form-select" @bind="_req.FuelType_id">
+                    <option value="0">—</option>
+                    @foreach (var f in _lookups.FuelTypes)
+                    {
+                        <option value="@f.Id">@f.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Объём кузова, м³</label>
+                <input type="number" step="0.01" class="form-control" @bind="_req.Cargo_volume" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Макс. груз, кг</label>
+                <input type="number" step="0.01" class="form-control" @bind="_req.Max_cargo_weight" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Бак, л</label>
+                <input type="number" step="0.01" class="form-control" @bind="_req.FuelTank_Capacity" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Пробег</label>
+                <input type="number" step="0.01" class="form-control" @bind="_req.Current_mileage" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Полис страхования</label>
+                <input class="form-control" @bind="_req.Insurance_policy" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Сразу закрепить за курьером (необязательно)</label>
+                <select class="form-select" @bind="_courierId">
+                    <option value="0">— только автопарк —</option>
+                    @foreach (var c in _couriers.OrderBy(x => x.User?.FName))
+                    {
+                        <option value="@c.ID_CourierProfile">@($"{c.User?.FName} {c.User?.Name}".Trim()) (#@c.ID_CourierProfile)</option>
+                    }
+                </select>
+            </div>
+        </div>
+        <div class="mt-3">
+            <button type="button" class="btn btn-primary dms-btn-primary" disabled="@_saving" @onclick="Save">
+                @(_saving ? "Сохранение…" : "Создать ТС")
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    private VehicleFormLookupsDto? _lookups;
+    private List<CourierProfileDto> _couriers = new();
+    private CreateVehicleApiRequest _req = new()
+    {
+        Year = new DateOnly(2020, 1, 1),
+        Cargo_volume = 0,
+        Max_cargo_weight = 0,
+        FuelTank_Capacity = 0,
+        Current_mileage = 0
+    };
+    private int _year = DateTime.UtcNow.Year;
+    private int _courierId;
+    private bool _loading = true;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        try
+        {
+            var state = await AuthState.GetAuthenticationStateAsync();
+            var cidStr = state.User.FindFirst("companyId")?.Value;
+            if (!int.TryParse(cidStr, out var companyId))
+            {
+                _lookups = null;
+                return;
+            }
+
+            _lookups = await VehiclesApi.GetLookupsAsync();
+            if (_lookups is null)
+            {
+                Notify.ShowWarning("Сессия истекла или нет доступа. Войдите заново.");
+                Nav.NavigateTo("/login");
+                return;
+            }
+            _couriers = await CouriersApi.GetAllAsync(companyId) ?? new();
+        }
+        catch (Exception ex)
+        {
+            Notify.ShowError($"Ошибка загрузки данных: {ex.Message}");
+            _lookups = null;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task Save()
+    {
+        if (_lookups is null) return;
+        if (string.IsNullOrWhiteSpace(_req.License_plate) || string.IsNullOrWhiteSpace(_req.VIN))
+        {
+            Notify.ShowWarning("Укажите гос. номер и VIN.");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_req.Brand_name) || string.IsNullOrWhiteSpace(_req.Model_name))
+        {
+            Notify.ShowWarning("Укажите марку и модель ТС.");
+            return;
+        }
+        if (_req.Category_id <= 0 || _req.BodyType_id <= 0 || _req.FuelType_id <= 0)
+        {
+            Notify.ShowWarning("Выберите категорию, тип кузова и тип топлива.");
+            return;
+        }
+
+        _req.Year = new DateOnly(Math.Clamp(_year, 1980, 2100), 1, 1);
+        _req.Model_id = null;
+        _req.CurrentCourier_id = _courierId > 0 ? _courierId : null;
+
+        _saving = true;
+        try
+        {
+            var (ok, err, id) = await VehiclesApi.CreateVehicleAsync(_req);
+            if (ok)
+            {
+                Notify.ShowSuccess(id.HasValue ? $"ТС создано (id {id})." : "ТС создано.");
+                Nav.NavigateTo("/logistician/couriers");
+            }
+            else
+                Notify.ShowError(string.IsNullOrWhiteSpace(err) ? "Ошибка создания." : err);
+        }
+        catch (Exception ex)
+        {
+            Notify.ShowError(ex.Message);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

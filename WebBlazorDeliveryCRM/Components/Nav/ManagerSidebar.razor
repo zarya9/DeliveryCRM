@@ -9,26 +9,51 @@
     }
 </div>
 <nav class="sidebar-nav">
-    <NavLink href="/manager" class="sidebar-link" Match="NavLinkMatch.Prefix">
+    <NavLink href="/manager" class="sidebar-link" Match="NavLinkMatch.All">
         <span class="icon">⌂</span> Дашборд
     </NavLink>
+    <NavLink href="/manager/notifications" class="sidebar-link">
+        <span class="icon">◉</span> Уведомления
+    </NavLink>
+    <NavLink href="/manager/chat" class="sidebar-link">
+        <span class="icon">✉</span> Чат
+    </NavLink>
     <NavLink href="/manager/orders" class="sidebar-link">
-        <span class="icon">📋</span> Заказы
+        <span class="icon">▤</span> Заказы
     </NavLink>
     <NavLink href="/manager/leads" class="sidebar-link">
-        <span class="icon">🧲</span> Лиды
+        <span class="icon">◎</span> Лиды
     </NavLink>
     <NavLink href="/manager/employees" class="sidebar-link">
-        <span class="icon">👥</span> Сотрудники
+        <span class="icon">◍</span> Сотрудники
+    </NavLink>
+    <NavLink href="/manager/hubs" class="sidebar-link">
+        <span class="icon">▣</span> Склады (хабы)
     </NavLink>
     <NavLink href="/manager/analytics" class="sidebar-link">
-        <span class="icon">📊</span> Аналитика
+        <span class="icon">▦</span> Аналитика
     </NavLink>
+    <NavLink href="/manager/billing" class="sidebar-link">
+        <span class="icon">₽</span> Оплата и тариф
+    </NavLink>
+    <NavLink href="/manager/communication-templates" class="sidebar-link">
+        <span class="icon">✎</span> Шаблоны сообщений
+    </NavLink>
+    <NavLink href="/manager/scheduled-reports" class="sidebar-link">
+        <span class="icon">⌚</span> Плановые отчеты
+    </NavLink>
+    @if (_isAdmin)
+    {
+        <NavLink href="/admin/audit" class="sidebar-link">
+            <span class="icon">≣</span> Аудит
+        </NavLink>
+    }
 </nav>
 
 @code {
     private string? _fullName;
     private string? _email;
+    private bool _isAdmin;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -38,6 +63,10 @@
         _email = user.FindFirst(ClaimTypes.Email)?.Value
                  ?? user.FindFirst("email")?.Value;
         _fullName = user.FindFirst(ClaimTypes.Name)?.Value;
+        var role = user.FindFirst(ClaimTypes.Role)?.Value
+                   ?? user.FindFirst("role")?.Value
+                   ?? user.FindFirst("http://schemas.microsoft.com/ws/2008/06/identity/claims/role")?.Value;
+        _isAdmin = string.Equals(role, "Админ", StringComparison.Ordinal);
         StateHasChanged();
     }
 }

@@ -1,25 +1,25 @@
 :root {
-    --dms-primary: #2563eb;
-    --dms-primary-hover: #1d4ed8;
-    --dms-primary-light: #dbeafe;
+    --dms-primary: #008b8b;
+    --dms-primary-hover: #007575;
+    --dms-primary-light: #e6f7f7;
 
-    --dms-sidebar-bg: #0f172a;
-    --dms-sidebar-fg: #f1f5f9;
-    --dms-sidebar-accent: rgba(255,255,255,0.1);
-    --dms-sidebar-active: rgba(255,255,255,0.15);
+    --dms-sidebar-bg: #eef3f3;
+    --dms-sidebar-fg: #1f2a2a;
+    --dms-sidebar-accent: rgba(0, 139, 139, 0.09);
+    --dms-sidebar-active: rgba(0, 139, 139, 0.18);
 
-    --dms-page-bg: #f1f5f9;
+    --dms-page-bg: #f4f7f7;
     --dms-card-bg: #ffffff;
-    --dms-card-border: #e2e8f0;
-    --dms-card-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    --dms-card-border: #d4dddd;
+    --dms-card-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 
-    --dms-text: #0f172a;
-    --dms-text-muted: #64748b;
-    --dms-text-light: #94a3b8;
+    --dms-text: #1f2a2a;
+    --dms-text-muted: #4b5f5f;
+    --dms-text-light: #6f8080;
 
-    --dms-success: #059669;
-    --dms-warning: #d97706;
-    --dms-error: #dc2626;
+    --dms-success: #007a63;
+    --dms-warning: #8a6f1d;
+    --dms-error: #b42318;
 
     --dms-space-1: 0.25rem;
     --dms-space-2: 0.5rem;
@@ -29,6 +29,26 @@
     --dms-space-6: 1.5rem;
     --dms-radius: 8px;
     --dms-radius-lg: 12px;
+}
+
+[data-theme="dark"] {
+    --dms-primary: #00b7b7;
+    --dms-primary-hover: #14caca;
+    --dms-primary-light: rgba(0, 183, 183, 0.16);
+
+    --dms-sidebar-bg: #333333;
+    --dms-sidebar-fg: #ecffff;
+    --dms-sidebar-accent: rgba(0, 183, 183, 0.20);
+    --dms-sidebar-active: rgba(0, 183, 183, 0.32);
+
+    --dms-page-bg: #333333;
+    --dms-card-bg: #3b3b3b;
+    --dms-card-border: #4f4f4f;
+    --dms-card-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
+
+    --dms-text: #eaffff;
+    --dms-text-muted: #b8d7d7;
+    --dms-text-light: #8fb6b6;
 }
 
 html, body {
@@ -72,8 +92,8 @@ html, body {
 
 .dms-btn-primary {
     background: var(--dms-primary);
-    color: #fff;
-    border: none;
+    color: var(--dms-page-bg);
+    border: 1px solid var(--dms-primary);
     padding: var(--dms-space-2) var(--dms-space-4);
     border-radius: var(--dms-radius);
     font-weight: 500;
@@ -149,4 +169,19 @@ html, body {
 .dms-btn-outline:hover {
     border-color: var(--dms-primary);
     color: var(--dms-primary);
+    background: var(--dms-primary-light);
+}
+
+.theme-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.theme-toggle-symbol {
+    display: inline-block;
+    width: 1.25rem;
+    text-align: center;
+    font-size: 1rem;
+    line-height: 1;
 }

@@ -17,6 +17,8 @@ namespace APIDeliveryCRM.Request
         public int LeadStageId { get; set; }
 
         public string? Comment { get; set; }
+        public string? NextTaskTitle { get; set; }
+        public DateTime? NextTaskDueAtUtc { get; set; }
     }
 
     public class LeadDto
@@ -30,6 +32,11 @@ namespace APIDeliveryCRM.Request
         public string? ManagerName { get; set; }
         public DateTime CreatedAt { get; set; }
         public string? Comment { get; set; }
+        public string? LostReason { get; set; }
+        public DateTime? WonAt { get; set; }
+        public DateTime? LostAt { get; set; }
+        public string? NextTaskTitle { get; set; }
+        public DateTime? NextTaskDueAtUtc { get; set; }
     }
 }
 
