@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using System.Security.Claims;
 using APIDeliveryCRM.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -48,9 +49,20 @@ namespace APIDeliveryCRM.Controllers
         }
 
         [HttpPost("chat-attachment")]
-        public async Task<IActionResult> UploadChatAttachment(IFormFile file, [FromQuery] int userId)
+        public async Task<IActionResult> UploadChatAttachment(IFormFile file, [FromQuery] int? userId = null)
         {
-            return await _fileService.UploadChatAttachmentAsync(file, userId);
+            var resolvedUserId = userId ?? GetCurrentUserId();
+            if (!resolvedUserId.HasValue)
+                return Unauthorized(new { message = "User id was not found in token." });
+
+            return await _fileService.UploadChatAttachmentAsync(file, resolvedUserId.Value);
+        }
+
+        private int? GetCurrentUserId()
+        {
+            var claim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                        ?? User.FindFirst("sub")?.Value;
+            return int.TryParse(claim, out var id) ? id : null;
         }
     }
 }

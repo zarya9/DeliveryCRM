@@ -7,14 +7,16 @@ namespace WebBlazorDeliveryCRM.Services;
 public class AuthApiService
 {
     private readonly IHttpClientFactory _factory;
+    private readonly IConfiguration _configuration;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
 
-    public AuthApiService(IHttpClientFactory factory)
+    public AuthApiService(IHttpClientFactory factory, IConfiguration configuration)
     {
         _factory = factory;
+        _configuration = configuration;
     }
 
     public async Task<LoginResult> LoginAsync(string email, string password)
@@ -52,11 +54,13 @@ public class AuthApiService
         }
         catch (HttpRequestException ex)
         {
-            return new LoginResult { Success = false, ErrorMessage = "Не удалось подключиться к API. Запустите проект APIDeliveryCRM (профиль «http», порт 5220) и обновите страницу. " + ex.Message };
+            var apiBase = (_configuration["ApiBaseUrl"] ?? "http://localhost:5220").TrimEnd('/');
+            return new LoginResult { Success = false, ErrorMessage = $"Не удалось подключиться к API ({apiBase}). Запустите проект APIDeliveryCRM и обновите страницу. {ex.Message}" };
         }
         catch (TaskCanceledException)
         {
-            return new LoginResult { Success = false, ErrorMessage = "Превышено время ожидания (5 с). Запустите API (http://localhost:5220) и попробуйте снова." };
+            var apiBase = (_configuration["ApiBaseUrl"] ?? "http://localhost:5220").TrimEnd('/');
+            return new LoginResult { Success = false, ErrorMessage = $"Превышено время ожидания (5 с). Проверьте API ({apiBase}) и попробуйте снова." };
         }
         catch (Exception ex)
         {

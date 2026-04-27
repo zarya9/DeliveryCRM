@@ -1,4 +1,5 @@
 @using System.Security.Claims
+@using WebBlazorDeliveryCRM.Components.Shared
 @inject AuthenticationStateProvider AuthStateProvider
 
 <div class="sidebar-header">
@@ -10,42 +11,42 @@
 </div>
 <nav class="sidebar-nav">
     <NavLink href="/manager" class="sidebar-link" Match="NavLinkMatch.All">
-        <span class="icon">⌂</span> Дашборд
-    </NavLink>
-    <NavLink href="/manager/notifications" class="sidebar-link">
-        <span class="icon">◉</span> Уведомления
+        <HugeIcon Name="dashboard-square-01" CssClass="icon" /> <span class="sidebar-label">Дашборд</span>
     </NavLink>
     <NavLink href="/manager/chat" class="sidebar-link">
-        <span class="icon">✉</span> Чат
+        <HugeIcon Name="message-01" CssClass="icon" /> <span class="sidebar-label">Чат</span>
     </NavLink>
     <NavLink href="/manager/orders" class="sidebar-link">
-        <span class="icon">▤</span> Заказы
+        <HugeIcon Name="invoice-01" CssClass="icon" /> <span class="sidebar-label">Заказы</span>
     </NavLink>
     <NavLink href="/manager/leads" class="sidebar-link">
-        <span class="icon">◎</span> Лиды
+        <HugeIcon Name="task-01" CssClass="icon" /> <span class="sidebar-label">Лиды</span>
     </NavLink>
     <NavLink href="/manager/employees" class="sidebar-link">
-        <span class="icon">◍</span> Сотрудники
+        <HugeIcon Name="user-group" CssClass="icon" /> <span class="sidebar-label">Сотрудники</span>
     </NavLink>
     <NavLink href="/manager/hubs" class="sidebar-link">
-        <span class="icon">▣</span> Склады (хабы)
+        <HugeIcon Name="store-01" CssClass="icon" /> <span class="sidebar-label">Склады (хабы)</span>
     </NavLink>
     <NavLink href="/manager/analytics" class="sidebar-link">
-        <span class="icon">▦</span> Аналитика
+        <HugeIcon Name="analytics-up" CssClass="icon" /> <span class="sidebar-label">Аналитика</span>
+    </NavLink>
+    <NavLink href="/manager/geoanalytics" class="sidebar-link">
+        <HugeIcon Name="location-01" CssClass="icon" /> <span class="sidebar-label">Геоаналитика</span>
     </NavLink>
     <NavLink href="/manager/billing" class="sidebar-link">
-        <span class="icon">₽</span> Оплата и тариф
+        <HugeIcon Name="wallet-01" CssClass="icon" /> <span class="sidebar-label">Оплата и тариф</span>
     </NavLink>
     <NavLink href="/manager/communication-templates" class="sidebar-link">
-        <span class="icon">✎</span> Шаблоны сообщений
+        <HugeIcon Name="edit-01" CssClass="icon" /> <span class="sidebar-label">Шаблоны сообщений</span>
     </NavLink>
     <NavLink href="/manager/scheduled-reports" class="sidebar-link">
-        <span class="icon">⌚</span> Плановые отчеты
+        <HugeIcon Name="calendar-03" CssClass="icon" /> <span class="sidebar-label">Плановые отчеты</span>
     </NavLink>
     @if (_isAdmin)
     {
         <NavLink href="/admin/audit" class="sidebar-link">
-            <span class="icon">≣</span> Аудит
+            <HugeIcon Name="audit-01" CssClass="icon" /> <span class="sidebar-label">Аудит</span>
         </NavLink>
     }
 </nav>

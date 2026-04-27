@@ -49,6 +49,8 @@ main {
 @media (min-width: 641px) {
     .page {
         flex-direction: row;
+        height: 100vh;
+        overflow: hidden;
     }
 
     .sidebar {
@@ -56,6 +58,15 @@ main {
         height: 100vh;
         position: sticky;
         top: 0;
+        overflow-y: auto;
+        flex-shrink: 0;
+    }
+
+    main {
+        flex: 1;
+        height: 100vh;
+        overflow-y: auto;
+        overflow-x: hidden;
     }
 
     .top-row {

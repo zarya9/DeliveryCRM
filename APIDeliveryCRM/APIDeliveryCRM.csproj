@@ -28,7 +28,7 @@
     <Folder Include="Controllers\" />
     <Folder Include="Interfaces\" />
     <Folder Include="Services\" />
-    <Folder Include="wwwroot\" />
+    <Folder Include="wwwroot\Новая папка\" />
   </ItemGroup>
 
 </Project>

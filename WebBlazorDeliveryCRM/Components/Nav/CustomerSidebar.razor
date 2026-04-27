@@ -1,26 +1,28 @@
+@using WebBlazorDeliveryCRM.Components.Shared
+
 <div class="sidebar-header">
     <h2 class="sidebar-title">Клиент</h2>
 </div>
 <nav class="sidebar-nav">
     <NavLink href="/customer" class="sidebar-link" Match="NavLinkMatch.Prefix">
-        <span class="icon">⌂</span> Главная
+        <HugeIcon Name="home-01" CssClass="icon" /> <span class="sidebar-label">Главная</span>
     </NavLink>
     <NavLink href="/customer/create-order" class="sidebar-link">
-        <span class="icon">+</span> Создать заказ
+        <HugeIcon Name="plus-sign" CssClass="icon" /> <span class="sidebar-label">Создать заказ</span>
     </NavLink>
     <NavLink href="/customer/orders" class="sidebar-link">
-        <span class="icon">▤</span> Мои заказы
+        <HugeIcon Name="invoice-01" CssClass="icon" /> <span class="sidebar-label">Мои заказы</span>
     </NavLink>
     <NavLink href="/customer/tracking" class="sidebar-link">
-        <span class="icon">◉</span> Отслеживание
+        <HugeIcon Name="location-01" CssClass="icon" /> <span class="sidebar-label">Отслеживание</span>
     </NavLink>
     <NavLink href="/customer/profile" class="sidebar-link">
-        <span class="icon">◍</span> Профиль
+        <HugeIcon Name="user-03" CssClass="icon" /> <span class="sidebar-label">Профиль</span>
     </NavLink>
     <NavLink href="/customer/shifts" class="sidebar-link">
-        <span class="icon">▥</span> Смены
+        <HugeIcon Name="calendar-03" CssClass="icon" /> <span class="sidebar-label">Смены</span>
     </NavLink>
     <NavLink href="/customer/chat" class="sidebar-link">
-        <span class="icon">✉</span> Чат
+        <HugeIcon Name="message-01" CssClass="icon" /> <span class="sidebar-label">Чат</span>
     </NavLink>
 </nav>

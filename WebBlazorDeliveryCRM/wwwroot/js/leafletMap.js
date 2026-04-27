@@ -13,6 +13,7 @@ window.leafletMap = {
     routeEnd: null,
     routeMarkers: [],
     heatLayer: null,
+    circleLayers: [],
     /** Базовый URL OSRM без завершающего слэша */
     osrmBaseUrl: "",
     /** Язык пошаговых инструкций (код для LRM: ru, en, de, fr, …) */
@@ -71,6 +72,7 @@ window.leafletMap = {
         this.routeLayer = null;
         this.routingControl = null;
         this.heatLayer = null;
+        this.circleLayers = [];
 
         var self = this;
         if (this.enableRouting && typeof L.Routing !== "undefined" && L.Routing.osrmv1 && L.Routing.control) {
@@ -182,6 +184,34 @@ window.leafletMap = {
         this.heatLayer = null;
     },
 
+    setCircles: function (items) {
+        if (!this.map || !items || !items.length) return;
+        this.clearCircles();
+        for (var i = 0; i < items.length; i++) {
+            var lat = parseFloat(items[i].lat);
+            var lon = parseFloat(items[i].lon);
+            var radiusKm = parseFloat(items[i].radiusKm);
+            if (isNaN(lat) || isNaN(lon) || isNaN(radiusKm)) continue;
+            var title = items[i].title || "Зона";
+            var c = L.circle([lat, lon], {
+                radius: Math.max(0.1, radiusKm) * 1000.0,
+                color: items[i].color || "#22c55e",
+                fillColor: items[i].fillColor || "#22c55e",
+                fillOpacity: items[i].fillOpacity || 0.12,
+                weight: 1.5
+            }).addTo(this.map).bindPopup(title);
+            this.circleLayers.push(c);
+        }
+    },
+
+    clearCircles: function () {
+        if (!this.map || !this.circleLayers || !this.circleLayers.length) return;
+        for (var i = 0; i < this.circleLayers.length; i++) {
+            this.map.removeLayer(this.circleLayers[i]);
+        }
+        this.circleLayers = [];
+    },
+
     /** Два клика → setWaypoints в LRM (панель справа с шагами на routeLanguage). */
     handleClickForRouteLrm: function (latlng) {
         if (!this.map || !this.routingControl) return;
@@ -288,6 +318,7 @@ window.leafletMap = {
             this.map.removeLayer(this.heatLayer);
             this.heatLayer = null;
         }
+        this.clearCircles();
         for (var i = 0; i < this.routeMarkers.length; i++) {
             this.map.removeLayer(this.routeMarkers[i]);
         }
@@ -376,6 +407,7 @@ window.leafletMap = {
             try { this.routeAbortController.abort(); } catch (_) { }
             this.routeAbortController = null;
         }
+        this.clearCircles();
         if (this.map) {
             this.map.remove();
             this.map = null;

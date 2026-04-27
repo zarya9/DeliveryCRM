@@ -167,6 +167,64 @@
   - `WebBlazorDeliveryCRM/Components/Pages/Manager/Employees.razor`
   - `WebBlazorDeliveryCRM/Components/Pages/Logistician/CourierManagement.razor`
 
+## 5.1 Chat UX overhaul (Telegram-like)
+
+- Переработан `CompanyChatPanel`:
+  - слева список чатов (правее главного nav menu),
+  - по умолчанию доступен чат компании,
+  - можно начать личный чат с сотрудником; если чата нет — создается автоматически,
+  - telegram-like composer:
+    - поле сообщения,
+    - справа кнопка-иконка отправки (самолетик),
+    - слева внутри composer кнопка-скрепка,
+    - поддержка прикрепления файла + минимальный image preview.
+- Перенесены/добавлены API для списка/создания чатов:
+  - `GET /api/Chat/rooms/list`
+  - `POST /api/Chat/rooms/company`
+  - `POST /api/Chat/rooms/direct?peerUserId=...`
+- Ключевые файлы:
+  - `APIDeliveryCRM/Services/ChatService.cs`
+  - `APIDeliveryCRM/Controllers/ChatController.cs`
+  - `APIDeliveryCRM/Interfaces/IChatService.cs`
+  - `APIDeliveryCRM/Responses/ChatRoomListItemDto.cs`
+  - `WebBlazorDeliveryCRM/Services/ChatApiService.cs`
+  - `WebBlazorDeliveryCRM/Components/Shared/CompanyChatPanel.razor`
+  - `WebBlazorDeliveryCRM/wwwroot/app.css`
+
+## 5.2 Header/Navigation tweaks
+
+- Иконка уведомлений вынесена в header рядом с выходом (без текста, placeholder icon).
+- Пункт "Уведомления" убран из левого manager sidebar.
+- Файлы:
+  - `WebBlazorDeliveryCRM/Components/Layout/AppBar.razor`
+  - `WebBlazorDeliveryCRM/Components/Nav/ManagerSidebar.razor`
+
+## 5.3 Большой модуль геоаналитики (новое)
+
+- Добавлен отдельный backend-модуль геоаналитики:
+  - `IGeoAnalyticsService` + `GeoAnalyticsService`
+  - `GeoAnalyticsController` (`GET /api/GeoAnalytics/overview`)
+  - DTO ответа с KPI и срезами: heat points, зоны, курьеры, почасовой спрос, статусы.
+- Новая manager-страница `Геоаналитика`:
+  - путь: `/manager/geoanalytics`
+  - период, шаг сетки heatmap, переключатели heatmap/зон
+  - KPI карточки
+  - карта с heatmap + круги зон обслуживания
+  - таблицы эффективности по зонам и курьерам
+  - почасовой срез спроса.
+- Расширен JS-карт модуль:
+  - `leafletMap.setCircles(...)` / `leafletMap.clearCircles()`.
+- Добавлен пункт меню в sidebar менеджера: `Геоаналитика`.
+- Ключевые файлы:
+  - `APIDeliveryCRM/Responses/GeoAnalyticsOverviewDto.cs`
+  - `APIDeliveryCRM/Interfaces/IGeoAnalyticsService.cs`
+  - `APIDeliveryCRM/Services/GeoAnalyticsService.cs`
+  - `APIDeliveryCRM/Controllers/GeoAnalyticsController.cs`
+  - `WebBlazorDeliveryCRM/Models/GeoAnalyticsDtos.cs`
+  - `WebBlazorDeliveryCRM/Services/GeoAnalyticsApiService.cs`
+  - `WebBlazorDeliveryCRM/Components/Pages/Manager/GeoAnalytics.razor`
+  - `WebBlazorDeliveryCRM/wwwroot/js/leafletMap.js`
+
 ## 6) Чат: что было и что добавлено последним
 
 ### 6.1 До последних изменений

@@ -25,6 +25,8 @@ builder.Services.AddScoped<IThemeService, ThemeService>();
 builder.Services.AddScoped<IAzureBlobService, AzureBlobService>();
 builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddScoped<IChatService, ChatService>();
+builder.Services.AddScoped<IChatMessageCryptoService, ChatMessageCryptoService>();
+builder.Services.AddSingleton<IKafkaProducer, KafkaProducerService>();
 builder.Services.AddScoped<IRoleService, RoleService>();
 builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<ILeadService, LeadService>();
@@ -35,6 +37,7 @@ builder.Services.AddScoped<ICommunicationTemplateService, CommunicationTemplateS
 builder.Services.AddScoped<IReportService, ReportService>();
 builder.Services.AddScoped<IScheduledReportService, ScheduledReportService>();
 builder.Services.AddScoped<ICompanySettingsService, CompanySettingsService>();
+builder.Services.AddScoped<IGeoAnalyticsService, GeoAnalyticsService>();
 builder.Services.AddSingleton<IUserPresenceService, UserPresenceService>();
 builder.Services.AddHostedService<ScheduledReportWorker>();
 

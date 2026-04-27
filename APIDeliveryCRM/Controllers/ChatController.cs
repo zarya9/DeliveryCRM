@@ -48,6 +48,36 @@ namespace APIDeliveryCRM.Controllers
             return await _chatService.GetChatRoomsForUserAsync(currentUserId.Value);
         }
 
+        [HttpGet("rooms/list")]
+        public async Task<IActionResult> GetMyRoomsList()
+        {
+            var currentUserId = GetCurrentUserId();
+            var companyIdStr = User.FindFirst("companyId")?.Value;
+            if (!currentUserId.HasValue || !int.TryParse(companyIdStr, out var companyId))
+                return Unauthorized();
+            return await _chatService.GetChatRoomsListAsync(companyId, currentUserId.Value);
+        }
+
+        [HttpPost("rooms/company")]
+        public async Task<IActionResult> EnsureCompanyRoom()
+        {
+            var currentUserId = GetCurrentUserId();
+            var companyIdStr = User.FindFirst("companyId")?.Value;
+            if (!currentUserId.HasValue || !int.TryParse(companyIdStr, out var companyId))
+                return Unauthorized();
+            return await _chatService.GetOrCreateCompanyRoomAsync(companyId, currentUserId.Value);
+        }
+
+        [HttpPost("rooms/direct")]
+        public async Task<IActionResult> CreateOrGetDirectRoom([FromQuery] int peerUserId)
+        {
+            var currentUserId = GetCurrentUserId();
+            var companyIdStr = User.FindFirst("companyId")?.Value;
+            if (!currentUserId.HasValue || !int.TryParse(companyIdStr, out var companyId))
+                return Unauthorized();
+            return await _chatService.CreateOrGetDirectRoomAsync(companyId, currentUserId.Value, peerUserId);
+        }
+
         [HttpGet("rooms/user/{userId:int}")]
         [Authorize(Roles = "Админ")]
         public async Task<IActionResult> GetChatRooms(int userId)

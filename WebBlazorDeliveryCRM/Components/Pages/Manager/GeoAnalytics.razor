@@ -1,0 +1,274 @@
+@page "/manager/geoanalytics"
+@layout ManagerLayout
+@attribute [Authorize(Roles = "Менеджер,Админ")]
+@using Microsoft.AspNetCore.Authorization
+@using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject GeoAnalyticsApiService GeoApi
+@inject AppNotificationService Notify
+@inject IJSRuntime JS
+@inject IConfiguration Configuration
+
+<PageTitle>Геоаналитика — Менеджер</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Геоаналитика</h1>
+    <p class="subtitle">Пространственная аналитика заказов, зон и курьеров</p>
+</div>
+
+<div class="dms-card mb-3">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label">С даты (UTC)</label>
+            <input class="form-control" type="date" @bind="_fromDate" @bind:format="yyyy-MM-dd" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">По дату (UTC)</label>
+            <input class="form-control" type="date" @bind="_toDate" @bind:format="yyyy-MM-dd" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Сетка heatmap, км</label>
+            <input class="form-control" type="number" min="1" max="30" step="1" @bind="_gridKm" />
+        </div>
+        <div class="col-md-4">
+            <button type="button" class="btn btn-primary" disabled="@_loading" @onclick="ReloadAsync">Обновить</button>
+            <button type="button" class="btn btn-outline-secondary ms-1" disabled="@_loading" @onclick="ResetPeriodAsync">Текущий месяц</button>
+        </div>
+    </div>
+    <div class="form-check form-switch mt-2">
+        <input class="form-check-input" type="checkbox" id="geo-heat-toggle" checked="@_showHeatmap" @onchange="OnHeatmapToggleChanged" />
+        <label class="form-check-label" for="geo-heat-toggle">Показывать тепловую карту</label>
+    </div>
+    <div class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" id="geo-zone-toggle" checked="@_showZones" @onchange="OnZonesToggleChanged" />
+        <label class="form-check-label" for="geo-zone-toggle">Показывать зоны обслуживания</label>
+    </div>
+</div>
+
+<div class="dms-stat-grid mb-3">
+    <KpiCard Title="Заказы (период)" Value="@_data.TotalOrders.ToString()" Meta="Все созданные за период" />
+    <KpiCard Title="С геоточками" Value="@_data.GeoOrders.ToString()" Meta="@GeoCoverageMeta" />
+    <KpiCard Title="Доставлено" Value="@_data.DeliveredOrders.ToString()" Meta="@LateMeta" />
+    <KpiCard Title="Среднее время, ч" Value="@((_data.AvgDeliveryHours ?? 0).ToString("0.0"))" Meta="От создания до доставки" />
+    <KpiCard Title="Выручка" Value="@_data.Revenue.ToString("N0")" Meta="По доставленным заказам" />
+    <KpiCard Title="Активные курьеры" Value="@_data.ActiveCouriers.ToString()" Meta="С заказами в периоде" />
+</div>
+
+<div class="dms-card mb-3">
+    <h2 class="dms-card-title">Карта геоаналитики</h2>
+    <div id="geo-analytics-map" style="height: 520px; width: 100%; border-radius: 8px;"></div>
+</div>
+
+<div class="row g-3">
+    <div class="col-12 col-xl-7">
+        <div class="dms-card">
+            <h2 class="dms-card-title">Зоны: SLA и нагрузка</h2>
+            @if (_data.ZonePerformance.Any())
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead>
+                            <tr>
+                                <th>Зона</th>
+                                <th>Заказов</th>
+                                <th>Доставлено</th>
+                                <th>Среднее время, ч</th>
+                                <th>Опоздания</th>
+                                <th>Выручка</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var z in _data.ZonePerformance)
+                            {
+                                <tr>
+                                    <td>@z.ZoneName</td>
+                                    <td>@z.Orders</td>
+                                    <td>@z.Delivered</td>
+                                    <td>@(z.AvgDeliveryHours?.ToString("0.0") ?? "н/д")</td>
+                                    <td>
+                                        <StatusBadge Text="@($"{z.LatePercent:0.0}%")" Tone="@LateTone(z.LatePercent)" />
+                                    </td>
+                                    <td>@z.Revenue.ToString("N0")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else
+            {
+                <p class="text-muted mb-0">Нет данных по зонам за выбранный период.</p>
+            }
+        </div>
+    </div>
+    <div class="col-12 col-xl-5">
+        <div class="dms-card">
+            <h2 class="dms-card-title">Почасовой спрос</h2>
+            @if (_data.HourlyDemand.Any())
+            {
+                <div class="geo-hourly-grid">
+                    @foreach (var h in _data.HourlyDemand)
+                    {
+                        <div class="geo-hour-item">
+                            <div class="geo-hour-label">@($"{h.Hour:00}:00")</div>
+                            <div class="geo-hour-value">@h.Orders</div>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <p class="text-muted mb-0">Нет данных по часовому спросу.</p>
+            }
+        </div>
+    </div>
+</div>
+
+<div class="dms-card mt-3">
+    <h2 class="dms-card-title">Эффективность курьеров (геосрез)</h2>
+    @if (_data.CourierPerformance.Any())
+    {
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead>
+                    <tr>
+                        <th>Курьер</th>
+                        <th>Заказов</th>
+                        <th>Доставлено</th>
+                        <th>Среднее время, ч</th>
+                        <th>Опоздания</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var c in _data.CourierPerformance)
+                    {
+                        <tr>
+                            <td>@c.CourierName</td>
+                            <td>@c.Orders</td>
+                            <td>@c.Delivered</td>
+                            <td>@(c.AvgDeliveryHours?.ToString("0.0") ?? "н/д")</td>
+                            <td>
+                                <StatusBadge Text="@($"{c.LatePercent:0.0}%")" Tone="@LateTone(c.LatePercent)" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else
+    {
+        <p class="text-muted mb-0">Нет данных по курьерам.</p>
+    }
+</div>
+
+@code {
+    private GeoAnalyticsOverviewDto _data = new();
+    private DateTime _fromDate;
+    private DateTime _toDate;
+    private double _gridKm = 3;
+    private bool _loading;
+    private bool _mapInitialized;
+    private bool _showHeatmap = true;
+    private bool _showZones = true;
+
+    private string GeoCoverageMeta => _data.TotalOrders == 0
+        ? "Нет данных"
+        : $"{Math.Round(100.0 * _data.GeoOrders / Math.Max(1, _data.TotalOrders), 1)}% покрытия";
+    private string LateMeta => $"{_data.LateDeliveredOrders} просрочено ({_data.LatePercent:0.0}%)";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        var now = DateTime.UtcNow.Date;
+        _fromDate = new DateTime(now.Year, now.Month, 1);
+        _toDate = now;
+
+        await ReloadAsync();
+        StateHasChanged();
+    }
+
+    private async Task ResetPeriodAsync()
+    {
+        var now = DateTime.UtcNow.Date;
+        _fromDate = new DateTime(now.Year, now.Month, 1);
+        _toDate = now;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var from = DateTime.SpecifyKind(_fromDate.Date, DateTimeKind.Utc);
+            var to = DateTime.SpecifyKind(_toDate.Date, DateTimeKind.Utc).AddDays(1).AddTicks(-1);
+            var overview = await GeoApi.GetOverviewAsync(from, to, _gridKm);
+            _data = overview ?? new GeoAnalyticsOverviewDto();
+            await RefreshMapAsync();
+        }
+        catch (Exception ex)
+        {
+            Notify.ShowError($"Не удалось загрузить геоаналитику: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task RefreshMapAsync()
+    {
+        if (!_mapInitialized)
+        {
+            var osrmUrl = Configuration["Osrm:RouterBaseUrl"];
+            await JS.InvokeVoidAsync("leafletMap.init", "geo-analytics-map", 55.7558, 37.6173, 10, null, osrmUrl, false, "ru");
+            _mapInitialized = true;
+        }
+
+        await JS.InvokeVoidAsync("leafletMap.clearMarkers");
+        await JS.InvokeVoidAsync("leafletMap.clearHeatPoints");
+        await JS.InvokeVoidAsync("leafletMap.clearCircles");
+
+        if (_showHeatmap && _data.HeatPoints.Any())
+        {
+            var points = _data.HeatPoints.Select(p => new { lat = p.Lat, lon = p.Lon, intensity = p.Intensity }).ToList();
+            await JS.InvokeVoidAsync("leafletMap.setHeatPoints", points);
+        }
+
+        if (_showZones && _data.Zones.Any())
+        {
+            var circles = _data.Zones.Where(z => z.IsActive).Select(z => new
+            {
+                lat = z.CenterLat,
+                lon = z.CenterLon,
+                radiusKm = z.RadiusKm,
+                title = z.Name,
+                color = "#16a34a",
+                fillColor = "#22c55e",
+                fillOpacity = 0.10
+            }).ToList();
+            await JS.InvokeVoidAsync("leafletMap.setCircles", circles);
+        }
+    }
+
+    private async Task OnHeatmapToggleChanged(ChangeEventArgs e)
+    {
+        _showHeatmap = e.Value is bool b && b;
+        await RefreshMapAsync();
+    }
+
+    private async Task OnZonesToggleChanged(ChangeEventArgs e)
+    {
+        _showZones = e.Value is bool b && b;
+        await RefreshMapAsync();
+    }
+
+    private static string LateTone(double latePercent)
+    {
+        if (latePercent >= 20) return "danger";
+        if (latePercent >= 10) return "warning";
+        return "success";
+    }
+}

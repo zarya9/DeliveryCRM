@@ -1,7 +1,13 @@
 @page "/logistician/chat"
 @layout LogisticianLayout
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Логист,Админ")]
+@using Microsoft.AspNetCore.Components
 
 <PageTitle>Чат — Логист</PageTitle>
 
-<CompanyChatPanel />
+<CompanyChatPanel TargetUserId="@UserId" />
+
+@code {
+    [SupplyParameterFromQuery(Name = "userId")]
+    public int? UserId { get; set; }
+}

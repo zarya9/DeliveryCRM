@@ -3,12 +3,14 @@
 @inject ChatHubClientService ChatHub
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@using WebBlazorDeliveryCRM.Components.Shared
 
 <div class="dms-appbar">
     <a href="/" class="dms-appbar-logo">@(_companyName ?? "Delivery CRM")</a>
     <div class="dms-appbar-actions">
         <div style="position: relative;">
             <button type="button" class="dms-btn-outline" @onclick="ToggleUiSettings">
+                <HugeIcon Name="settings-01" CssClass="dms-icon me-1" />
                 Вид
             </button>
             @if (_showUiSettings)
@@ -40,16 +42,25 @@
             }
         </div>
         <button type="button" class="dms-btn-outline theme-toggle-btn" @onclick="ToggleTheme" title="Сменить тему">
-            <span class="theme-toggle-symbol">@(_theme == "dark" ? "☀" : "☾")</span>
+            <HugeIcon Name="@ThemeIconName" CssClass="dms-icon" />
             <span>@(_theme == "dark" ? "Светлая" : "Тёмная")</span>
         </button>
         @if (_isAuthenticated)
         {
-            <button type="button" class="dms-btn-outline" @onclick="Logout">Выйти</button>
+            <a href="/manager/notifications" class="dms-btn-outline dms-icon-btn" title="Уведомления" aria-label="Уведомления">
+                <HugeIcon Name="notification-01" CssClass="dms-icon" />
+            </a>
+            <button type="button" class="dms-btn-outline" @onclick="Logout">
+                <HugeIcon Name="logout-01" CssClass="dms-icon me-1" />
+                Выйти
+            </button>
         }
         else
         {
-            <a href="/" class="dms-btn-outline">Войти</a>
+            <a href="/" class="dms-btn-outline">
+                <HugeIcon Name="user-03" CssClass="dms-icon me-1" />
+                Войти
+            </a>
         }
     </div>
 </div>
@@ -58,6 +69,7 @@
     private bool _isAuthenticated;
     private string? _companyName;
     private string _theme = "light";
+    private string ThemeIconName => _theme == "dark" ? "sun-03" : "moon-02";
     private bool _showUiSettings;
     private string _uiAccent = "#008b8b";
     private string _uiBackground = "plain";

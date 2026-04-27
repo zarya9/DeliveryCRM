@@ -1,7 +1,14 @@
 @page "/manager/chat"
 @layout ManagerLayout
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Менеджер,Админ")]
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
 
 <PageTitle>Чат — Менеджер</PageTitle>
 
-<CompanyChatPanel />
+<CompanyChatPanel TargetUserId="@UserId" />
+
+@code {
+    [SupplyParameterFromQuery(Name = "userId")]
+    public int? UserId { get; set; }
+}

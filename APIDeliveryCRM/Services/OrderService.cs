@@ -19,13 +19,23 @@ namespace APIDeliveryCRM.Services
         private readonly ICommunicationTemplateService _templateService;
         private readonly INotificationService _notificationService;
         private readonly IHubContext<ChatHub> _hubContext;
+        private readonly IKafkaProducer _kafkaProducer;
+        private readonly IConfiguration _configuration;
 
-        public OrderService(ContextDB context, ICommunicationTemplateService templateService, INotificationService notificationService, IHubContext<ChatHub> hubContext)
+        public OrderService(
+            ContextDB context,
+            ICommunicationTemplateService templateService,
+            INotificationService notificationService,
+            IHubContext<ChatHub> hubContext,
+            IKafkaProducer kafkaProducer,
+            IConfiguration configuration)
         {
             _context = context;
             _templateService = templateService;
             _notificationService = notificationService;
             _hubContext = hubContext;
+            _kafkaProducer = kafkaProducer;
+            _configuration = configuration;
         }
 
         public async Task<Order> GetByIdAsync(int id)
@@ -200,6 +210,12 @@ namespace APIDeliveryCRM.Services
                 Message = "Создан новый заказ и рассчитан начальный ETA."
             });
             await _context.SaveChangesAsync();
+            await PublishOrderEventAsync("order.created", order, new
+            {
+                routeKind = order.DeliveryRouteKind.ToString(),
+                priority = order.Priority,
+                etaAt = order.Eta_at
+            });
             return order;
         }
 
@@ -252,6 +268,12 @@ namespace APIDeliveryCRM.Services
             }
 
             await _context.SaveChangesAsync();
+            await PublishOrderEventAsync("order.status_changed", order, new
+            {
+                oldStatusId,
+                newStatusId = statusId,
+                isSlaRisk
+            });
             return true;
         }
 
@@ -289,6 +311,12 @@ namespace APIDeliveryCRM.Services
             });
 
             await _context.SaveChangesAsync();
+            await PublishOrderEventAsync("order.courier_assigned", order, new
+            {
+                oldCourierId,
+                newCourierId = courierProfileId,
+                assignmentType = "standard"
+            });
             return true;
         }
 
@@ -325,6 +353,13 @@ namespace APIDeliveryCRM.Services
             });
 
             await _context.SaveChangesAsync();
+            await PublishOrderEventAsync("order.courier_assigned", order, new
+            {
+                oldCourierId,
+                newCourierId = courierProfileId,
+                assignmentType = "manual_override",
+                reason
+            });
             return true;
         }
 
@@ -413,6 +448,14 @@ namespace APIDeliveryCRM.Services
             }
 
             await _context.SaveChangesAsync();
+            await PublishOrderEventAsync("order.auto_dispatched", order, new
+            {
+                oldCourierId,
+                newCourierId = winner.ID_CourierProfile,
+                winner.DistanceKm,
+                winner.ActiveOrders,
+                isSlaRisk
+            });
 
             return new OrderDispatchDto
             {
@@ -668,6 +711,25 @@ namespace APIDeliveryCRM.Services
                 .AsNoTracking()
                 .Select(t => t.ID_NotificationType)
                 .FirstOrDefaultAsync();
+        }
+
+        private async Task PublishOrderEventAsync(string eventType, Order order, object details)
+        {
+            var topic = _configuration["Kafka:OrderEventsTopic"] ?? "orders-events";
+            var payload = new
+            {
+                eventType,
+                occurredAtUtc = DateTime.UtcNow,
+                companyId = order.Company_id,
+                orderId = order.ID_Order,
+                orderNumber = order.Order_Number,
+                statusId = order.Status_id,
+                courierId = order.Courier_id,
+                priority = order.Priority,
+                details
+            };
+
+            await _kafkaProducer.ProduceAsync(topic, payload, key: $"{order.Company_id}:{order.ID_Order}");
         }
     }
 }

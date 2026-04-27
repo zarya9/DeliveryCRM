@@ -1,32 +1,34 @@
+@using WebBlazorDeliveryCRM.Components.Shared
+
 <div class="sidebar-header">
     <h2 class="sidebar-title">Логист</h2>
 </div>
 <nav class="sidebar-nav">
     <NavLink href="/logistician" class="sidebar-link" Match="NavLinkMatch.All">
-        <span class="icon">⌂</span> Распределение
+        <HugeIcon Name="dashboard-square-01" CssClass="icon" /> <span class="sidebar-label">Распределение</span>
     </NavLink>
     <NavLink href="/logistician/chat" class="sidebar-link">
-        <span class="icon">✉</span> Чат
+        <HugeIcon Name="message-01" CssClass="icon" /> <span class="sidebar-label">Чат</span>
     </NavLink>
     <NavLink href="/logistician/hubs" class="sidebar-link">
-        <span class="icon">▤</span> Склады (просмотр)
+        <HugeIcon Name="store-01" CssClass="icon" /> <span class="sidebar-label">Склады (просмотр)</span>
     </NavLink>
     <NavLink href="/logistician/routes" class="sidebar-link">
-        <span class="icon">◈</span> Маршруты
+        <HugeIcon Name="route-02" CssClass="icon" /> <span class="sidebar-label">Маршруты</span>
     </NavLink>
     <NavLink href="/logistician/couriers" class="sidebar-link">
-        <span class="icon">◍</span> Курьеры
+        <HugeIcon Name="user-group" CssClass="icon" /> <span class="sidebar-label">Курьеры</span>
     </NavLink>
     <NavLink href="/logistician/vehicles/add" class="sidebar-link">
-        <span class="icon">▣</span> Новое ТС
+        <HugeIcon Name="car-01" CssClass="icon" /> <span class="sidebar-label">Новое ТС</span>
     </NavLink>
     <NavLink href="/logistician/analytics" class="sidebar-link">
-        <span class="icon">▦</span> Аналитика
+        <HugeIcon Name="analytics-up" CssClass="icon" /> <span class="sidebar-label">Аналитика</span>
     </NavLink>
     <NavLink href="/logistician/monitoring" class="sidebar-link">
-        <span class="icon">◌</span> Мониторинг
+        <HugeIcon Name="activity-01" CssClass="icon" /> <span class="sidebar-label">Мониторинг</span>
     </NavLink>
     <NavLink href="/logistician/shifts" class="sidebar-link">
-        <span class="icon">▥</span> Смены
+        <HugeIcon Name="calendar-03" CssClass="icon" /> <span class="sidebar-label">Смены</span>
     </NavLink>
 </nav>

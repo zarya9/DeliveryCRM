@@ -361,7 +361,9 @@
 
     private void GoToChat()
     {
-        Navigation.NavigateTo("/manager/chat");
+        if (_selectedEmployee is null)
+            return;
+        Navigation.NavigateTo($"/manager/chat?userId={_selectedEmployee.Id}");
     }
 
     private void CloseEmployee()

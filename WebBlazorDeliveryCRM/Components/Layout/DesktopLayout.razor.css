@@ -1,20 +1,29 @@
 .desktop-layout {
     display: flex;
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
 }
 
 .desktop-sidebar {
-    width: 260px;
-    min-width: 260px;
+    width: 72px;
+    min-width: 72px;
     background: var(--dms-sidebar-bg, #0f172a);
     color: var(--dms-sidebar-fg, #f1f5f9);
-    padding: 1rem 0;
+    padding: 0.75rem 0;
     box-shadow: 2px 0 8px rgba(0,0,0,0.06);
+    height: 100vh;
+    overflow-y: hidden;
+    overflow-x: hidden;
+    transition: width 0.2s ease, min-width 0.2s ease;
+    position: relative;
+    z-index: 20;
 }
 
 .desktop-main {
     flex: 1;
-    overflow: auto;
+    height: 100vh;
+    overflow-y: auto;
+    overflow-x: hidden;
     padding: 0;
     background: var(--dms-page-bg, #f1f5f9);
 }

@@ -1,5 +1,6 @@
 using Blazored.Toast;
 using ApexCharts;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
 using MudBlazor.Services;
 using WebBlazorDeliveryCRM.Components;
@@ -10,6 +11,17 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
+builder.Services
+    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/";
+        options.AccessDeniedPath = "/";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+    });
+builder.Services.AddAuthorization();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddBlazoredToast();
@@ -32,6 +44,7 @@ builder.Services.AddScoped<AppNotificationService>();
 builder.Services.AddScoped<RolesApiService>();
 builder.Services.AddScoped<EmployeesApiService>();
 builder.Services.AddScoped<LeadsApiService>();
+builder.Services.AddScoped<GeoAnalyticsApiService>();
 builder.Services.AddScoped<ReportsApiService>();
 builder.Services.AddScoped<CompanySettingsApiService>();
 builder.Services.AddScoped<UserPresenceApiService>();
@@ -83,6 +96,8 @@ app.UseStaticFiles();
 app.UseAntiforgery();
 
 app.UseCors("AllowAll");
+app.UseAuthentication();
+app.UseAuthorization();
 
 // HttpOnly-cookie с JWT: выставляется ответом на same-origin POST из браузера (после логина к API).
 app.MapPost("/api/auth/session", (HttpContext http, SessionRequest req) =>

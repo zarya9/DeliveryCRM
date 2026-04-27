@@ -19,6 +19,9 @@ namespace APIDeliveryCRM.Interfaces
         Task<IActionResult> DeleteMessageAsync(int messageId, int userId);
         Task<IActionResult> GetUnreadMessagesCountAsync(int userId, int chatRoomId);
         Task<IActionResult> MarkAllMessagesAsReadAsync(int chatRoomId, int userId);
+        Task<IActionResult> GetChatRoomsListAsync(int companyId, int userId);
+        Task<IActionResult> GetOrCreateCompanyRoomAsync(int companyId, int userId);
+        Task<IActionResult> CreateOrGetDirectRoomAsync(int companyId, int userId, int peerUserId);
         Task<IActionResult> GetQuickReplyTemplatesAsync(int companyId, int userId, string? category = null, string? search = null);
         Task<IActionResult> UpsertQuickReplyTemplateAsync(int companyId, int userId, UpsertChatQuickReplyTemplateRequest request);
         Task<IActionResult> DeleteQuickReplyTemplateAsync(int companyId, int userId, int templateId);
