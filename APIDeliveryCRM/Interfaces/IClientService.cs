@@ -12,6 +12,10 @@ namespace APIDeliveryCRM.Interfaces
         Task<ClientProfile> GetByUserIdAsync(int userId);
         Task<IReadOnlyList<Order>> GetClientOrdersAsync(int clientProfileId);
         Task<IActionResult> UpdateProfileAsync(int clientProfileId, UpdateClientProfileRequest request);
+        Task<IActionResult> GetPaymentMethodsAsync();
+        Task<IActionResult> BindCardAsync(int clientProfileId, BindClientCardRequest request);
+        Task<IActionResult> GetBoundCardAsync(int clientProfileId);
+        Task<IActionResult> GetBoundCardsAsync(int clientProfileId);
         Task<IActionResult> GetClientDetailsAsync(int clientProfileId);
         Task<IActionResult> AddClientNoteAsync(AddClientNoteRequest request);
     }

@@ -29,7 +29,37 @@
 }
 
 .desktop-main-inner {
-    padding: 1.5rem 2rem;
+    padding: 2rem 2rem 1.5rem;
     max-width: 1400px;
     margin: 0 auto;
+}
+
+.desktop-main-inner > .dms-appbar {
+    margin-bottom: 1rem;
+}
+
+.desktop-main-inner > :not(.dms-appbar):first-of-type {
+    margin-top: 0.35rem;
+}
+
+@media (max-width: 900px) {
+    .desktop-layout {
+        display: block;
+        height: auto;
+        min-height: 100vh;
+    }
+
+    .desktop-sidebar {
+        display: none;
+    }
+
+    .desktop-main {
+        height: auto;
+        overflow: visible;
+    }
+
+    .desktop-main-inner {
+        padding: 0.9rem 0.8rem 1.1rem;
+        max-width: 100%;
+    }
 }

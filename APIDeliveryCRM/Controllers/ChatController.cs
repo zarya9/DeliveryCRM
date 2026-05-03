@@ -79,7 +79,7 @@ namespace APIDeliveryCRM.Controllers
         }
 
         [HttpGet("rooms/user/{userId:int}")]
-        [Authorize(Roles = "Админ")]
+        [Authorize(Roles = "Администратор,Админ")]
         public async Task<IActionResult> GetChatRooms(int userId)
         {
             return await _chatService.GetChatRoomsForUserAsync(userId);

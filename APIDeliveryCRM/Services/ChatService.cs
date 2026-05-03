@@ -31,8 +31,15 @@ namespace APIDeliveryCRM.Services
             _logger = logger;
         }
 
-        public async Task<IActionResult> SendMessageAsync(int chatRoomId, int senderId, string messageText, string? attachmentUrl = null)
+        public async Task<IActionResult> SendMessageAsync(int chatRoomId, int senderId, string? messageText, string? attachmentUrl = null)
         {
+            var normalizedText = messageText?.Trim() ?? string.Empty;
+            var normalizedAttachmentUrl = string.IsNullOrWhiteSpace(attachmentUrl) ? null : attachmentUrl.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedText) && string.IsNullOrWhiteSpace(normalizedAttachmentUrl))
+            {
+                return new BadRequestObjectResult(new { message = "Сообщение должно содержать текст, файл или текст с файлом." });
+            }
+
             var chatRoom = await _context.ChatRooms.FindAsync(chatRoomId);
             if (chatRoom == null)
             {
@@ -49,8 +56,8 @@ namespace APIDeliveryCRM.Services
             {
                 ChatRoom_id = chatRoomId,
                 Sender_id = senderId,
-                MessageText = _chatCrypto.Encrypt(messageText),
-                AttachmentUrl = attachmentUrl,
+                MessageText = _chatCrypto.Encrypt(normalizedText),
+                AttachmentUrl = normalizedAttachmentUrl,
                 Sent_at = DateTime.UtcNow,
                 Is_deleted = false
             };
@@ -67,13 +74,13 @@ namespace APIDeliveryCRM.Services
                 chatRoomId = chatRoomId,
                 senderId = senderId,
                 senderName = $"{sender.FName} {sender.Name}",
-                messageText = messageText,
-                attachmentUrl = attachmentUrl,
+                messageText = normalizedText,
+                attachmentUrl = normalizedAttachmentUrl,
                 sentAt = message.Sent_at
             });
 
             // Отправляем уведомления участникам, которые не в сети
-            await SendNotificationsToParticipantsAsync(chatRoomId, senderId, sender, messageText, chatRoom);
+            await SendNotificationsToParticipantsAsync(chatRoomId, senderId, sender, normalizedText, chatRoom);
 
             return new OkObjectResult(new { message = "Сообщение отправлено", messageId = message.ID_ChatMessage });
         }
@@ -95,6 +102,7 @@ namespace APIDeliveryCRM.Services
                     m.ID_ChatMessage,
                     m.ChatRoom_id,
                     m.Sender_id,
+                    SenderName = $"{m.Sender.FName} {m.Sender.Name}".Trim(),
                     MessageText = _chatCrypto.Decrypt(m.MessageText),
                     m.AttachmentUrl,
                     m.Sent_at,
@@ -348,6 +356,16 @@ namespace APIDeliveryCRM.Services
                 .ToListAsync();
 
             var roomIds = rooms.Select(r => r.ID_ChatRoom).ToList();
+
+            var roomTypeIds = rooms
+                .Select(r => r.ChatRoomType_id)
+                .Distinct()
+                .ToList();
+
+            var roomTypes = await _context.ChatRoomTypes
+                .Where(t => roomTypeIds.Contains(t.ID_ChatRoomType))
+                .ToDictionaryAsync(t => t.ID_ChatRoomType, t => t.Name);
+
             var participants = await _context.ChatParticipants
                 .Where(cp => roomIds.Contains(cp.ChatRoom_id) && cp.Is_active)
                 .Include(cp => cp.User)
@@ -359,16 +377,53 @@ namespace APIDeliveryCRM.Services
                 .Select(g => g.OrderByDescending(x => x.Sent_at).First())
                 .ToListAsync();
 
+            var myReadMarkers = await _context.ChatParticipants.AsNoTracking()
+                .Where(cp => cp.User_id == userId && roomIds.Contains(cp.ChatRoom_id))
+                .Select(cp => new { cp.ChatRoom_id, ReadAt = cp.LastRead_at ?? cp.Joined_at })
+                .ToListAsync();
+            var lastReadByRoom = myReadMarkers.ToDictionary(x => x.ChatRoom_id, x => x.ReadAt);
+
+            var inboundMessageTimes = await _context.ChatMessages.AsNoTracking()
+                .Where(m => roomIds.Contains(m.ChatRoom_id) && !m.Is_deleted && m.Sender_id != userId)
+                .Select(m => new { m.ChatRoom_id, m.Sent_at })
+                .ToListAsync();
+
+            var unreadByRoom = roomIds.ToDictionary(
+                id => id,
+                id =>
+                {
+                    var lr = lastReadByRoom.TryGetValue(id, out var t) ? t : System.DateTime.MinValue;
+                    return inboundMessageTimes.Count(m => m.ChatRoom_id == id && m.Sent_at > lr);
+                });
+
             var list = rooms.Select(r =>
             {
                 var roomParticipants = participants.Where(p => p.ChatRoom_id == r.ID_ChatRoom).ToList();
+
                 var peer = roomParticipants.FirstOrDefault(p => p.User_id != userId)?.User;
-                var kind = peer != null ? "direct" : "company";
+                roomTypes.TryGetValue(r.ChatRoomType_id, out var roomTypeName);
+
+                var normalizedType = (roomTypeName ?? string.Empty).Trim();
+
+                var isDirectRoom = string.Equals(normalizedType, "Личный", StringComparison.OrdinalIgnoreCase);
+
+                var kind = isDirectRoom ? "direct" : "company";
+
                 var name = kind == "direct"
                     ? $"{peer?.FName} {peer?.Name}".Trim()
                     : (string.IsNullOrWhiteSpace(r.Name) ? "Чат компании" : r.Name!);
+
                 var lm = lastMessages.FirstOrDefault(m => m.ChatRoom_id == r.ID_ChatRoom);
-                var lastMessageText = lm == null ? null : _chatCrypto.Decrypt(lm.MessageText);
+
+                var decryptedText = lm == null ? null : _chatCrypto.Decrypt(lm.MessageText);
+
+                var hasAttachmentOnly = lm != null
+                    && !string.IsNullOrWhiteSpace(lm.AttachmentUrl)
+                    && string.IsNullOrWhiteSpace(decryptedText);
+
+                var lastMessageText = hasAttachmentOnly
+                    ? "📎 Вложение"
+                    : decryptedText;
                 return new ChatRoomListItemDto
                 {
                     ChatRoomId = r.ID_ChatRoom,
@@ -376,7 +431,8 @@ namespace APIDeliveryCRM.Services
                     RoomKind = kind,
                     PeerUserId = peer?.ID_User,
                     LastMessageText = lastMessageText,
-                    LastMessageAt = lm?.Sent_at
+                    LastMessageAt = lm?.Sent_at,
+                    UnreadCount = unreadByRoom.GetValueOrDefault(r.ID_ChatRoom)
                 };
             })
             .OrderByDescending(x => x.LastMessageAt ?? DateTime.MinValue)

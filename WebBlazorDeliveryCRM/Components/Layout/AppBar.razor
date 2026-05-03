@@ -1,12 +1,16 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject CustomAuthenticationStateProvider AuthState
 @inject ChatHubClientService ChatHub
+@inject ChatApiService ChatApi
+@inject ChatUnreadStateService ChatUnreadState
+@inject AppNotificationService Notify
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @using WebBlazorDeliveryCRM.Components.Shared
+@using System.Security.Claims
 
 <div class="dms-appbar">
-    <a href="/" class="dms-appbar-logo">@(_companyName ?? "Delivery CRM")</a>
+    <a href="/" class="dms-appbar-logo">@DisplayTitle</a>
     <div class="dms-appbar-actions">
         <div style="position: relative;">
             <button type="button" class="dms-btn-outline" @onclick="ToggleUiSettings">
@@ -47,7 +51,7 @@
         </button>
         @if (_isAuthenticated)
         {
-            <a href="/manager/notifications" class="dms-btn-outline dms-icon-btn" title="Уведомления" aria-label="Уведомления">
+            <a href="@NotificationsHref" class="dms-btn-outline dms-icon-btn" title="Уведомления" aria-label="Уведомления">
                 <HugeIcon Name="notification-01" CssClass="dms-icon" />
             </a>
             <button type="button" class="dms-btn-outline" @onclick="Logout">
@@ -68,12 +72,20 @@
 @code {
     private bool _isAuthenticated;
     private string? _companyName;
+    private string? _role;
     private string _theme = "light";
     private string ThemeIconName => _theme == "dark" ? "sun-03" : "moon-02";
+    private string DisplayTitle =>
+        ResolveDisplayTitle(_companyName, _role);
+    private string NotificationsHref =>
+        string.Equals(_role, "Клиент", StringComparison.Ordinal) ? "/customer/notifications" : "/manager/notifications";
     private bool _showUiSettings;
     private string _uiAccent = "#008b8b";
     private string _uiBackground = "plain";
     private string _uiRadius = "12";
+    private int _currentUserId;
+    private Dictionary<int, string> _roomKinds = new();
+    private bool _chatHandlersAttached;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -94,12 +106,19 @@
         _isAuthenticated = state.User.Identity?.IsAuthenticated ?? false;
         var user = state.User;
         _companyName = user.FindFirst("company")?.Value;
+        _role = user.FindFirst(ClaimTypes.Role)?.Value
+             ?? user.FindFirst("role")?.Value
+             ?? user.FindFirst("http://schemas.microsoft.com/ws/2008/06/identity/claims/role")?.Value;
+        _ = int.TryParse(user.FindFirst(ClaimTypes.NameIdentifier)?.Value, out _currentUserId);
 
         if (_isAuthenticated)
         {
             try
             {
                 await ChatHub.StartAsync();
+                await RefreshRoomKindsAsync();
+                await ChatUnreadState.RefreshAsync();
+                AttachChatHandlers();
             }
             catch
             {
@@ -174,10 +193,69 @@
         Navigation.NavigateTo("/", forceLoad: true);
     }
 
+    private void AttachChatHandlers()
+    {
+        if (_chatHandlersAttached || ChatHub.Connection is null)
+            return;
+
+        ChatHub.Connection.On<IncomingChatSignal>("ReceiveMessage", payload =>
+        {
+            return InvokeAsync(async () =>
+            {
+                if (payload.senderId == _currentUserId)
+                    return;
+
+                if (IsDirectRoom(payload.chatRoomId))
+                {
+                    var sender = string.IsNullOrWhiteSpace(payload.senderName) ? "Сотрудник" : payload.senderName!;
+                    Notify.ShowInfo($"Новое личное сообщение от {sender}.", pushWhenHidden: true);
+                }
+
+                await ChatUnreadState.RefreshAsync();
+            });
+        });
+
+        _chatHandlersAttached = true;
+    }
+
+    private bool IsDirectRoom(int roomId)
+        => string.Equals(_roomKinds.GetValueOrDefault(roomId, "company"), "direct", StringComparison.OrdinalIgnoreCase);
+
+    private async Task RefreshRoomKindsAsync()
+    {
+        var rooms = await ChatApi.GetRoomsListAsync();
+        _roomKinds = rooms.ToDictionary(x => x.ChatRoomId, x => x.RoomKind ?? "company");
+    }
+
     private sealed class UiSettingsDto
     {
         public string Accent { get; set; } = string.Empty;
         public string Background { get; set; } = "plain";
         public string Radius { get; set; } = "12";
+    }
+
+    private sealed class IncomingChatSignal
+    {
+        public int chatRoomId { get; set; }
+        public int senderId { get; set; }
+        public string? senderName { get; set; }
+    }
+
+    private static string ResolveDisplayTitle(string? companyName, string? role)
+    {
+        var name = (companyName ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(name) &&
+            !string.Equals(name, "Default Company", StringComparison.OrdinalIgnoreCase))
+            return name;
+
+        return role switch
+        {
+            "Клиент" => "Клиентский кабинет",
+            "Курьер" => "Курьерский контур",
+            "Менеджер" => "Панель менеджера",
+            "Логист" => "Панель логиста",
+            "Админ" or "Администратор" => "Панель администратора",
+            _ => "Delivery CRM"
+        };
     }
 }

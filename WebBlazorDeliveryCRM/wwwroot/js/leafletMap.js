@@ -141,12 +141,32 @@ window.leafletMap = {
             var lon = parseFloat(items[i].lon);
             if (isNaN(lat) || isNaN(lon)) continue;
             var title = items[i].title || "Точка " + (i + 1);
-            var marker = L.marker([lat, lon]).addTo(this.map).bindPopup(title);
+            var kind = items[i].kind || "";
+            var markerOpts = {};
+            if (kind === "courier" || kind === "hub") {
+                var svg =
+                    kind === "hub"
+                        ? '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M3.50002 10V15C3.50002 17.8284 3.50002 19.2426 4.37869 20.1213C5.25737 21 6.67159 21 9.50002 21H14.5C17.3284 21 18.7427 21 19.6213 20.1213C20.5 19.2426 20.5 17.8284 20.5 15V10M17 7.50184C17 8.88255 15.8807 9.99997 14.5 9.99997C13.1193 9.99997 12 8.88068 12 7.49997C12 8.88068 10.8807 9.99997 9.50002 9.99997C8.1193 9.99997 7.00002 8.88068 7.00002 7.49997C7.00002 8.88068 5.82655 9.99997 4.37901 9.99997C3.59984 9.99997 2.90008 9.67567 2.42 9.16087C1.59462 8.2758 2.12561 6.97403 2.81448 5.98842L3.20202 5.45851C4.08386 4.2527 4.52478 3.6498 5.16493 3.32494C5.80508 3.00008 6.55201 3.00018 8.04587 3.00038L15.9551 3.00143C17.4485 3.00163 18.1952 3.00173 18.8351 3.32658C19.475 3.65143 19.9158 4.25414 20.7974 5.45957L21.1855 5.99029C21.8744 6.97589 22.4054 8.27766 21.58 9.16273C21.0999 9.67754 20.4002 10.0018 19.621 10.0018C18.1734 10.0018 17 8.88255 17 7.50184Z" stroke="#0f766e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+                        : '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2.5 12L4.5 13M21.5 12.5L19.5 13M8 17.5L8.24567 16.8858C8.61101 15.9725 8.79368 15.5158 9.17461 15.2579C9.55553 15 10.0474 15 11.0311 15H12.9689C13.9526 15 14.4445 15 14.8254 15.2579C15.2063 15.5158 15.389 15.9725 15.7543 16.8858L16 17.5M2 17V19.882C2 20.2607 2.24075 20.607 2.62188 20.7764C2.86918 20.8863 3.10538 21 3.39058 21H5.10942C5.39462 21 5.63082 20.8863 5.87812 20.7764C6.25925 20.607 6.5 20.2607 6.5 19.882V18M17.5 18V19.882C17.5 20.2607 17.7408 20.607 18.1219 20.7764C18.3692 20.8863 18.6054 21 18.8906 21H20.6094C20.8946 21 21.1308 20.8863 21.3781 20.7764C21.7592 20.607 22 20.2607 22 19.882V17M20 8.5L21 8M4 8.5L3 8M4.5 9L5.5883 5.73509C6.02832 4.41505 6.24832 3.75503 6.7721 3.37752C7.29587 3 7.99159 3 9.38304 3H14.617C16.0084 3 16.7041 3 17.2279 3.37752C17.7517 3.75503 17.9717 4.41505 18.4117 5.73509L19.5 9M4.5 9H19.5C20.4572 10.0135 22 11.4249 22 12.9996V16.4702C22 17.0407 21.6205 17.5208 21.1168 17.5875L18 18H6L2.88316 17.5875C2.37955 17.5208 2 17.0407 2 16.4702V12.9996C2 11.4249 3.54279 10.0135 4.5 9Z" stroke="#0369a1" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+                var wrap =
+                    '<div class="lm-pin-wrap" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.25);border:1px solid rgba(0,0,0,.08)">' +
+                    svg +
+                    "</div>";
+                markerOpts.icon = L.divIcon({
+                    html: wrap,
+                    className: "lm-div-marker",
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16]
+                });
+            }
+            var marker = L.marker([lat, lon], markerOpts).addTo(this.map).bindPopup(title);
             this.markers.push(marker);
         }
         if (this.markers.length > 1) {
             var group = new L.featureGroup(this.markers);
-            this.map.fitBounds(group.getBounds().pad(0.1));
+            this.map.fitBounds(group.getBounds().pad(0.12));
+        } else if (this.markers.length === 1) {
+            this.map.setView(this.markers[0].getLatLng(), Math.max(this.map.getZoom(), 12));
         }
     },
 

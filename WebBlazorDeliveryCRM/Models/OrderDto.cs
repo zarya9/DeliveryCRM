@@ -56,6 +56,9 @@ public class OrderEtaDto
     public int OrderId { get; set; }
     public DateTime? EtaAtUtc { get; set; }
     public DateTime? SlaDueAtUtc { get; set; }
+    public DateTime? DeliveryWindowFromUtc { get; set; }
+    public DateTime? DeliveryWindowToUtc { get; set; }
+    public string? DeliveryWindowText { get; set; }
     public bool IsSlaBreached { get; set; }
     public bool IsSlaRisk { get; set; }
     public string? DelayReason { get; set; }
@@ -95,6 +98,13 @@ public class OrderTypeDto
 {
     public int ID_OrderType { get; set; }
     public string Name { get; set; } = "";
+}
+
+/// <summary>Элемент GET /api/Orders/statuses.</summary>
+public class OrderStatusOptionDto
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
 }
 
 public class AddressShortDto

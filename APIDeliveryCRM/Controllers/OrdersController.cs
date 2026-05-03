@@ -4,25 +4,46 @@ using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
+using APIDeliveryCRM.ContextDb;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
     public class OrdersController : Controller
     {
         private readonly IOrderService _orderService;
+        private readonly ContextDB _context;
 
-        public OrdersController(IOrderService orderService)
+        public OrdersController(IOrderService orderService, ContextDB context)
         {
             _orderService = orderService;
+            _context = context;
+        }
+
+        /// <summary>Справочник статусов заказа (для шаблонов и форм).</summary>
+        [HttpGet("statuses")]
+        public async Task<IActionResult> GetOrderStatuses()
+        {
+            var list = await _context.OrderStatuses.AsNoTracking()
+                .OrderBy(s => s.ID_OrderStatus)
+                .Select(s => new { id = s.ID_OrderStatus, name = s.Name })
+                .ToListAsync();
+            return new OkObjectResult(list);
         }
 
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] int? companyId, [FromQuery] DateTime? from, [FromQuery] DateTime? to)
         {
-            var orders = await _orderService.GetAllAsync(companyId, from, to);
+            var resolvedCompanyId = ResolveCompanyId(companyId, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!resolvedCompanyId.HasValue) return Unauthorized();
+
+            var orders = await _orderService.GetAllAsync(resolvedCompanyId, from, to);
             return new OkObjectResult(orders);
         }
 
@@ -63,6 +84,98 @@ namespace APIDeliveryCRM.Controllers
             catch (InvalidOperationException ex)
             {
                 return new BadRequestObjectResult(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("create-mine")]
+        public async Task<IActionResult> CreateMine([FromBody] CustomerCreateOrderRequest request)
+        {
+            var userId = GetCurrentUserId();
+            if (!userId.HasValue)
+                return Unauthorized();
+
+            var client = await _context.ClientProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.User_id == userId.Value);
+            if (client == null)
+                return BadRequest(new { message = "Профиль клиента не найден для текущего пользователя." });
+
+            var orderTypeId = await _context.OrderTypes
+                .AsNoTracking()
+                .Select(x => x.ID_OrderType)
+                .FirstOrDefaultAsync();
+            var statusId = await _context.OrderStatuses
+                .AsNoTracking()
+                .Select(x => x.ID_OrderStatus)
+                .FirstOrDefaultAsync();
+            var packageTypeId = await _context.PackageTypes
+                .AsNoTracking()
+                .Select(x => x.ID_PackageType)
+                .FirstOrDefaultAsync();
+            var fallbackPaymentMethodId = await _context.PaymentMethods
+                .AsNoTracking()
+                .Select(x => x.ID_PaymentMethod)
+                .FirstOrDefaultAsync();
+
+            if (orderTypeId == 0 || statusId == 0 || packageTypeId == 0)
+                return BadRequest(new { message = "Не настроены справочники заказа (типы/статусы/пакеты)." });
+            if (client.Preferred_payment_method_id <= 0 && fallbackPaymentMethodId == 0)
+                return BadRequest(new { message = "Не настроены способы оплаты для компании." });
+
+            var pickupAddress = new Address
+            {
+                Street = request.PickupStreet.Trim(),
+                House = request.PickupHouse.Trim(),
+                Flat = string.IsNullOrWhiteSpace(request.PickupFlat) ? null : request.PickupFlat.Trim(),
+                City = string.IsNullOrWhiteSpace(request.PickupCity) ? null : request.PickupCity.Trim(),
+                Comment = string.IsNullOrWhiteSpace(request.PickupComment) ? null : request.PickupComment.Trim(),
+                Company_id = client.Company_id,
+                User_id = userId.Value
+            };
+            var deliveryAddress = new Address
+            {
+                Street = request.DeliveryStreet.Trim(),
+                House = request.DeliveryHouse.Trim(),
+                Flat = string.IsNullOrWhiteSpace(request.DeliveryFlat) ? null : request.DeliveryFlat.Trim(),
+                City = string.IsNullOrWhiteSpace(request.DeliveryCity) ? null : request.DeliveryCity.Trim(),
+                Comment = string.IsNullOrWhiteSpace(request.DeliveryComment) ? null : request.DeliveryComment.Trim(),
+                Company_id = client.Company_id,
+                User_id = userId.Value
+            };
+
+            _context.Addresses.Add(pickupAddress);
+            _context.Addresses.Add(deliveryAddress);
+            await _context.SaveChangesAsync();
+
+            var create = new CreateOrderRequest
+            {
+                Name = request.Name.Trim(),
+                Description = request.Description?.Trim() ?? string.Empty,
+                Client_id = client.ID_ClientProfile,
+                OrderType_id = orderTypeId,
+                Status_id = statusId,
+                PackageType_id = packageTypeId,
+                Weight = request.Weight,
+                Height = request.Height,
+                Length = request.Length,
+                Width = request.Width,
+                Estimated_cost = 0,
+                PaymentMethod_id = client.Preferred_payment_method_id > 0 ? client.Preferred_payment_method_id : fallbackPaymentMethodId,
+                PickupAddress_id = pickupAddress.ID_Address,
+                DeliveryAddress_id = deliveryAddress.ID_Address,
+                DeliveryRouteKind = 1,
+                Priority = request.Priority,
+                RequestedDeliveryAtUtc = request.RequestedDeliveryAtUtc
+            };
+
+            try
+            {
+                var created = await _orderService.CreateAsync(create);
+                return Ok(created);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
             }
         }
 
@@ -143,6 +256,22 @@ namespace APIDeliveryCRM.Controllers
         {
             var v = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             return int.TryParse(v, out var id) ? id : null;
+        }
+
+        private int? ResolveCompanyId(int? requestedCompanyId, out bool forbidden)
+        {
+            forbidden = false;
+            var raw = User.FindFirst("companyId")?.Value;
+            if (!int.TryParse(raw, out var claimCompanyId))
+                return null;
+
+            if (requestedCompanyId.HasValue && requestedCompanyId.Value != claimCompanyId)
+            {
+                forbidden = true;
+                return null;
+            }
+
+            return claimCompanyId;
         }
     }
 }

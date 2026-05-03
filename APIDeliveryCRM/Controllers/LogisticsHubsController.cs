@@ -1,25 +1,30 @@
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using APIDeliveryCRM.ContextDb;
+using APIDeliveryCRM.Helpers;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Request;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace APIDeliveryCRM.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class LogisticsHubsController : ControllerBase
+public class LogisticsHubsController : Controller
 {
     private readonly ILogisticsHubService _hubService;
+    private readonly ContextDB _db;
 
-    public LogisticsHubsController(ILogisticsHubService hubService)
+    public LogisticsHubsController(ILogisticsHubService hubService, ContextDB db)
     {
         _hubService = hubService;
+        _db = db;
     }
 
-    [Authorize(Roles = "Логист,Админ,Менеджер")]
+    [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
     [HttpGet]
     public async Task<IActionResult> GetMine()
     {
@@ -28,17 +33,45 @@ public class LogisticsHubsController : ControllerBase
             return Unauthorized(new { message = "Не указана компания в токене." });
 
         var list = await _hubService.GetByCompanyAsync(companyId.Value);
-        return Ok(list.Select(h => new
+        var openOrders = await _db.Orders.AsNoTracking()
+            .Where(o => o.Company_id == companyId.Value && o.Delivered_at == null)
+            .Include(o => o.ClientProfile).ThenInclude(c => c.User)
+            .Include(o => o.DeliveryAddress)
+            .Include(o => o.RouteStops)
+            .ToListAsync();
+
+        return Ok(list.Select(h =>
         {
-            id = h.ID_LogisticsHub,
-            name = h.Name,
-            addressId = h.Address_id,
-            city = h.Address?.City,
-            street = h.Address != null ? $"{h.Address.Street}, {h.Address.House}" : null
+            var onSite = openOrders
+                .Where(o => HubOccupancyHelper.IsOrderAtHub(o, h.ID_LogisticsHub))
+                .Select(o => new
+                {
+                    orderId = o.ID_Order,
+                    orderNumber = o.Order_Number,
+                    clientName = HubOccupancyHelper.FormatClientName(o.ClientProfile),
+                    deliveryTo = HubOccupancyHelper.FormatDeliveryLine(o.DeliveryAddress)
+                })
+                .ToList();
+
+            return new
+            {
+                id = h.ID_LogisticsHub,
+                name = h.Name,
+                addressId = h.Address_id,
+                city = h.Address?.City,
+                street = h.Address?.Street,
+                house = h.Address?.House,
+                flat = h.Address?.Flat,
+                region = h.Address?.Region,
+                postalCode = h.Address?.PostalCode,
+                latitude = h.Address?.Latitude,
+                longitude = h.Address?.Longitude,
+                ordersOnSite = onSite
+            };
         }));
     }
 
-    [Authorize(Roles = "Логист,Админ,Менеджер")]
+    [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateLogisticsHubRequest request)
     {

@@ -3,6 +3,7 @@
 @using System.Security.Claims
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Utilities
 @inject VehiclesApiService VehiclesApi
 @inject CouriersApiService CouriersApi
 @inject AuthenticationStateProvider AuthState
@@ -17,8 +18,8 @@
     </div>
     <h1>Добавить транспорт</h1>
     <p class="subtitle">
-        Из справочников выбираются только <strong>категория</strong>, <strong>тип кузова</strong> и <strong>топливо</strong> (таблицы VehicleCategories, VehicleBodyTypes, FuelTypes).
-        Марка, модель, госномер, VIN и прочие параметры — вручную (поля таблицы Vehicles).
+        Марка и модель — комбобоксы по справочнику: сначала марка (модели фильтруются) или сначала модель из полного списка (марка и данные справочника подставляются).
+        Если в БД нет моделей — ввод вручную. Категория, кузов и топливо — из справочников формы.
     </p>
 </div>
 
@@ -40,8 +41,8 @@ else
                 <input class="form-control" @bind="_req.License_plate" />
             </div>
             <div class="col-md-4">
-                <label class="form-label">VIN *</label>
-                <input class="form-control" @bind="_req.VIN" />
+                <label class="form-label">VIN * (17 символов, без I, O, Q)</label>
+                <input class="form-control" maxlength="17" value="@_req.VIN" @oninput="OnVinInput" />
             </div>
             <div class="col-md-4">
                 <label class="form-label">Год выпуска *</label>
@@ -57,14 +58,46 @@ else
                     }
                 </select>
             </div>
-            <div class="col-md-4">
-                <label class="form-label">Марка *</label>
-                <input class="form-control" placeholder="Например: Toyota" @bind="_req.Brand_name" />
-            </div>
-            <div class="col-md-4">
-                <label class="form-label">Модель *</label>
-                <input class="form-control" placeholder="Например: Camry" @bind="_req.Model_name" />
-            </div>
+            @if (UseVehicleCatalog)
+            {
+                <div class="col-md-4">
+                    <label class="form-label">Марка *</label>
+                    <select class="form-select" @bind="_selectedBrandId" @bind:after="OnCatalogBrandChangedAfter">
+                        <option value="0">— любая марка (или выберите первой) —</option>
+                        @foreach (var b in _catalogBrands)
+                        {
+                            <option value="@b.Id">@b.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Модель *</label>
+                    <select class="form-select" @bind="_selectedModelId" @bind:after="OnCatalogModelChangedAfter">
+                        <option value="0">— выберите модель —</option>
+                        @foreach (var m in GetFilteredCatalogModels())
+                        {
+                            <option value="@m.Id">@FormatCatalogModelOption(m)</option>
+                        }
+                    </select>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_catalogHint))
+                {
+                    <div class="col-12">
+                        <div class="form-text text-info">@_catalogHint</div>
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="col-md-4">
+                    <label class="form-label">Марка *</label>
+                    <input class="form-control" placeholder="Например: Toyota" @bind="_req.Brand_name" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Модель *</label>
+                    <input class="form-control" placeholder="Например: Camry" @bind="_req.Model_name" />
+                </div>
+            }
             <div class="col-md-4">
                 <label class="form-label">Кузов * <span class="text-muted small">(справочник)</span></label>
                 <select class="form-select" @bind="_req.BodyType_id">
@@ -115,7 +148,7 @@ else
                     <option value="0">— только автопарк —</option>
                     @foreach (var c in _couriers.OrderBy(x => x.User?.FName))
                     {
-                        <option value="@c.ID_CourierProfile">@($"{c.User?.FName} {c.User?.Name}".Trim()) (#@c.ID_CourierProfile)</option>
+                        <option value="@c.ID_CourierProfile">@($"{c.User?.FName} {c.User?.Name}".Trim())</option>
                     }
                 </select>
             </div>
@@ -131,6 +164,11 @@ else
 @code {
     private VehicleFormLookupsDto? _lookups;
     private List<CourierProfileDto> _couriers = new();
+    private List<IdNameDto> _catalogBrands = new();
+    private List<VehicleCatalogModelDto> _allCatalogModels = new();
+    private int _selectedBrandId;
+    private int _selectedModelId;
+    private string _catalogHint = string.Empty;
     private CreateVehicleApiRequest _req = new()
     {
         Year = new DateOnly(2020, 1, 1),
@@ -142,16 +180,32 @@ else
     private int _year = DateTime.UtcNow.Year;
     private int _courierId;
     private bool _loading = true;
+    private bool _dataLoaded;
     private bool _saving;
 
-    protected override async Task OnInitializedAsync()
+    private bool UseVehicleCatalog => _allCatalogModels.Count > 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender || _dataLoaded)
+            return;
+        _dataLoaded = true;
+
         _loading = true;
+        StateHasChanged();
+
         try
         {
             var state = await AuthState.GetAuthenticationStateAsync();
-            var cidStr = state.User.FindFirst("companyId")?.Value;
-            if (!int.TryParse(cidStr, out var companyId))
+            if (state.User.Identity?.IsAuthenticated != true)
+            {
+                _lookups = null;
+                Notify.ShowWarning("Требуется вход.");
+                Nav.NavigateTo("/login");
+                return;
+            }
+
+            if (!int.TryParse(state.User.FindFirst("companyId")?.Value, out _))
             {
                 _lookups = null;
                 return;
@@ -164,7 +218,17 @@ else
                 Nav.NavigateTo("/login");
                 return;
             }
-            _couriers = await CouriersApi.GetAllAsync(companyId) ?? new();
+
+            var brandsFromApi = await VehiclesApi.GetCatalogBrandsAsync();
+            _allCatalogModels = await VehiclesApi.GetCatalogModelsAsync(null);
+            _catalogBrands = brandsFromApi.Count > 0
+                ? brandsFromApi
+                : _allCatalogModels
+                    .GroupBy(x => x.BrandId)
+                    .Select(g => new IdNameDto { Id = g.Key, Name = g.First().BrandName ?? "" })
+                    .OrderBy(b => b.Name)
+                    .ToList();
+            _couriers = await CouriersApi.GetAllAsync(null) ?? new();
         }
         catch (Exception ex)
         {
@@ -174,7 +238,84 @@ else
         finally
         {
             _loading = false;
+            StateHasChanged();
         }
+    }
+
+    private void OnCatalogBrandChangedAfter()
+    {
+        if (_selectedModelId <= 0)
+        {
+            SyncBrandNameFromSelection();
+            return;
+        }
+
+        var current = _allCatalogModels.FirstOrDefault(x => x.Id == _selectedModelId);
+        if (current is null || (_selectedBrandId > 0 && current.BrandId != _selectedBrandId))
+        {
+            _selectedModelId = 0;
+            _req.Model_id = null;
+            _req.Model_name = string.Empty;
+            _catalogHint = string.Empty;
+        }
+
+        SyncBrandNameFromSelection();
+    }
+
+    private void OnCatalogModelChangedAfter()
+    {
+        var m = _allCatalogModels.FirstOrDefault(x => x.Id == _selectedModelId);
+        if (m is null || _selectedModelId <= 0)
+        {
+            _req.Model_id = null;
+            _req.Model_name = string.Empty;
+            _catalogHint = string.Empty;
+            SyncBrandNameFromSelection();
+            return;
+        }
+
+        _selectedBrandId = m.BrandId;
+        _req.Model_id = m.Id;
+        _year = m.Year.Year;
+        _req.Brand_name = m.BrandName ?? string.Empty;
+        _req.Model_name = m.Name ?? string.Empty;
+        _catalogHint = BuildCatalogHint(m);
+    }
+
+    private void SyncBrandNameFromSelection()
+    {
+        if (_selectedBrandId > 0)
+            _req.Brand_name = _catalogBrands.FirstOrDefault(b => b.Id == _selectedBrandId)?.Name ?? string.Empty;
+        else if ((_req.Model_id ?? 0) <= 0)
+            _req.Brand_name = string.Empty;
+    }
+
+    private List<VehicleCatalogModelDto> GetFilteredCatalogModels()
+    {
+        IEnumerable<VehicleCatalogModelDto> q = _allCatalogModels;
+        if (_selectedBrandId > 0)
+            q = q.Where(m => m.BrandId == _selectedBrandId);
+        return q.OrderBy(m => m.BrandName).ThenBy(m => m.Name).ThenBy(m => m.Year).ToList();
+    }
+
+    private string FormatCatalogModelOption(VehicleCatalogModelDto m)
+    {
+        if (_selectedBrandId > 0)
+            return $"{m.Name} ({m.Year})";
+        var brand = string.IsNullOrWhiteSpace(m.BrandName) ? "?" : m.BrandName;
+        return $"{brand} — {m.Name} ({m.Year})";
+    }
+
+    private static string BuildCatalogHint(VehicleCatalogModelDto m)
+    {
+        var tr = string.IsNullOrWhiteSpace(m.TransmissionTypeName) ? $"КПП #{m.TransmissionTypeId}" : m.TransmissionTypeName;
+        var dr = string.IsNullOrWhiteSpace(m.DriveTypeName) ? $"привод #{m.DriveTypeId}" : m.DriveTypeName;
+        return $"Справочник: расход {m.AvgFuelCity:0.#} / {m.AvgFuelHighWay:0.#} л/100 км, двигатель {m.EngineCapacity:0.#} л, {m.HorsePower} л.с., {tr}, {dr}.";
+    }
+
+    private void OnVinInput(ChangeEventArgs e)
+    {
+        _req.VIN = VinHelper.SanitizeInput(e.Value?.ToString());
     }
 
     private async Task Save()
@@ -185,9 +326,15 @@ else
             Notify.ShowWarning("Укажите гос. номер и VIN.");
             return;
         }
-        if (string.IsNullOrWhiteSpace(_req.Brand_name) || string.IsNullOrWhiteSpace(_req.Model_name))
+        if (!VinHelper.IsValid(_req.VIN, out var vinErr))
         {
-            Notify.ShowWarning("Укажите марку и модель ТС.");
+            Notify.ShowWarning(vinErr ?? "Некорректный VIN.");
+            return;
+        }
+        if ((_req.Model_id ?? 0) <= 0 &&
+            (string.IsNullOrWhiteSpace(_req.Brand_name) || string.IsNullOrWhiteSpace(_req.Model_name)))
+        {
+            Notify.ShowWarning("Выберите модель из справочника или укажите марку и модель ТС.");
             return;
         }
         if (_req.Category_id <= 0 || _req.BodyType_id <= 0 || _req.FuelType_id <= 0)
@@ -197,10 +344,10 @@ else
         }
 
         _req.Year = new DateOnly(Math.Clamp(_year, 1980, 2100), 1, 1);
-        _req.Model_id = null;
         _req.CurrentCourier_id = _courierId > 0 ? _courierId : null;
 
         _saving = true;
+        StateHasChanged();
         try
         {
             var (ok, err, id) = await VehiclesApi.CreateVehicleAsync(_req);
@@ -219,6 +366,7 @@ else
         finally
         {
             _saving = false;
+            StateHasChanged();
         }
     }
 }

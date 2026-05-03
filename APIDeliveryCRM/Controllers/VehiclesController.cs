@@ -12,7 +12,7 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class VehiclesController : ControllerBase
+public class VehiclesController : Controller
     {
         private readonly ICourierService _courierService;
         private readonly ContextDB _db;
@@ -23,8 +23,53 @@ namespace APIDeliveryCRM.Controllers
             _db = db;
         }
 
+        /// <summary>Марки из справочника VehicleBrands.</summary>
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+        [HttpGet("catalog/brands")]
+        public async Task<IActionResult> GetCatalogBrands()
+        {
+            var list = await _db.VehicleBrands.AsNoTracking()
+                .OrderBy(b => b.Name)
+                .Select(b => new IdNameDto { Id = b.ID_Brand, Name = b.Name })
+                .ToListAsync();
+            return Ok(list);
+        }
+
+        /// <summary>Модели из справочника VehicleModels. Без brandId или brandId ≤ 0 — все модели (с маркой); иначе — только выбранная марка.</summary>
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+        [HttpGet("catalog/models")]
+        public async Task<IActionResult> GetCatalogModels([FromQuery] int? brandId)
+        {
+            var query = _db.VehicleModels.AsNoTracking().AsQueryable();
+            if (brandId is > 0)
+                query = query.Where(m => m.Brand_id == brandId.Value);
+
+            var list = await query
+                .OrderBy(m => m.VehicleBrand.Name)
+                .ThenBy(m => m.Name)
+                .ThenBy(m => m.Year)
+                .Select(m => new VehicleCatalogModelDto
+                {
+                    Id = m.ID_Model,
+                    BrandId = m.Brand_id,
+                    BrandName = m.VehicleBrand.Name,
+                    Name = m.Name,
+                    Year = m.Year,
+                    AvgFuelCity = m.AvgFuelCity,
+                    AvgFuelHighWay = m.AvgFuelHighWay,
+                    EngineCapacity = m.EngineCapacity,
+                    HorsePower = m.HorsePower,
+                    TransmissionTypeId = m.TransmissionType_id,
+                    DriveTypeId = m.DriveType_id,
+                    TransmissionTypeName = m.TransmissionType.Name,
+                    DriveTypeName = m.VehicleDriveType.Name
+                })
+                .ToListAsync();
+            return Ok(list);
+        }
+
         /// <summary>Справочники для формы создания ТС: категория, кузов, топливо. Марка/модель — вручную.</summary>
-        [Authorize(Roles = "Логист,Админ,Менеджер")]
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
         [HttpGet("lookups")]
         public async Task<IActionResult> GetLookups()
         {
@@ -52,7 +97,7 @@ namespace APIDeliveryCRM.Controllers
         }
 
         /// <summary>Создание ТС в автопарке компании (JWT companyId).</summary>
-        [Authorize(Roles = "Логист,Админ,Менеджер")]
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreateVehicleRequest dto)
         {
@@ -75,7 +120,7 @@ namespace APIDeliveryCRM.Controllers
         }
 
         /// <summary>ТС с истекающими документами в ближайшие N дней.</summary>
-        [Authorize(Roles = "Логист,Админ,Менеджер")]
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
         [HttpGet("expiring-docs")]
         public async Task<IActionResult> GetExpiringDocs([FromQuery] int days = 14)
         {
@@ -132,6 +177,23 @@ namespace APIDeliveryCRM.Controllers
         {
             public int Id { get; set; }
             public string? Name { get; set; }
+        }
+
+        public class VehicleCatalogModelDto
+        {
+            public int Id { get; set; }
+            public int BrandId { get; set; }
+            public string? BrandName { get; set; }
+            public string? Name { get; set; }
+            public DateOnly Year { get; set; }
+            public decimal AvgFuelCity { get; set; }
+            public decimal AvgFuelHighWay { get; set; }
+            public decimal EngineCapacity { get; set; }
+            public int HorsePower { get; set; }
+            public int TransmissionTypeId { get; set; }
+            public int DriveTypeId { get; set; }
+            public string? TransmissionTypeName { get; set; }
+            public string? DriveTypeName { get; set; }
         }
     }
 }

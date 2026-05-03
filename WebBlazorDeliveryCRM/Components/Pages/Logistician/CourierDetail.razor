@@ -41,11 +41,46 @@ else
         </div>
         <div class="col-lg-6">
             <div class="dms-card h-100">
-                <h2 class="dms-card-title">Документы и допуски</h2>
-                <p class="mb-1"><strong>Категория ТС (допуск):</strong> @(CategoryName(_courier))</p>
-                <p class="mb-1"><strong>График работы:</strong> @(ScheduleName(_courier))</p>
-                <p class="mb-1"><strong>Водительское удостоверение:</strong> @(string.IsNullOrWhiteSpace(_courier.DriverLicense) ? "—" : _courier.DriverLicense)</p>
-                <p class="mb-0"><strong>Паспорт / данные:</strong> @(string.IsNullOrWhiteSpace(_courier.Passport_data) ? "—" : _courier.Passport_data)</p>
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                    <h2 class="dms-card-title mb-0">Документы и допуски</h2>
+                    @if (!_editingDocs)
+                    {
+                        @if (DocsIncomplete)
+                        {
+                            <button type="button" class="btn btn-sm btn-primary" @onclick="() => _editingDocs = true">Заполнить</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => _editingDocs = true">Редактировать</button>
+                        }
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-sm btn-primary" disabled="@_savingDocs" @onclick="SaveDocumentsAsync">
+                            @(_savingDocs ? "Сохранение…" : "Сохранить")
+                        </button>
+                    }
+                </div>
+                @if (!_editingDocs)
+                {
+                    <p class="mb-1"><strong>Категория ТС (допуск):</strong> @(CategoryName(_courier))</p>
+                    <p class="mb-1"><strong>График работы:</strong> @(ScheduleName(_courier))</p>
+                    <p class="mb-1"><strong>Водительское удостоверение:</strong> @(string.IsNullOrWhiteSpace(_courier.DriverLicense) ? "—" : _courier.DriverLicense)</p>
+                    <p class="mb-0"><strong>Паспорт / данные:</strong> @(string.IsNullOrWhiteSpace(_courier.Passport_data) ? "—" : _courier.Passport_data)</p>
+                }
+                else
+                {
+                    <p class="small text-muted">Категория ТС и график — в справочниках; здесь можно внести ВУ и паспортные данные.</p>
+                    <div class="mb-2">
+                        <label class="form-label">Водительское удостоверение</label>
+                        <input class="form-control" @bind="_editDriverLicense" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Паспорт / данные</label>
+                        <textarea class="form-control" rows="3" @bind="_editPassport"></textarea>
+                    </div>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CancelEditDocs">Отмена</button>
+                }
             </div>
         </div>
     </div>
@@ -128,6 +163,14 @@ else
     private int _selectedVehicleId;
     private bool _assigning;
     private bool _loading = true;
+    private bool _editingDocs;
+    private bool _savingDocs;
+    private string _editDriverLicense = "";
+    private string _editPassport = "";
+
+    private bool DocsIncomplete =>
+        _courier is not null &&
+        (string.IsNullOrWhiteSpace(_courier.DriverLicense) || string.IsNullOrWhiteSpace(_courier.Passport_data));
 
     protected override async Task OnParametersSetAsync()
     {
@@ -157,6 +200,10 @@ else
             _orders = await CouriersApi.GetActiveOrdersAsync(CourierId) ?? new();
             if (_assignedVehicles.Count == 1)
                 _selectedVehicleId = _assignedVehicles[0].ID_Vehicle;
+
+            _editDriverLicense = _courier.DriverLicense ?? "";
+            _editPassport = _courier.Passport_data ?? "";
+            _editingDocs = false;
         }
         catch (Exception ex)
         {
@@ -168,6 +215,38 @@ else
         finally
         {
             _loading = false;
+        }
+    }
+
+    private void CancelEditDocs()
+    {
+        _editingDocs = false;
+        if (_courier is not null)
+        {
+            _editDriverLicense = _courier.DriverLicense ?? "";
+            _editPassport = _courier.Passport_data ?? "";
+        }
+    }
+
+    private async Task SaveDocumentsAsync()
+    {
+        if (_courier is null) return;
+        _savingDocs = true;
+        try
+        {
+            var (ok, err) = await CouriersApi.UpdateDocumentsAsync(CourierId, _editDriverLicense, _editPassport);
+            if (ok)
+            {
+                Notify.ShowSuccess("Данные сохранены.");
+                _editingDocs = false;
+                await LoadAsync();
+            }
+            else
+                Notify.ShowError(string.IsNullOrWhiteSpace(err) ? "Не удалось сохранить." : err);
+        }
+        finally
+        {
+            _savingDocs = false;
         }
     }
 
@@ -203,7 +282,7 @@ else
     }
 
     private static string FullName(CourierProfileDto c)
-        => $"{c.User?.FName} {c.User?.Name}".Trim();
+        => $"{c.User?.FName} {c.User?.Name} {c.User?.Patronumic}".Trim();
 
     private static string CategoryName(CourierProfileDto c)
         => c.VehicleCategory?.Name ?? c.VehicleCategoryName ?? "—";

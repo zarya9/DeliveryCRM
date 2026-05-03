@@ -1,7 +1,5 @@
 using System;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
 using APIDeliveryCRM.Interfaces;
@@ -9,23 +7,26 @@ using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
 
 namespace APIDeliveryCRM.Services
 {
     public class EmployeeService : IEmployeeService
     {
         private readonly ContextDB _context;
+        private readonly IPasswordHasher<Login> _passwordHasher;
 
         public EmployeeService(ContextDB context)
         {
             _context = context;
+            _passwordHasher = new PasswordHasher<Login>();
         }
 
         public async Task<IActionResult> GetByCompanyAsync(int companyId)
         {
             var users = await _context.Users
                 .Include(u => u.Role)
-                .Where(u => u.Company_id == companyId)
+                .Where(u => u.Company_id == companyId && u.Is_Active)
                 .OrderBy(u => u.FName)
                 .ThenBy(u => u.Name)
                 .Select(u => new
@@ -35,6 +36,7 @@ namespace APIDeliveryCRM.Services
                     u.Patronumic,
                     role = u.Role.Name,
                     u.Is_Active,
+                    isFired = !u.Is_Active,
                     u.Created_at,
                     u.Company_id,
                     email = u.Logins
@@ -88,12 +90,17 @@ namespace APIDeliveryCRM.Services
                 var login = new Login
                 {
                     Email = request.Email,
-                    Password = HashPassword(request.Password),
+                    Password = string.Empty,
                     User = user
                 };
+                login.Password = _passwordHasher.HashPassword(login, request.Password);
 
                 _context.Logins.Add(login);
                 await _context.SaveChangesAsync();
+
+                if (string.Equals(role.Name, "Курьер", StringComparison.Ordinal))
+                    await CreateCourierProfileInTransactionAsync(user.ID_User, company.ID_Company);
+
                 await transaction.CommitAsync();
 
                 return new OkObjectResult(new
@@ -109,11 +116,58 @@ namespace APIDeliveryCRM.Services
             }
         }
 
-        private static string HashPassword(string password)
+        public async Task<IActionResult> FireAsync(int employeeId, int companyId, int actorUserId)
         {
-            using var sha256 = SHA256.Create();
-            var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-            return Convert.ToBase64String(hashedBytes);
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.ID_User == employeeId && u.Company_id == companyId);
+            if (user == null)
+                return new NotFoundObjectResult(new { message = "Сотрудник не найден." });
+
+            if (user.ID_User == actorUserId)
+                return new BadRequestObjectResult(new { message = "Нельзя уволить текущего пользователя." });
+
+            if (!user.Is_Active)
+                return new OkObjectResult(new { message = "Сотрудник уже уволен." });
+
+            user.Is_Active = false;
+            await _context.SaveChangesAsync();
+            return new OkObjectResult(new { message = "Сотрудник уволен." });
+        }
+
+        /// <summary>Создаёт CourierProfile в той же транзакции, что и сотрудник (роль «Курьер»).</summary>
+        private async Task CreateCourierProfileInTransactionAsync(int userId, int companyId)
+        {
+            if (await _context.CourierProfiles.AnyAsync(c => c.User_id == userId))
+                return;
+
+            var defaultCategory = await _context.VehicleCategories.OrderBy(c => c.ID_Category).FirstOrDefaultAsync();
+            var defaultSchedule = await _context.ScheduleTypes.OrderBy(s => s.ID_SheduleType).FirstOrDefaultAsync();
+            if (defaultCategory == null || defaultSchedule == null)
+                return;
+
+            var defaultStatus = await _context.CourierStatuses.FirstOrDefaultAsync(s => s.Name == "Не на смене");
+            if (defaultStatus == null)
+            {
+                defaultStatus = new CourierStatus { Name = "Не на смене", Description = "Курьер не на смене" };
+                _context.CourierStatuses.Add(defaultStatus);
+                await _context.SaveChangesAsync();
+            }
+
+            _context.CourierProfiles.Add(new CourierProfile
+            {
+                Company_id = companyId,
+                User_id = userId,
+                VehicleCategory_id = defaultCategory.ID_Category,
+                WorkSchedule_id = defaultSchedule.ID_SheduleType,
+                CurrentStatus_id = defaultStatus.ID_CourierStatus,
+                Total_deliveries = 0,
+                Current_lat = 0,
+                Current_lon = 0,
+                Rating = 0,
+                Is_online = false,
+                LastActivity_at = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync();
         }
     }
 }

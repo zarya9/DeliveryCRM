@@ -160,11 +160,25 @@ namespace APIDeliveryCRM.Services
                     throw new InvalidOperationException("Один из складов не найден или принадлежит другой компании.");
             }
             var stops = OrderRoutePlanner.BuildStops(routeKind, pickup, delivery, originHub, destHub);
+            var distanceKm = EstimateRouteDistanceKm(routeKind, pickup, delivery, originHub, destHub);
+            var estimatedCost = CalculateEstimatedCost(
+                distanceKm: distanceKm,
+                weightKg: request.Weight,
+                lengthCm: request.Length,
+                widthCm: request.Width,
+                heightCm: request.Height,
+                priority: request.Priority,
+                routeKind: routeKind,
+                createdAtUtc: DateTime.UtcNow);
+            var (windowFromUtc, windowToUtc, etaUtc) = EstimateDeliveryWindowUtc(
+                nowUtc: DateTime.UtcNow,
+                priority: request.Priority,
+                hasCourierAssigned: request.Courier_id.HasValue,
+                routeKind: routeKind,
+                distanceKm: distanceKm);
 
-            var maxOrderNumber = await _context.Orders
-                .Select(o => o.Order_Number)
-                .DefaultIfEmpty(0)
-                .MaxAsync();
+            // EF Core не переводит Select(...).DefaultIfEmpty(0).MaxAsync() в SQL (Npgsql).
+            var maxOrderNumber = await _context.Orders.MaxAsync(o => (int?)o.Order_Number) ?? 0;
 
             var order = new Order
             {
@@ -181,7 +195,7 @@ namespace APIDeliveryCRM.Services
                 Height = request.Height,
                 Length = request.Length,
                 Width = request.Width,
-                Estimated_cost = request.Estimated_cost,
+                Estimated_cost = estimatedCost,
                 Final_cost = 0,
                 Created_at = DateTime.UtcNow,
                 PaymentMethod_id = request.PaymentMethod_id,
@@ -192,8 +206,8 @@ namespace APIDeliveryCRM.Services
                 OriginHub_id = routeKind == DeliveryRouteKind.ViaHub ? originHub!.ID_LogisticsHub : null,
                 DestinationHub_id = routeKind == DeliveryRouteKind.ViaHub ? destHub!.ID_LogisticsHub : null,
                 Priority = request.Priority,
-                Sla_due_at = request.RequestedDeliveryAtUtc?.ToUniversalTime(),
-                Eta_at = EstimateEtaUtc(DateTime.UtcNow, request.Priority, hasCourierAssigned: request.Courier_id.HasValue)
+                Sla_due_at = request.RequestedDeliveryAtUtc?.ToUniversalTime() ?? windowToUtc,
+                Eta_at = etaUtc
             };
 
             foreach (var stop in stops)
@@ -207,14 +221,17 @@ namespace APIDeliveryCRM.Services
                 Order_id = order.ID_Order,
                 EventType = "ORDER_CREATED",
                 Title = "Заказ создан",
-                Message = "Создан новый заказ и рассчитан начальный ETA."
+                Message = $"Создан новый заказ. Ориентировочная доставка: {FormatDeliveryWindowRu(windowFromUtc, windowToUtc)}. Предварительная стоимость: {estimatedCost:0.##}."
             });
             await _context.SaveChangesAsync();
             await PublishOrderEventAsync("order.created", order, new
             {
                 routeKind = order.DeliveryRouteKind.ToString(),
                 priority = order.Priority,
-                etaAt = order.Eta_at
+                etaAt = order.Eta_at,
+                deliveryWindowFromUtc = windowFromUtc,
+                deliveryWindowToUtc = windowToUtc,
+                estimatedCost
             });
             return order;
         }
@@ -484,6 +501,8 @@ namespace APIDeliveryCRM.Services
                 return null;
 
             var risk = IsSlaRisk(order);
+            var windowFrom = order.Eta_at?.AddHours(-Math.Max(2, Math.Ceiling(((order.Sla_due_at ?? order.Eta_at ?? DateTime.UtcNow) - (order.Eta_at ?? DateTime.UtcNow)).TotalHours)));
+            var windowTo = order.Sla_due_at;
             return new OrderEtaDto
             {
                 OrderId = order.ID_Order,
@@ -491,9 +510,159 @@ namespace APIDeliveryCRM.Services
                 SlaDueAtUtc = order.Sla_due_at,
                 IsSlaBreached = order.Sla_breached_at.HasValue || (order.Sla_due_at.HasValue && DateTime.UtcNow > order.Sla_due_at.Value),
                 IsSlaRisk = risk,
-                DelayReason = order.Delay_reason
+                DelayReason = order.Delay_reason,
+                DeliveryWindowFromUtc = windowFrom,
+                DeliveryWindowToUtc = windowTo,
+                DeliveryWindowText = FormatDeliveryWindowRu(windowFrom, windowTo)
             };
         }
+
+        private static (DateTime fromUtc, DateTime toUtc, DateTime etaUtc) EstimateDeliveryWindowUtc(
+            DateTime nowUtc,
+            byte priority,
+            bool hasCourierAssigned,
+            DeliveryRouteKind routeKind,
+            decimal distanceKm)
+        {
+            var safeDistance = Math.Max(1m, distanceKm);
+            var speedKmh = routeKind switch
+            {
+                DeliveryRouteKind.DirectIntercity => 62m,
+                DeliveryRouteKind.ViaHub => 48m,
+                _ => 32m
+            };
+            var routeHandlingHours = routeKind switch
+            {
+                DeliveryRouteKind.ViaHub => 8m,
+                DeliveryRouteKind.DirectIntercity => 5m,
+                _ => 2m
+            };
+            var travelHours = safeDistance / speedKmh + routeHandlingHours;
+            var priorityFactor = priority switch
+            {
+                2 => 0.70m,
+                1 => 0.82m,
+                _ => 1.00m
+            };
+            travelHours *= priorityFactor;
+            if (!hasCourierAssigned)
+                travelHours += 2.0m;
+
+            var center = nowUtc.AddHours((double)travelHours);
+            var halfWindowHours = Math.Max(2.0, Math.Ceiling((double)travelHours * 0.25));
+            var from = center.AddHours(-halfWindowHours);
+            var to = center.AddHours(halfWindowHours);
+            return (from, to, center);
+        }
+
+        private static decimal CalculateEstimatedCost(
+            decimal distanceKm,
+            decimal weightKg,
+            decimal lengthCm,
+            decimal widthCm,
+            decimal heightCm,
+            byte priority,
+            DeliveryRouteKind routeKind,
+            DateTime createdAtUtc)
+        {
+            var baseFare = 180m;
+            var perKm = routeKind switch
+            {
+                DeliveryRouteKind.DirectIntercity => 30m,
+                DeliveryRouteKind.ViaHub => 24m,
+                _ => 20m
+            };
+            var safeDistance = Math.Max(1m, distanceKm);
+            var volumetricKg = Math.Max(0m, (lengthCm * widthCm * heightCm) / 5000m);
+            var chargeableWeight = Math.Max(Math.Max(0.1m, weightKg), volumetricKg);
+            var weightSurcharge = Math.Max(0m, chargeableWeight - 3m) * 15m;
+
+            var priorityMul = priority switch
+            {
+                2 => 1.55m,
+                1 => 1.25m,
+                _ => 1.00m
+            };
+
+            // В пиковые часы дороже, в дневное окно будней — дешевле.
+            var localHour = createdAtUtc.Hour;
+            var dayOfWeek = createdAtUtc.DayOfWeek;
+            var timeMul = 1.00m;
+            if (dayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+                timeMul += 0.08m;
+            if (localHour >= 18 && localHour < 22)
+                timeMul += 0.12m;
+            else if (localHour >= 10 && localHour < 17 && dayOfWeek is >= DayOfWeek.Monday and <= DayOfWeek.Friday)
+                timeMul -= 0.07m;
+
+            var subtotal = baseFare + safeDistance * perKm + weightSurcharge;
+            var result = subtotal * priorityMul * timeMul;
+            return Math.Round(Math.Max(120m, result), 2);
+        }
+
+        private static decimal EstimateRouteDistanceKm(
+            DeliveryRouteKind routeKind,
+            Address pickup,
+            Address delivery,
+            LogisticsHub? originHub,
+            LogisticsHub? destinationHub)
+        {
+            decimal Segment(Address? a, Address? b)
+            {
+                if (a?.Latitude is not null && a.Longitude is not null && b?.Latitude is not null && b.Longitude is not null)
+                    return (decimal)HaversineKm((double)a.Latitude.Value, (double)a.Longitude.Value, (double)b.Latitude.Value, (double)b.Longitude.Value);
+                if (!string.IsNullOrWhiteSpace(a?.City) && !string.IsNullOrWhiteSpace(b?.City) &&
+                    string.Equals(a.City, b.City, StringComparison.OrdinalIgnoreCase))
+                    return 8m;
+                return 35m;
+            }
+
+            return routeKind switch
+            {
+                DeliveryRouteKind.ViaHub when originHub?.Address != null && destinationHub?.Address != null =>
+                    Segment(pickup, originHub.Address) + Segment(originHub.Address, destinationHub.Address) + Segment(destinationHub.Address, delivery),
+                _ => Segment(pickup, delivery)
+            };
+        }
+
+        private static string FormatDeliveryWindowRu(DateTime? fromUtc, DateTime? toUtc)
+        {
+            if (!fromUtc.HasValue && !toUtc.HasValue)
+                return "дата уточняется";
+            if (!fromUtc.HasValue)
+                return $"до {FormatDayMonthRu(toUtc!.Value)}";
+            if (!toUtc.HasValue)
+                return $"с {FormatDayMonthRu(fromUtc.Value)}";
+
+            var from = fromUtc.Value;
+            var to = toUtc.Value;
+            if (from.Date == to.Date)
+                return FormatDayMonthRu(from);
+
+            if (from.Month == to.Month && from.Year == to.Year)
+                return $"с {from:dd} по {to:dd} {GetMonthRu(to.Month)}";
+
+            return $"с {FormatDayMonthRu(from)} по {FormatDayMonthRu(to)}";
+        }
+
+        private static string FormatDayMonthRu(DateTime dt) => $"{dt:dd} {GetMonthRu(dt.Month)}";
+
+        private static string GetMonthRu(int month) => month switch
+        {
+            1 => "января",
+            2 => "февраля",
+            3 => "марта",
+            4 => "апреля",
+            5 => "мая",
+            6 => "июня",
+            7 => "июля",
+            8 => "августа",
+            9 => "сентября",
+            10 => "октября",
+            11 => "ноября",
+            12 => "декабря",
+            _ => string.Empty
+        };
 
         private static DateTime EstimateEtaUtc(DateTime nowUtc, byte priority, bool hasCourierAssigned)
         {
@@ -667,7 +836,7 @@ namespace APIDeliveryCRM.Services
             {
                 var systemSenderId = await _context.Users
                     .AsNoTracking()
-                    .Where(u => u.Company_id == order.Company_id && (u.Role.Name == "Менеджер" || u.Role.Name == "Админ"))
+                    .Where(u => u.Company_id == order.Company_id && (u.Role.Name == "Менеджер" || u.Role.Name == "Админ" || u.Role.Name == "Администратор"))
                     .Select(u => u.ID_User)
                     .FirstOrDefaultAsync();
                 if (systemSenderId > 0)

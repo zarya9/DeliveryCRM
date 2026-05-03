@@ -1,3 +1,6 @@
+@implements IDisposable
+@inject NavigationManager Navigation
+
 <div class="desktop-layout">
     <aside class="desktop-sidebar">
         @SidebarContent
@@ -5,15 +8,42 @@
     <main class="desktop-main">
         <div class="desktop-main-inner">
             <AppBar />
-            @ChildContent
+            <ErrorBoundary @ref="_errorBoundary">
+                <ChildContent>
+                    @ChildContent
+                </ChildContent>
+                <ErrorContent>
+                    <div class="alert alert-danger">
+                        Произошла ошибка при открытии страницы. Попробуйте перейти в раздел еще раз.
+                    </div>
+                </ErrorContent>
+            </ErrorBoundary>
         </div>
     </main>
 </div>
 
 @code {
+    private ErrorBoundary? _errorBoundary;
+
     [Parameter]
     public RenderFragment? SidebarContent { get; set; }
 
     [Parameter]
     public RenderFragment? ChildContent { get; set; }
+
+    protected override void OnInitialized()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        _errorBoundary?.Recover();
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
 }

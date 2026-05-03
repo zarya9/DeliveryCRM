@@ -23,6 +23,12 @@ public class EmployeesApiService
         return resp.IsSuccessStatusCode;
     }
 
+    public async Task<bool> FireAsync(int employeeId, int companyId, CancellationToken cancellationToken = default)
+    {
+        var resp = await _http.PostAsync($"/api/Employees/{employeeId}/fire?companyId={companyId}", null, cancellationToken);
+        return resp.IsSuccessStatusCode;
+    }
+
     public sealed class EmployeeDto
     {
         public int Id { get; set; }
@@ -30,6 +36,7 @@ public class EmployeesApiService
         public string? Patronumic { get; set; }
         public string Role { get; set; } = "";
         public bool Is_Active { get; set; }
+        public bool IsFired { get; set; }
         public DateTime Created_at { get; set; }
         public int Company_id { get; set; }
         public string? Email { get; set; }

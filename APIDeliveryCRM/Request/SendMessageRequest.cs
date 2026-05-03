@@ -4,8 +4,8 @@ namespace APIDeliveryCRM.Request
 {
     public class SendMessageRequest
     {
-        [Required]
-        public string MessageText { get; set; } = string.Empty;
+    [MaxLength(4000)]
+    public string? MessageText { get; set; }
 
         [MaxLength(500)]
         public string? AttachmentUrl { get; set; }

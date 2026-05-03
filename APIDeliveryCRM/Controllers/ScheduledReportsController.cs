@@ -8,8 +8,8 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize(Roles = "Менеджер,Админ")]
-    public class ScheduledReportsController : ControllerBase
+    [Authorize(Roles = "Менеджер,Администратор,Админ")]
+public class ScheduledReportsController : Controller
     {
         private readonly IScheduledReportService _service;
 

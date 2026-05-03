@@ -1,19 +1,38 @@
 ﻿@page "/counter"
 @rendermode InteractiveServer
+@using Fluxor
+@using WebBlazorDeliveryCRM.Store.PlayerPosition
+@inject IState<PlayerPositionState> PlayerPositionState
+@inject IDispatcher Dispatcher
 
-<PageTitle>Counter</PageTitle>
+<PageTitle>Player Position (Fluxor)</PageTitle>
 
-<h1>Counter</h1>
+<h1>Player Position (Fluxor)</h1>
 
-<p role="status">Current count: @currentCount</p>
+<p role="status">X: @PlayerPositionState.Value.X, Y: @PlayerPositionState.Value.Y</p>
+<p class="text-muted">Состояние сохраняется в localStorage и восстанавливается после перезагрузки.</p>
 
-<button class="btn btn-primary" @onclick="IncrementCount">Click me</button>
+<div class="d-flex gap-2 flex-wrap">
+    <button class="btn btn-outline-secondary" @onclick="MoveLeft">← Left</button>
+    <button class="btn btn-outline-secondary" @onclick="MoveUp">↑ Up</button>
+    <button class="btn btn-outline-secondary" @onclick="MoveDown">↓ Down</button>
+    <button class="btn btn-outline-secondary" @onclick="MoveRight">→ Right</button>
+</div>
 
 @code {
-    private int currentCount = 0;
-
-    private void IncrementCount()
+    protected override void OnInitialized()
     {
-        currentCount++;
+        Dispatcher.Dispatch(new LoadPlayerPositionAction());
+        base.OnInitialized();
     }
+
+    private void MoveLeft() => Update(-1, 0);
+    private void MoveRight() => Update(1, 0);
+    private void MoveUp() => Update(0, 1);
+    private void MoveDown() => Update(0, -1);
+
+    private void Update(int dx, int dy) =>
+        Dispatcher.Dispatch(new SetPlayerPositionAction(
+            PlayerPositionState.Value.X + dx,
+            PlayerPositionState.Value.Y + dy));
 }

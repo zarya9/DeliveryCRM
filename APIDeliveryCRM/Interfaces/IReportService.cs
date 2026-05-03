@@ -8,4 +8,5 @@ public interface IReportService
 {
     Task<IActionResult> GetFinanceDashboardAsync(int companyId, DateTime? fromUtc, DateTime? toUtc);
     Task<IActionResult> ExportFinanceExcelAsync(int companyId, DateTime? fromUtc, DateTime? toUtc);
+    Task<IActionResult> ExportFinancePdfAsync(int companyId, DateTime? fromUtc, DateTime? toUtc);
 }

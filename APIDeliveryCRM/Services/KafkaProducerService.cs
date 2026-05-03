@@ -30,6 +30,19 @@ public sealed class KafkaProducerService : IKafkaProducer, IDisposable
             MessageTimeoutMs = 10000
         };
 
+        if (Enum.TryParse<SecurityProtocol>(configuration["Kafka:SecurityProtocol"], true, out var securityProtocol))
+            config.SecurityProtocol = securityProtocol;
+
+        if (Enum.TryParse<SaslMechanism>(configuration["Kafka:SaslMechanism"], true, out var saslMechanism))
+            config.SaslMechanism = saslMechanism;
+
+        var username = configuration["Kafka:Username"];
+        var password = configuration["Kafka:Password"];
+        if (!string.IsNullOrWhiteSpace(username))
+            config.SaslUsername = username;
+        if (!string.IsNullOrWhiteSpace(password))
+            config.SaslPassword = password;
+
         _producer = new ProducerBuilder<string, string>(config).Build();
         _enabled = true;
         _logger.LogInformation("Kafka producer initialized for {BootstrapServers}.", bootstrapServers);

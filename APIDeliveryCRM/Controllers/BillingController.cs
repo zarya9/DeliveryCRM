@@ -12,7 +12,7 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class BillingController : ControllerBase
+    public class BillingController : Controller
     {
         private readonly IBillingService _billingService;
         private readonly IConfiguration _configuration;
@@ -25,14 +25,14 @@ namespace APIDeliveryCRM.Controllers
             _hostEnvironment = hostEnvironment;
         }
 
-        [Authorize(Roles = "Менеджер,Админ")]
+        [Authorize(Roles = "Менеджер,Администратор,Админ")]
         [HttpGet("plans")]
         public async Task<IActionResult> Plans()
         {
             return await _billingService.GetPlansAsync();
         }
 
-        [Authorize(Roles = "Менеджер,Админ")]
+        [Authorize(Roles = "Менеджер,Администратор,Админ")]
         [HttpGet("subscription")]
         public async Task<IActionResult> MySubscription()
         {
@@ -42,7 +42,7 @@ namespace APIDeliveryCRM.Controllers
             return await _billingService.GetMySubscriptionAsync(companyId.Value);
         }
 
-        [Authorize(Roles = "Менеджер,Админ")]
+        [Authorize(Roles = "Менеджер,Администратор,Админ")]
         [HttpPost("checkout")]
         public async Task<IActionResult> Checkout([FromBody] CreateCheckoutSessionRequest request)
         {
@@ -85,7 +85,7 @@ namespace APIDeliveryCRM.Controllers
             return await _billingService.HandleYooKassaWebhookAsync(payload);
         }
 
-        [Authorize(Roles = "Менеджер,Админ")]
+        [Authorize(Roles = "Менеджер,Администратор,Админ")]
         [HttpGet("invoices")]
         public async Task<IActionResult> Invoices()
         {

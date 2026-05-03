@@ -1,15 +1,27 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using WebBlazorDeliveryCRM.Models;
 
 namespace WebBlazorDeliveryCRM.Services;
 
 public class OrdersApiService
 {
+    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
     private readonly HttpClient _http;
 
     public OrdersApiService(IHttpClientFactory factory)
     {
         _http = factory.CreateClient("AuthorizedClient");
+    }
+
+    public async Task<List<OrderStatusOptionDto>> GetOrderStatusesAsync()
+    {
+        var resp = await _http.GetAsync("/api/Orders/statuses");
+        if (!resp.IsSuccessStatusCode)
+            return new List<OrderStatusOptionDto>();
+        await using var stream = await resp.Content.ReadAsStreamAsync();
+        var list = await JsonSerializer.DeserializeAsync<List<OrderStatusOptionDto>>(stream, JsonOpts);
+        return list ?? new List<OrderStatusOptionDto>();
     }
 
     public async Task<List<OrderDto>?> GetAllAsync(int? companyId = null, DateTime? fromUtc = null, DateTime? toUtc = null)
@@ -74,5 +86,17 @@ public class OrdersApiService
     public async Task<OrderEtaDto?> GetEtaAsync(int orderId)
     {
         return await _http.GetFromJsonAsync<OrderEtaDto>($"/api/Orders/{orderId}/eta");
+    }
+
+    public async Task<(OrderDto? order, string? error)> CreateMineAsync(CreateCustomerOrderRequestDto request, CancellationToken cancellationToken = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/Orders/create-mine", request, cancellationToken);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+            return (null, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body);
+        }
+        var dto = await resp.Content.ReadFromJsonAsync<OrderDto>(cancellationToken: cancellationToken);
+        return (dto, null);
     }
 }

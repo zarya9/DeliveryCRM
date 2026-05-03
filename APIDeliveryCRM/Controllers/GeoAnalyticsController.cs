@@ -8,7 +8,7 @@ namespace APIDeliveryCRM.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class GeoAnalyticsController : ControllerBase
+public class GeoAnalyticsController : Controller
 {
     private readonly IGeoAnalyticsService _geoAnalyticsService;
 

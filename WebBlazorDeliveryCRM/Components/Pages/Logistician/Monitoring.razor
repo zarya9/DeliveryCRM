@@ -1,23 +1,180 @@
 @page "/logistician/monitoring"
 @layout LogisticianLayout
 @using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Services
+@inject MonitoringApiService MonitoringApi
+@inject IJSRuntime JS
+@inject IConfiguration Configuration
+@implements IDisposable
 
 <PageTitle>Мониторинг — Логист</PageTitle>
 
 <div class="dms-page-header">
     <h1>Мониторинг операций</h1>
-    <p class="subtitle">Live-лента событий и уведомления</p>
+    <p class="subtitle">
+        Лента событий по заказам компании и карта: курьеры на <strong>активной смене</strong> (координаты после выхода в сеть на странице курьера) и склады.
+    </p>
 </div>
 
 <div class="dms-stat-grid mb-3">
-    <KpiCard Title="Новые события (час)" Value="0" Meta="После подключения потока" />
-    <KpiCard Title="Критичные алерты" Value="0" Meta="SLA и инциденты" />
+    <KpiCard Title="События за 48 ч" Value="@_feedCount.ToString()" Meta="по заказам компании" />
+    <KpiCard Title="На смене (профили)" Value="@_onShiftCount.ToString()" Meta="активная смена без окончания" />
 </div>
 
-<div class="dms-card">
-    <h2 class="dms-card-title">Лента событий</h2>
-    <p class="text-muted">Новые заказы, задержки, инциденты (SignalR).</p>
-    <div class="mt-2">
-        <StatusBadge Text="Режим ожидания данных" Tone="info" />
+<div class="row g-3">
+    <div class="col-lg-7">
+        <div class="dms-card">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                <h2 class="dms-card-title mb-0">Лента событий</h2>
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_feedLoading" @onclick="ReloadFeedAsync">Обновить</button>
+            </div>
+            @if (_feedLoading && _feed.Count == 0)
+            {
+                <p class="text-muted mb-0">Загрузка…</p>
+            }
+            else if (_feed.Count == 0)
+            {
+                <p class="text-muted mb-0">Событий за выбранный период нет.</p>
+            }
+            else
+            {
+                <ul class="list-unstyled mb-0 monitoring-feed">
+                    @foreach (var e in _feed)
+                    {
+                        <li class="monitoring-feed-item border-bottom pb-2 mb-2">
+                            <div class="small text-muted">@e.Created_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm") · заказ №@e.OrderNumber</div>
+                            <div class="fw-semibold">@(string.IsNullOrWhiteSpace(e.Title) ? e.EventType : e.Title)</div>
+                            @if (!string.IsNullOrWhiteSpace(e.Message))
+                            {
+                                <div class="small">@e.Message</div>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="dms-card">
+            <h2 class="dms-card-title">Карта</h2>
+            <p class="small text-muted mb-2">Маркеры курьеров — только при открытой смене; координаты курьер передаёт после «В сеть» на своей странице.</p>
+            <div id="logistician-monitoring-map" style="height: 420px; width: 100%; border-radius: 8px;"></div>
+        </div>
     </div>
 </div>
+
+@code {
+    private List<MonitoringFeedItemDto> _feed = new();
+    private bool _feedLoading = true;
+    private int _feedCount;
+    private int _onShiftCount;
+    private PeriodicTimer? _timer;
+    private CancellationTokenSource? _cts;
+    private bool _mapReady;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await ReloadFeedAsync();
+        await InitMapOnceAsync();
+        StartRefreshLoop();
+    }
+
+    private async Task InitMapOnceAsync()
+    {
+        if (_mapReady) return;
+        try
+        {
+            var osrmUrl = Configuration["Osrm:RouterBaseUrl"];
+            await JS.InvokeVoidAsync("leafletMap.init", "logistician-monitoring-map", 55.7558, 37.6173, 11, null, osrmUrl, false, null);
+            _mapReady = true;
+            await RefreshMapAsync();
+        }
+        catch
+        {
+            // пререндер / нет DOM
+        }
+    }
+
+    private async Task ReloadFeedAsync()
+    {
+        _feedLoading = true;
+        StateHasChanged();
+        try
+        {
+            _feed = await MonitoringApi.GetFeedAsync(48, 80);
+            _feedCount = _feed.Count;
+        }
+        finally
+        {
+            _feedLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshMapAsync()
+    {
+        if (!_mapReady) return;
+        var live = await MonitoringApi.GetLiveMapAsync();
+        _onShiftCount = live?.Couriers?.Count ?? 0;
+        var markers = new List<object>();
+        if (live?.Couriers != null)
+        {
+            foreach (var c in live.Couriers)
+            {
+                if (c.Lat == 0 && c.Lon == 0) continue;
+                markers.Add(new { lat = c.Lat, lon = c.Lon, title = c.Title ?? "Курьер", kind = "courier" });
+            }
+        }
+
+        if (live?.Hubs != null)
+        {
+            foreach (var h in live.Hubs)
+            {
+                markers.Add(new { lat = h.Lat, lon = h.Lon, title = h.Title ?? "Склад", kind = "hub" });
+            }
+        }
+
+        await JS.InvokeVoidAsync("leafletMap.clearMarkers");
+        if (markers.Count > 0)
+            await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
+        StateHasChanged();
+    }
+
+    private void StartRefreshLoop()
+    {
+        StopRefreshLoop();
+        _cts = new CancellationTokenSource();
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(25));
+        _ = RunLoopAsync(_cts.Token);
+    }
+
+    private async Task RunLoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (_timer is not null && await _timer.WaitForNextTickAsync(ct))
+            {
+                await ReloadFeedAsync();
+                await RefreshMapAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void StopRefreshLoop()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = null;
+        _timer?.Dispose();
+        _timer = null;
+    }
+
+    public void Dispose()
+    {
+        StopRefreshLoop();
+    }
+}

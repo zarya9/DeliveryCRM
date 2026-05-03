@@ -1,6 +1,6 @@
 @page "/manager/hubs"
 @layout ManagerLayout
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Менеджер,Админ")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Менеджер,Администратор,Админ")]
 @using WebBlazorDeliveryCRM.Services
 @using WebBlazorDeliveryCRM.Components.Shared
 @inject LogisticsHubsApiService HubsApi
@@ -58,26 +58,41 @@
     <h2 class="dms-card-title">Список складов компании</h2>
     @if (_list?.Count > 0)
     {
-        <div class="table-responsive">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Название</th>
-                        <th>Адрес</th>
-                        <th>ID</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var h in _list)
+        <div class="hub-grid">
+            @foreach (var h in _list)
+            {
+                <div class="hub-card">
+                    <h3 class="hub-card-title">@(string.IsNullOrWhiteSpace(h.Name) ? "Склад" : h.Name)</h3>
+                    <div class="small text-muted">@FormatAddress(h)</div>
+                    @if (h.OrdersOnSite is { Count: > 0 })
                     {
-                        <tr>
-                            <td>@h.Name</td>
-                            <td>@(h.City ?? "—"), @h.Street</td>
-                            <td>@h.Id</td>
-                        </tr>
+                        <div class="mt-2 small">
+                            <strong class="d-block mb-1">Заказы на складе</strong>
+                            <ul class="mb-0 ps-3">
+                                @foreach (var o in h.OrdersOnSite)
+                                {
+                                    <li>
+                                        Заказ №@o.OrderNumber — от @(o.ClientName ?? "—"), доставка: @(o.DeliveryTo ?? "—")
+                                    </li>
+                                }
+                            </ul>
+                        </div>
                     }
-                </tbody>
-            </table>
+                    else
+                    {
+                        <p class="small text-muted mb-0 mt-2">Нет заказов на этом складе по маршруту.</p>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(BuildMapUrl(h)))
+                    {
+                        <iframe class="hub-mini-map"
+                                src="@BuildMapUrl(h)"
+                                loading="lazy"
+                                title="Карта склада"
+                                tabindex="-1"
+                                aria-hidden="true"></iframe>
+                    }
+                </div>
+            }
         </div>
     }
     else
@@ -140,5 +155,34 @@
         }
         catch (Exception ex) { Notify.ShowError(ex.Message); }
         finally { _saving = false; }
+    }
+
+    private static string FormatAddress(LogisticsHubListItemDto h)
+    {
+        var parts = new[]
+        {
+            h.City,
+            h.Street,
+            h.House,
+            h.Flat,
+            h.Region,
+            h.PostalCode
+        }.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim());
+        var text = string.Join(", ", parts);
+        return string.IsNullOrWhiteSpace(text) ? "Адрес не указан" : text;
+    }
+
+    private static string BuildMapUrl(LogisticsHubListItemDto h)
+    {
+        if (!h.Latitude.HasValue || !h.Longitude.HasValue)
+            return string.Empty;
+        var lat = h.Latitude.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var lon = h.Longitude.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var delta = 0.01m;
+        var left = (h.Longitude.Value - delta).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var right = (h.Longitude.Value + delta).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var top = (h.Latitude.Value + delta).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var bottom = (h.Latitude.Value - delta).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return $"https://www.openstreetmap.org/export/embed.html?bbox={left}%2C{bottom}%2C{right}%2C{top}&layer=mapnik&marker={lat}%2C{lon}";
     }
 }

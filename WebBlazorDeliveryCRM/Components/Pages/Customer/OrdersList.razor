@@ -2,63 +2,172 @@
 @layout CustomerLayout
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
 @using System.Security.Claims
 @inject ClientsApiService ClientsApi
 @inject AuthenticationStateProvider AuthState
+@inject NavigationManager Navigation
 
 <PageTitle>Мои заказы — Клиент</PageTitle>
 
-<div class="dms-page-header">
-    <h1>Мои заказы</h1>
-    <p class="subtitle">История всех заказов</p>
+<div class="dms-page-header d-flex flex-wrap justify-content-between align-items-start gap-2">
+    <div>
+        <h1 class="mb-1">Мои заказы</h1>
+        <p class="subtitle mb-0">Список заказов. Новый заказ — кнопка справа.</p>
+    </div>
+    <button type="button"
+            class="btn btn-outline-primary dms-icon-btn"
+            title="Добавить заказ"
+            aria-label="Добавить заказ"
+            @onclick="OpenCreateModal">
+        <HugeIcon Name="plus-sign" CssClass="dms-icon" />
+    </button>
 </div>
 
 <div class="dms-card">
     <h2 class="dms-card-title">Список заказов</h2>
     @if (_orders != null && _orders.Count > 0)
     {
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>№</th>
-                    <th>Название</th>
-                    <th>Статус</th>
-                    <th>Сумма</th>
-                    <th>Дата</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var o in _orders)
-                {
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead>
                     <tr>
-                        <td>@o.Order_Number</td>
-                        <td>@o.Name</td>
-                        <td>@(o.OrderStatus?.Name ?? "—")</td>
-                        <td>@(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost) ₽</td>
-                        <td>@o.Created_at.ToString("dd.MM.yyyy")</td>
+                        <th>№</th>
+                        <th>Название</th>
+                        <th>Статус</th>
+                        <th>Сумма</th>
+                        <th>Окно доставки</th>
+                        <th>Дата</th>
                     </tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (var o in _orders)
+                    {
+                        <tr>
+                            <td>@o.Order_Number</td>
+                            <td>@o.Name</td>
+                            <td>@(o.OrderStatus?.Name ?? "—")</td>
+                            <td>@(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost) ₽</td>
+                            <td>@FormatDeliveryWindow(o)</td>
+                            <td>@o.Created_at.ToString("dd.MM.yyyy")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="small text-muted mt-2 mb-0">
+            Подробная история с оплатой и приоритетом: <a href="/customer/orders/history">История заказов</a>.
+        </p>
+    }
+    else if (_dataLoaded)
+    {
+        <p class="text-muted mb-0">Заказов пока нет.</p>
     }
     else
     {
-        <p class="text-muted">Заказов пока нет.</p>
+        <p class="text-muted mb-0">Загрузка…</p>
     }
 </div>
 
+@if (_showCreateModal)
+{
+    <div class="employee-modal-backdrop" @onclick="CloseCreateModal">
+        <div class="employee-modal" style="max-width: 720px;" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <h2 class="h5 mb-0">Новый заказ</h2>
+                <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseCreateModal"></button>
+            </div>
+            <CustomerCreateOrderForm @key="_formMountKey"
+                                     ShowCancel="true"
+                                     OnSuccess="AfterOrderCreatedAsync"
+                                     OnCancel="CloseCreateModal" />
+        </div>
+    </div>
+}
+
 @code {
     private List<OrderDto>? _orders;
+    private bool _showCreateModal;
+    private int _formMountKey;
+    private bool _dataLoaded;
+    private bool _openCreateAfterLoad;
+
+    [SupplyParameterFromQuery(Name = "new")]
+    public string? New { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (string.Equals(New, "1", StringComparison.OrdinalIgnoreCase))
+            _openCreateAfterLoad = true;
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender) return;
+        if (firstRender)
+        {
+            await LoadOrdersAsync();
+            _dataLoaded = true;
+        }
+
+        if (_openCreateAfterLoad && _dataLoaded)
+        {
+            _openCreateAfterLoad = false;
+            OpenCreateModal();
+            Navigation.NavigateTo("/customer/orders", replace: true);
+            await InvokeAsync(StateHasChanged);
+        }
+        else if (firstRender)
+            StateHasChanged();
+    }
+
+    private async Task LoadOrdersAsync()
+    {
         var auth = await AuthState.GetAuthenticationStateAsync();
         var userIdStr = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (!int.TryParse(userIdStr, out var userId)) { StateHasChanged(); return; }
+        if (!int.TryParse(userIdStr, out var userId))
+        {
+            _orders = new List<OrderDto>();
+            return;
+        }
         var client = await ClientsApi.GetByUserIdAsync(userId);
-        if (client == null) { StateHasChanged(); return; }
+        if (client == null)
+        {
+            _orders = new List<OrderDto>();
+            return;
+        }
         _orders = await ClientsApi.GetOrdersAsync(client.ID_ClientProfile) ?? new List<OrderDto>();
+    }
+
+    private void OpenCreateModal()
+    {
+        _formMountKey++;
+        _showCreateModal = true;
+    }
+
+    private void CloseCreateModal()
+    {
+        _showCreateModal = false;
+    }
+
+    private async Task AfterOrderCreatedAsync()
+    {
+        _showCreateModal = false;
+        await LoadOrdersAsync();
         StateHasChanged();
+    }
+
+    private static string FormatDeliveryWindow(OrderDto o)
+    {
+        var from = o.Eta_at;
+        var to = o.Sla_due_at;
+        if (!from.HasValue && !to.HasValue)
+            return "—";
+        if (!from.HasValue)
+            return $"до {to:dd.MM.yyyy}";
+        if (!to.HasValue)
+            return $"с {from:dd.MM.yyyy}";
+        if (from.Value.Date == to.Value.Date)
+            return from.Value.ToString("dd.MM.yyyy");
+        return $"с {from:dd.MM} по {to:dd.MM}";
     }
 }

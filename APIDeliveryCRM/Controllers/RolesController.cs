@@ -7,6 +7,7 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize(Roles = "Менеджер,Администратор,Админ")]
     public class RolesController : Controller
     {
         private readonly IRoleService _roleService;

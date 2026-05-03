@@ -8,8 +8,8 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize(Roles = "Менеджер,Админ,Логист")]
-    public class CommunicationTemplatesController : ControllerBase
+    [Authorize(Roles = "Менеджер,Администратор,Админ,Логист")]
+    public class CommunicationTemplatesController : Controller
     {
         private readonly ICommunicationTemplateService _service;
 

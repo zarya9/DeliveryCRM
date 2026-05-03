@@ -1,0 +1,306 @@
+@page "/courier/shift"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Курьер")]
+@using System.Linq
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using WebBlazorDeliveryCRM.Services
+@inject AuthenticationStateProvider AuthState
+@inject CouriersApiService CouriersApi
+@inject AppNotificationService Notify
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>Смена и геолокация — Курьер</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Смена и координаты</h1>
+    <p class="subtitle">
+        Сначала начните смену. В сеть и передача координат доступны только при активной смене. Разрешите доступ к геолокации в браузере.
+    </p>
+</div>
+
+@if (_loading)
+{
+    <p class="text-muted">Загрузка…</p>
+}
+else if (_profileId is null)
+{
+    <div class="alert alert-warning">Профиль курьера не найден. Обратитесь к администратору компании.</div>
+}
+else
+{
+    <div class="dms-card mb-3">
+        <h2 class="dms-card-title">Статус смены</h2>
+        @if (_shiftActive && _shiftId.HasValue)
+        {
+            <p class="mb-2">Смена открыта @( _shiftStartedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—" ).</p>
+            <button type="button" class="btn btn-outline-danger" disabled="@_busy" @onclick="EndShiftAsync">Завершить смену</button>
+        }
+        else
+        {
+            <p class="text-muted mb-2">Смена не начата.</p>
+            <button type="button" class="btn btn-primary dms-btn-primary" disabled="@_busy" @onclick="StartShiftAsync">Начать смену</button>
+        }
+    </div>
+
+    <div class="dms-card mb-3">
+        <h2 class="dms-card-title">В сеть и координаты</h2>
+        @if (!_shiftActive)
+        {
+            <p class="text-muted mb-0">Начните смену, чтобы включить «В сеть» и передачу координат.</p>
+        }
+        else
+        {
+            <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+                @if (_online)
+                {
+                    <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="GoOfflineAsync">Выйти из сети</button>
+                    <span class="text-success small">Координаты отправляются автоматически.</span>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-primary dms-btn-primary" disabled="@_busy" @onclick="GoOnlineAsync">В сеть + геолокация</button>
+                }
+            </div>
+            @if (_lastGeoError is not null)
+            {
+                <div class="alert alert-warning py-2 small mb-0">@_lastGeoError</div>
+            }
+        }
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_mapRouteUrl))
+    {
+        <div class="dms-card mb-3">
+            <h2 class="dms-card-title">Маршрут смены</h2>
+            <p class="small text-muted mb-2">Можно открыть маршрут в внешнем приложении карт.</p>
+            <a href="@_mapRouteUrl" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary">
+                Открыть в Яндекс Картах
+            </a>
+        </div>
+    }
+}
+
+@code {
+    private int? _profileId;
+    private bool _shiftActive;
+    private int? _shiftId;
+    private DateTime? _shiftStartedAt;
+    private bool _online;
+    private bool _busy;
+    private bool _loading = true;
+    private string? _lastGeoError;
+    private CancellationTokenSource? _geoPollCts;
+    private string? _mapRouteUrl;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        var state = await AuthState.GetAuthenticationStateAsync();
+        var uidStr = state.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(uidStr, out var uid))
+        {
+            _loading = false;
+            return;
+        }
+
+        var profile = await CouriersApi.GetByUserIdAsync(uid);
+        _profileId = profile?.ID_CourierProfile;
+        if (_profileId.HasValue)
+        {
+            await RefreshShiftStateAsync();
+            await RefreshRouteLinkAsync();
+        }
+
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task RefreshShiftStateAsync()
+    {
+        if (!_profileId.HasValue) return;
+        var (active, sid, ts) = await CouriersApi.GetActiveShiftAsync(_profileId.Value);
+        _shiftActive = active;
+        _shiftId = sid;
+        _shiftStartedAt = ts;
+    }
+
+    private async Task RefreshRouteLinkAsync()
+    {
+        if (!_profileId.HasValue) return;
+        var activeOrders = await CouriersApi.GetActiveOrdersAsync(_profileId.Value) ?? new List<WebBlazorDeliveryCRM.Models.OrderDto>();
+        var first = activeOrders.FirstOrDefault(o => o.DeliveryAddress?.Latitude.HasValue == true && o.DeliveryAddress.Longitude.HasValue == true)
+                    ?? activeOrders.FirstOrDefault(o => o.PickupAddress?.Latitude.HasValue == true && o.PickupAddress.Longitude.HasValue == true);
+        var lat = first?.DeliveryAddress?.Latitude ?? first?.PickupAddress?.Latitude;
+        var lon = first?.DeliveryAddress?.Longitude ?? first?.PickupAddress?.Longitude;
+        if (!lat.HasValue || !lon.HasValue)
+        {
+            _mapRouteUrl = null;
+            return;
+        }
+        _mapRouteUrl = $"https://yandex.ru/maps/?rtext=~{lat.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{lon.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}&rtt=auto";
+    }
+
+    private async Task StartShiftAsync()
+    {
+        if (!_profileId.HasValue) return;
+        _busy = true;
+        try
+        {
+            var (ok, sid, err) = await CouriersApi.StartShiftAsync(_profileId.Value);
+            if (!ok)
+            {
+                Notify.ShowError(string.IsNullOrWhiteSpace(err) ? "Не удалось начать смену." : err!);
+                return;
+            }
+
+            await RefreshShiftStateAsync();
+            Notify.ShowSuccess("Смена начата.");
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task EndShiftAsync()
+    {
+        if (!_shiftId.HasValue) return;
+        _busy = true;
+        try
+        {
+            await StopGeoAsync();
+            var (ok, err) = await CouriersApi.EndShiftAsync(_shiftId.Value);
+            if (!ok)
+            {
+                Notify.ShowError(string.IsNullOrWhiteSpace(err) ? "Не удалось завершить смену." : err!);
+                return;
+            }
+
+            _online = false;
+            await RefreshShiftStateAsync();
+            Notify.ShowSuccess("Смена завершена.");
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task GoOnlineAsync()
+    {
+        if (!_profileId.HasValue || !_shiftActive) return;
+        _lastGeoError = null;
+        _busy = true;
+        try
+        {
+            var (okOn, errOn) = await CouriersApi.SetOnlineAsync(_profileId.Value, true);
+            if (!okOn)
+            {
+                Notify.ShowError(string.IsNullOrWhiteSpace(errOn) ? "Не удалось выйти в сеть." : errOn!);
+                return;
+            }
+
+            _online = true;
+            StartGeoPolling();
+            Notify.ShowSuccess("Вы в сети. Передаём координаты.");
+        }
+        catch (Exception ex)
+        {
+            _lastGeoError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task GoOfflineAsync()
+    {
+        if (!_profileId.HasValue) return;
+        await StopGeoAsync();
+        _busy = true;
+        try
+        {
+            await CouriersApi.SetOnlineAsync(_profileId.Value, false);
+            _online = false;
+            Notify.ShowInfo("Вы вышли из сети.");
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private void StartGeoPolling()
+    {
+        StopGeoPolling();
+        _geoPollCts = new CancellationTokenSource();
+        var pid = _profileId!.Value;
+        var ct = _geoPollCts.Token;
+        _ = PollGeoAsync(pid, ct);
+    }
+
+    private async Task PollGeoAsync(int profileId, CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    var pos = await JS.InvokeAsync<double[]>("courierGeo.tryGetPosition");
+                    if (pos is { Length: 2 })
+                    {
+                        var lat = (decimal)pos[0];
+                        var lon = (decimal)pos[1];
+                        var (ok, err) = await CouriersApi.UpdateLocationAsync(profileId, lat, lon);
+                        if (!ok)
+                            _lastGeoError = err ?? "Ошибка отправки координат.";
+                        else
+                            _lastGeoError = null;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _lastGeoError = ex.Message;
+                }
+
+                await InvokeAsync(StateHasChanged);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(22), ct);
+                }
+                catch (TaskCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    private void StopGeoPolling()
+    {
+        _geoPollCts?.Cancel();
+        _geoPollCts?.Dispose();
+        _geoPollCts = null;
+    }
+
+    private async Task StopGeoAsync()
+    {
+        StopGeoPolling();
+        await Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        StopGeoPolling();
+    }
+}

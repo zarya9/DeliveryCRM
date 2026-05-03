@@ -1,5 +1,6 @@
 using Blazored.Toast;
 using ApexCharts;
+using Fluxor;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
 using MudBlazor.Services;
@@ -16,8 +17,8 @@ builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
-        options.LoginPath = "/";
-        options.AccessDeniedPath = "/";
+        options.LoginPath = "/login";
+        options.AccessDeniedPath = "/login";
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
     });
@@ -27,12 +28,14 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddBlazoredToast();
 builder.Services.AddMudServices();
 builder.Services.AddApexCharts();
+builder.Services.AddFluxor(options => options.ScanAssemblies(typeof(Program).Assembly));
 
 builder.Services.AddScoped<CustomAuthenticationStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(sp => sp.GetRequiredService<CustomAuthenticationStateProvider>());
 builder.Services.AddScoped<AuthApiService>();
 builder.Services.AddScoped<ChatHubClientService>();
 builder.Services.AddScoped<ChatApiService>();
+builder.Services.AddScoped<ChatUnreadStateService>();
 builder.Services.AddScoped<OrdersApiService>();
 builder.Services.AddScoped<LogisticsHubsApiService>();
 builder.Services.AddScoped<ClientsApiService>();
@@ -45,8 +48,10 @@ builder.Services.AddScoped<RolesApiService>();
 builder.Services.AddScoped<EmployeesApiService>();
 builder.Services.AddScoped<LeadsApiService>();
 builder.Services.AddScoped<GeoAnalyticsApiService>();
+builder.Services.AddScoped<MonitoringApiService>();
 builder.Services.AddScoped<ReportsApiService>();
 builder.Services.AddScoped<CompanySettingsApiService>();
+builder.Services.AddScoped<AddressSuggestApiService>();
 builder.Services.AddScoped<UserPresenceApiService>();
 builder.Services.AddScoped<NotificationsApiService>();
 builder.Services.AddScoped<SupportTicketsApiService>();
@@ -93,11 +98,11 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseStaticFiles();
-app.UseAntiforgery();
-
 app.UseCors("AllowAll");
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseAntiforgery();
+app.UseStatusCodePagesWithReExecute("/404");
 
 // HttpOnly-cookie с JWT: выставляется ответом на same-origin POST из браузера (после логина к API).
 app.MapPost("/api/auth/session", (HttpContext http, SessionRequest req) =>

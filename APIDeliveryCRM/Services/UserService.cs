@@ -1,6 +1,5 @@
 using System.Linq;
 using System.Threading.Tasks;
-using System.Security.Cryptography;
 using System.Text;
 using System.Security.Claims;
 using System.IdentityModel.Tokens.Jwt;
@@ -12,6 +11,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using APIDeliveryCRM.Request;
+using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Identity;
+using System.Security.Cryptography;
 
 namespace APIDeliveryCRM.Services
 {
@@ -19,11 +21,13 @@ namespace APIDeliveryCRM.Services
     {
         private readonly ContextDB _context;
         private readonly IConfiguration _configuration;
+        private readonly IPasswordHasher<Login> _passwordHasher;
 
         public UserLoginService(ContextDB context, IConfiguration configuration)
         {
             _context = context;
             _configuration = configuration;
+            _passwordHasher = new PasswordHasher<Login>();
         }
 
         public async Task<IActionResult> GetUserByIdAsync(int id)
@@ -48,19 +52,33 @@ namespace APIDeliveryCRM.Services
             return new OkObjectResult(users);
         }
 
-        private string HashPassword(string password)
+        private string HashPassword(Login login, string password)
         {
-            using (var sha256 = SHA256.Create())
-            {
-                var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-                return Convert.ToBase64String(hashedBytes);
-            }
+            return _passwordHasher.HashPassword(login, password);
         }
 
-        private bool VerifyPassword(string password, string hashedPassword)
+        private async Task<bool> VerifyPasswordAsync(Login login, string password)
         {
-            var hashOfInput = HashPassword(password);
-            return hashOfInput == hashedPassword;
+            var verification = _passwordHasher.VerifyHashedPassword(login, login.Password, password);
+            if (verification == PasswordVerificationResult.Success)
+                return true;
+
+            if (verification == PasswordVerificationResult.SuccessRehashNeeded)
+            {
+                login.Password = _passwordHasher.HashPassword(login, password);
+                await _context.SaveChangesAsync();
+                return true;
+            }
+
+            // Backward compatibility for legacy SHA256 hashes.
+            if (IsLegacySha256Hash(login.Password) && VerifyLegacySha256(password, login.Password))
+            {
+                login.Password = _passwordHasher.HashPassword(login, password);
+                await _context.SaveChangesAsync();
+                return true;
+            }
+
+            return false;
         }
 
         private string GenerateJwtToken(User user, string email)
@@ -69,15 +87,22 @@ namespace APIDeliveryCRM.Services
             var jwtIssuer = _configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("JWT Issuer is not configured");
             var jwtAudience = _configuration["Jwt:Audience"] ?? throw new InvalidOperationException("JWT Audience is not configured");
 
-            var claims = new[]
+            var roleName = user.Role?.Name ?? "Unknown";
+            var claims = new List<Claim>
             {
                 new Claim(ClaimTypes.NameIdentifier, user.ID_User.ToString()),
                 new Claim(ClaimTypes.Email, email),
                 new Claim(ClaimTypes.Name, $"{user.FName} {user.Name}"),
-                new Claim(ClaimTypes.Role, user.Role?.Name ?? "Unknown"),
+                new Claim(ClaimTypes.Role, roleName),
                 new Claim("company", user.Company?.Name ?? string.Empty),
                 new Claim("companyId", user.Company_id.ToString())
             };
+
+            // Совместимость ролей: часть экранов/ендпоинтов могла ждать значение "Админ".
+            if (string.Equals(roleName, "Администратор", StringComparison.OrdinalIgnoreCase))
+                claims.Add(new Claim(ClaimTypes.Role, "Админ"));
+            else if (string.Equals(roleName, "Админ", StringComparison.OrdinalIgnoreCase))
+                claims.Add(new Claim(ClaimTypes.Role, "Администратор"));
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -144,7 +169,7 @@ namespace APIDeliveryCRM.Services
                 var login = new Login
                 {
                     Email = dto.Email,
-                    Password = HashPassword(dto.Password),
+                    Password = string.Empty,
                     User = new User
                     {
                         FName = dto.FName,
@@ -160,6 +185,7 @@ namespace APIDeliveryCRM.Services
                         Company = defaultCompany
                     }
                 };
+                login.Password = HashPassword(login, dto.Password);
 
                 await _context.AddAsync(login);
                 await _context.SaveChangesAsync();
@@ -186,6 +212,112 @@ namespace APIDeliveryCRM.Services
                     status = true,
                     userId = login.User.ID_User,
                     clientProfileId = clientProfile.ID_ClientProfile
+                });
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                return new BadRequestObjectResult(new { message = $"Ошибка при регистрации: {ex.Message}" });
+            }
+        }
+
+        public async Task<IActionResult> RegisterCompanyOwnerAsync(RegisterCompanyOwnerRequest dto)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var existingLogin = await _context.Logins.FirstOrDefaultAsync(l => l.Email == dto.Email);
+                if (existingLogin != null)
+                {
+                    return new BadRequestObjectResult(new { message = "Пользователь с таким email уже существует" });
+                }
+
+                var companyName = dto.CompanyName.Trim();
+                if (string.IsNullOrWhiteSpace(companyName))
+                {
+                    return new BadRequestObjectResult(new { message = "Название компании обязательно." });
+                }
+
+                var existingCompany = await _context.Companies
+                    .FirstOrDefaultAsync(c => c.Name.ToLower() == companyName.ToLower());
+                if (existingCompany != null)
+                {
+                    return new BadRequestObjectResult(new { message = "Компания с таким названием уже зарегистрирована." });
+                }
+
+                var subdomainSeed = BuildSubdomainSeed(companyName);
+                var subdomain = await GenerateUniqueSubdomainAsync(subdomainSeed);
+
+                var company = new Company
+                {
+                    Name = companyName,
+                    Subdomain = subdomain,
+                    Created_at = DateTime.UtcNow,
+                    Is_Active = true,
+                    SubscriptionPlan = string.IsNullOrWhiteSpace(dto.SubscriptionPlan) ? "Pro" : dto.SubscriptionPlan.Trim(),
+                    MaxUsers = dto.MaxUsers > 0 ? dto.MaxUsers : 100,
+                    MaxOrdersPerMonth = dto.MaxOrdersPerMonth > 0 ? dto.MaxOrdersPerMonth : 10000,
+                    SubscriptionExpiresAt = DateTime.UtcNow.AddYears(1),
+                    SlaOnTimeHours = dto.SlaOnTimeHours > 0 ? dto.SlaOnTimeHours : 4,
+                    SlaLateHours = dto.SlaLateHours > 0 ? dto.SlaLateHours : 24
+                };
+                _context.Companies.Add(company);
+                await _context.SaveChangesAsync();
+
+                var adminRole = await _context.Roles
+                    .FirstOrDefaultAsync(r => r.Name == "Администратор" || r.Name == "Админ");
+                if (adminRole == null)
+                {
+                    adminRole = new Role { Name = "Администратор" };
+                    _context.Roles.Add(adminRole);
+                    await _context.SaveChangesAsync();
+                }
+
+                var login = new Login
+                {
+                    Email = dto.Email,
+                    Password = string.Empty,
+                    User = new User
+                    {
+                        FName = dto.FName,
+                        Name = dto.Name,
+                        Patronumic = dto.Patronumic,
+                        Created_at = DateTime.UtcNow,
+                        Is_Active = true,
+                        Theme = "light",
+                        Avatar = "/avatars/default.png",
+                        Role_id = adminRole.ID_Role,
+                        Role = adminRole,
+                        Company_id = company.ID_Company,
+                        Company = company
+                    }
+                };
+                login.Password = HashPassword(login, dto.Password);
+
+                await _context.AddAsync(login);
+                await _context.SaveChangesAsync();
+
+                var ownerProfile = new ManagerProfile
+                {
+                    Company_id = company.ID_Company,
+                    Company = company,
+                    User_id = login.User.ID_User,
+                    User = login.User,
+                    Position = "Владелец компании",
+                    Department = "Руководство",
+                    Phone = string.IsNullOrWhiteSpace(dto.Phone) ? null : dto.Phone.Trim(),
+                    HireDate = DateTime.UtcNow
+                };
+                await _context.ManagerProfiles.AddAsync(ownerProfile);
+                await _context.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+
+                return new OkObjectResult(new
+                {
+                    status = true,
+                    userId = login.User.ID_User,
+                    companyId = company.ID_Company
                 });
             }
             catch (Exception ex)
@@ -238,7 +370,7 @@ namespace APIDeliveryCRM.Services
                 var login = new Login
                 {
                     Email = dto.Email,
-                    Password = HashPassword(dto.Password),
+                    Password = string.Empty,
                     User = new User
                     {
                         FName = dto.FName,
@@ -254,6 +386,7 @@ namespace APIDeliveryCRM.Services
                         Company = defaultCompany
                     }
                 };
+                login.Password = HashPassword(login, dto.Password);
 
                 await _context.AddAsync(login);
                 await _context.SaveChangesAsync();
@@ -336,7 +469,7 @@ namespace APIDeliveryCRM.Services
                 var login = new Login
                 {
                     Email = dto.Email,
-                    Password = HashPassword(dto.Password),
+                    Password = string.Empty,
                     User = new User
                     {
                         FName = dto.FName,
@@ -352,6 +485,7 @@ namespace APIDeliveryCRM.Services
                         Company = defaultCompany
                     }
                 };
+                login.Password = HashPassword(login, dto.Password);
 
                 await _context.AddAsync(login);
                 await _context.SaveChangesAsync();
@@ -395,7 +529,7 @@ namespace APIDeliveryCRM.Services
                 return new UnauthorizedObjectResult(new { message = "Аккаунт деактивирован" });
             }
 
-            if (!VerifyPassword(dto.Password, login.Password))
+            if (!await VerifyPasswordAsync(login, dto.Password))
             {
                 return new UnauthorizedObjectResult(new { message = "Неверный email или пароль" });
             }
@@ -468,7 +602,7 @@ namespace APIDeliveryCRM.Services
                 var login = new Login
                 {
                     Email = dto.Email,
-                    Password = HashPassword(dto.Password),
+                    Password = string.Empty,
                     User = new User
                     {
                         FName = dto.FName,
@@ -484,6 +618,7 @@ namespace APIDeliveryCRM.Services
                         Company = defaultCompany
                     }
                 };
+                login.Password = HashPassword(login, dto.Password);
 
                 await _context.AddAsync(login);
                 await _context.SaveChangesAsync();
@@ -581,6 +716,51 @@ namespace APIDeliveryCRM.Services
 
             await _context.SaveChangesAsync();
             return new OkObjectResult(new { message = "Данные пользователя успешно обновлены", user });
+        }
+
+        private static string BuildSubdomainSeed(string companyName)
+        {
+            var lower = companyName.Trim().ToLowerInvariant();
+            var latinOrDigits = Regex.Replace(lower, "[^a-z0-9]+", "-").Trim('-');
+            return string.IsNullOrWhiteSpace(latinOrDigits) ? "company" : latinOrDigits;
+        }
+
+        private async Task<string> GenerateUniqueSubdomainAsync(string seed)
+        {
+            var normalized = seed.Length > 60 ? seed[..60] : seed;
+            var candidate = normalized;
+            var index = 1;
+            while (await _context.Companies.AnyAsync(c => c.Subdomain == candidate))
+            {
+                index++;
+                var suffix = "-" + index;
+                var prefixLength = Math.Max(1, 60 - suffix.Length);
+                candidate = normalized[..Math.Min(normalized.Length, prefixLength)] + suffix;
+            }
+            return candidate;
+        }
+
+        private static bool IsLegacySha256Hash(string? hash)
+        {
+            if (string.IsNullOrWhiteSpace(hash) || hash.Length != 44)
+                return false;
+            try
+            {
+                var bytes = Convert.FromBase64String(hash);
+                return bytes.Length == 32;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool VerifyLegacySha256(string password, string hash)
+        {
+            using var sha256 = System.Security.Cryptography.SHA256.Create();
+            var computed = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
+            var decoded = Convert.FromBase64String(hash);
+            return CryptographicOperations.FixedTimeEquals(computed, decoded);
         }
     }
 }

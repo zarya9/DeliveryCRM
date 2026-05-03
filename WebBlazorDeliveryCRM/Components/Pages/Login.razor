@@ -2,6 +2,7 @@
 @page "/login"
 @layout LoginLayout
 @attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@using Microsoft.AspNetCore.WebUtilities
 @inject AuthApiService AuthApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Navigation
@@ -10,26 +11,126 @@
 
 <PageTitle>Вход</PageTitle>
 
-<div class="login-page">
-    <div class="dms-card" style="max-width: 24rem; margin: 2rem auto;">
-        <h1 class="dms-card-title">Вход в систему</h1>
-        <div class="mb-3">
-            <label class="form-label">Email</label>
-            <input type="email" class="form-control" placeholder="example@mail.ru" @bind="_email" />
+<div class="auth-shell">
+    <div class="auth-card">
+        <div class="auth-card-head">
+            <h1>DeliveryCRM</h1>
+            <p>Единая платформа для клиентов и компаний доставки.</p>
         </div>
-        <div class="mb-3">
-            <label class="form-label">Пароль</label>
-            <input type="password" class="form-control" placeholder="••••••••" @bind="_password" />
+
+        <div class="auth-segment">
+            <button type="button" class="auth-segment-btn @(_activeTab == AuthTab.Login ? "active" : "")" @onclick="() => SetTab(AuthTab.Login)">Вход</button>
+            <button type="button" class="auth-segment-btn @(_activeTab == AuthTab.Register ? "active" : "")" @onclick="() => SetTab(AuthTab.Register)">Регистрация</button>
         </div>
-        @if (!string.IsNullOrEmpty(_error))
+
+        @if (_activeTab == AuthTab.Login)
         {
-            <div class="alert alert-danger mb-2">@_error</div>
+            <div class="mb-3">
+                <label class="form-label">Email</label>
+                <input type="email" class="form-control" placeholder="example@mail.ru" @bind="_email" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Пароль</label>
+                <input type="password" class="form-control" placeholder="••••••••" @bind="_password" />
+            </div>
+            <button type="button" class="btn btn-primary dms-btn-primary w-100" disabled="@_loading" @onclick="HandleLogin">
+                @(_loading ? "Вход..." : "Войти")
+            </button>
         }
-        <button type="button" class="btn btn-primary dms-btn-primary w-100" disabled="@_loading" @onclick="HandleLogin">
-            @(_loading ? "Вход..." : "Войти")
-        </button>
-        <p class="mt-3 mb-0">
-            <a href="/home">Выбор роли</a>
+        else
+        {
+            <div class="mb-2">
+                <label class="form-label">Тип регистрации</label>
+                <div class="auth-register-type">
+                    <label class="auth-choice">
+                        <input type="radio" name="registerType" checked="@(_registrationType == RegistrationType.Client)" @onchange="() => _registrationType = RegistrationType.Client" />
+                        <span>Клиент</span>
+                    </label>
+                    <label class="auth-choice">
+                        <input type="radio" name="registerType" checked="@(_registrationType == RegistrationType.CompanyOwner)" @onchange="() => _registrationType = RegistrationType.CompanyOwner" />
+                        <span>Владелец компании (Администратор)</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="row g-2 mb-2">
+                <div class="col-md-6">
+                    <label class="form-label">Имя</label>
+                    <input class="form-control" @bind="_regFName" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Фамилия</label>
+                    <input class="form-control" @bind="_regName" />
+                </div>
+            </div>
+
+            <div class="mb-2">
+                <label class="form-label">Отчество (необязательно)</label>
+                <input class="form-control" @bind="_regPatronumic" />
+            </div>
+
+            @if (_registrationType == RegistrationType.CompanyOwner)
+            {
+                <div class="mb-2">
+                    <label class="form-label">Название компании</label>
+                    <input class="form-control" @bind="_regCompanyName" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Телефон владельца (необязательно)</label>
+                    <input class="form-control" @bind="_regOwnerPhone" />
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-md-6">
+                        <label class="form-label">Тариф</label>
+                        <select class="form-select" @bind="_regSubscriptionPlan">
+                            <option value="Basic">Basic</option>
+                            <option value="Pro">Pro</option>
+                            <option value="Enterprise">Enterprise</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Макс. пользователей</label>
+                        <input type="number" min="1" class="form-control" @bind="_regMaxUsers" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Макс. заказов/мес</label>
+                        <input type="number" min="1" class="form-control" @bind="_regMaxOrdersPerMonth" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">SLA on-time, ч</label>
+                        <input type="number" min="1" class="form-control" @bind="_regSlaOnTimeHours" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">SLA late, ч</label>
+                        <input type="number" min="1" class="form-control" @bind="_regSlaLateHours" />
+                    </div>
+                </div>
+            }
+
+            <div class="mb-2">
+                <label class="form-label">Email</label>
+                <input type="email" class="form-control" @bind="_regEmail" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Пароль</label>
+                <input type="password" class="form-control" placeholder="Минимум 6 символов" @bind="_regPassword" />
+            </div>
+
+            <button type="button" class="btn btn-primary dms-btn-primary w-100" disabled="@_registerLoading" @onclick="HandleRegister">
+                @(_registerLoading ? "Регистрация..." : "Создать аккаунт")
+            </button>
+        }
+
+        <p class="mt-3 mb-0 small text-secondary">
+            @if (_activeTab == AuthTab.Login)
+            {
+                <span>Нет аккаунта? <button type="button" class="btn btn-link p-0 align-baseline" @onclick="() => SetTab(AuthTab.Register)">Зарегистрироваться</button></span>
+            }
+            else
+            {
+                <span>Уже есть аккаунт? <button type="button" class="btn btn-link p-0 align-baseline" @onclick="() => SetTab(AuthTab.Login)">Войти</button></span>
+            }
         </p>
     </div>
 </div>
@@ -39,6 +140,21 @@
     private string _password = "";
     private string? _error;
     private bool _loading;
+    private bool _registerLoading;
+    private AuthTab _activeTab = AuthTab.Login;
+    private RegistrationType _registrationType = RegistrationType.Client;
+    private string _regEmail = "";
+    private string _regPassword = "";
+    private string _regFName = "";
+    private string _regName = "";
+    private string? _regPatronumic;
+    private string _regCompanyName = "";
+    private string _regOwnerPhone = "";
+    private string _regSubscriptionPlan = "Pro";
+    private int _regMaxUsers = 100;
+    private int _regMaxOrdersPerMonth = 10000;
+    private int _regSlaOnTimeHours = 4;
+    private int _regSlaLateHours = 24;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -48,7 +164,7 @@
         {
             var role = state.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
                        ?? state.User.FindFirst("role")?.Value;
-            RedirectByRole(role);
+            NavigateAfterLogin(role);
         }
     }
 
@@ -97,17 +213,138 @@
             _ = Notify.RequestPushPermissionAsync();
 
             var role = GetRoleFromToken(token);
-            RedirectByRole(role);
+            NavigateAfterLogin(role);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _error = ex.Message;
-            Notify.ShowError(string.IsNullOrEmpty(ex.Message) ? "Ошибка при входе." : ex.Message);
+            _error = AuthApiService.ServerUnavailableUserMessage;
+            Notify.ShowError(_error);
         }
         finally
         {
             _loading = false;
         }
+    }
+
+    private async Task HandleRegister()
+    {
+        _error = null;
+        var email = _regEmail.Trim();
+        var password = _regPassword;
+        var fName = _regFName.Trim();
+        var name = _regName.Trim();
+
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(fName) || string.IsNullOrWhiteSpace(name))
+        {
+            _error = "Заполните обязательные поля регистрации.";
+            return;
+        }
+
+        if (_registrationType == RegistrationType.CompanyOwner && string.IsNullOrWhiteSpace(_regCompanyName))
+        {
+            _error = "Для владельца компании нужно указать название компании.";
+            return;
+        }
+        if (_registrationType == RegistrationType.CompanyOwner &&
+            (_regMaxUsers <= 0 || _regMaxOrdersPerMonth <= 0 || _regSlaOnTimeHours <= 0 || _regSlaLateHours <= 0))
+        {
+            _error = "Проверьте лимиты и SLA: значения должны быть больше нуля.";
+            return;
+        }
+
+        _registerLoading = true;
+        try
+        {
+            RegistrationResult result;
+            if (_registrationType == RegistrationType.CompanyOwner)
+            {
+                result = await AuthApi.RegisterCompanyOwnerAsync(new RegisterCompanyOwnerUiRequest
+                {
+                    Email = email,
+                    Password = password,
+                    FName = fName,
+                    Name = name,
+                    Patronumic = string.IsNullOrWhiteSpace(_regPatronumic) ? null : _regPatronumic.Trim(),
+                    CompanyName = _regCompanyName.Trim(),
+                    Phone = string.IsNullOrWhiteSpace(_regOwnerPhone) ? null : _regOwnerPhone.Trim(),
+                    SubscriptionPlan = _regSubscriptionPlan,
+                    MaxUsers = _regMaxUsers,
+                    MaxOrdersPerMonth = _regMaxOrdersPerMonth,
+                    SlaOnTimeHours = _regSlaOnTimeHours,
+                    SlaLateHours = _regSlaLateHours
+                });
+            }
+            else
+            {
+                result = await AuthApi.RegisterClientAsync(new RegisterClientUiRequest
+                {
+                    Email = email,
+                    Password = password,
+                    FName = fName,
+                    Name = name,
+                    Patronumic = string.IsNullOrWhiteSpace(_regPatronumic) ? null : _regPatronumic.Trim()
+                });
+            }
+
+            if (!result.Success)
+            {
+                _error = result.ErrorMessage ?? "Ошибка регистрации.";
+                Notify.ShowError(_error);
+                return;
+            }
+
+            Notify.ShowSuccess("Регистрация завершена. Выполняется вход...");
+
+            _email = email;
+            _password = password;
+            _activeTab = AuthTab.Login;
+            await HandleLogin();
+        }
+        catch (Exception)
+        {
+            _error = AuthApiService.ServerUnavailableUserMessage;
+            Notify.ShowError(_error);
+        }
+        finally
+        {
+            _registerLoading = false;
+        }
+    }
+
+    private void SetTab(AuthTab tab)
+    {
+        _activeTab = tab;
+        _error = null;
+    }
+
+    private void NavigateAfterLogin(string? role)
+    {
+        if (TryGetSafeReturnUrl(out var returnPath))
+        {
+            Navigation.NavigateTo(returnPath, forceLoad: true);
+            return;
+        }
+
+        RedirectByRole(role);
+    }
+
+    private bool TryGetSafeReturnUrl(out string path)
+    {
+        path = "/";
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        if (!QueryHelpers.ParseQuery(uri.Query).TryGetValue("ReturnUrl", out var values))
+            return false;
+
+        var candidate = values.FirstOrDefault();
+        if (string.IsNullOrEmpty(candidate))
+            return false;
+        if (candidate.Contains("://", StringComparison.Ordinal) || candidate.Contains("//", StringComparison.Ordinal))
+            return false;
+        if (!candidate.StartsWith('/'))
+            return false;
+
+        path = candidate;
+        return true;
     }
 
     private void RedirectByRole(string? role)
@@ -118,15 +355,12 @@
             Navigation.NavigateTo("/manager", forceLoad: true);
         else if (role == "Логист")
             Navigation.NavigateTo("/logistician", forceLoad: true);
-        else if (role == "Админ")
+        else if (role == "Админ" || role == "Администратор")
             Navigation.NavigateTo("/admin/employees", forceLoad: true);
         else if (role == "Курьер")
-        {
-            Notify.ShowInfo("Для курьера предназначено мобильное приложение.");
-            Navigation.NavigateTo("/", forceLoad: true);
-        }
+            Navigation.NavigateTo("/home", forceLoad: true);
         else
-            Navigation.NavigateTo("/", forceLoad: true);
+            Navigation.NavigateTo("/home", forceLoad: true);
     }
 
     private static string? GetRoleFromToken(string token)
@@ -141,5 +375,17 @@
         {
             return null;
         }
+    }
+
+    private enum AuthTab
+    {
+        Login,
+        Register
+    }
+
+    private enum RegistrationType
+    {
+        Client,
+        CompanyOwner
     }
 }

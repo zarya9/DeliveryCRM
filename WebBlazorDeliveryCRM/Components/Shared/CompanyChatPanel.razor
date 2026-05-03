@@ -8,6 +8,8 @@
 @inject EmployeesApiService EmployeesApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject AppNotificationService Notify
+@inject ChatUnreadStateService ChatUnreadState
+@inject IJSRuntime JS
 
 <div class="dms-card telegram-chat-shell">
     <aside class="telegram-chat-list">
@@ -42,6 +44,10 @@
                         </span>
                         <span class="telegram-chat-item-preview">@GetRoomPreview(room.LastMessageText)</span>
                     </span>
+                    @if (room.UnreadCount > 0)
+                    {
+                        <span class="telegram-chat-unread-dot" title="Непрочитанные сообщения"></span>
+                    }
                 </button>
             }
         </div>
@@ -61,6 +67,10 @@
                 {
                     <div class="telegram-bubble-wrap @(m.IsMine ? "mine" : "other")">
                         <div class="telegram-bubble">
+                            @if (ShouldShowSenderName(m))
+                            {
+                                <div class="telegram-sender-name">@GetSenderDisplayName(m)</div>
+                            }
                             @if (_editingMessageId == m.Id && m.IsMine)
                             {
                                 <div class="d-flex gap-2 flex-wrap">
@@ -78,7 +88,7 @@
                                 <div class="mt-2 p-2 border rounded bg-body-tertiary">
                                     <div class="small d-flex align-items-center gap-2">
                                         <span>@GetFileIcon(m.AttachmentFileName)</span>
-                                        <a href="@m.AttachmentUrl" target="_blank" rel="noopener noreferrer">@m.AttachmentFileName</a>
+                                        <a href="@m.AttachmentUrl" @onclick:preventDefault="true" @onclick="(() => DownloadAttachmentAsync(m))">@m.AttachmentFileName</a>
                                     </div>
                                     @if (m.IsImageAttachment)
                                     {
@@ -154,6 +164,8 @@
 
     private readonly List<ChatMessageVm> _messages = new();
     private readonly List<ChatRoomListItemDto> _rooms = new();
+    private readonly Dictionary<int, string> _roomKinds = new();
+    private readonly Dictionary<int, string> _employeeNames = new();
     private readonly List<EmployeesApiService.EmployeeDto> _employees = new();
     private string _chatSearch = string.Empty;
     private string _newMessage = string.Empty;
@@ -161,6 +173,7 @@
     private int _companyId;
     private bool _initialized;
     private int _activeRoomId;
+    private string _activeRoomKind = "company";
     private int? _lastHandledTargetUserId;
     private int? _editingMessageId;
     private string _editingText = string.Empty;
@@ -213,6 +226,10 @@
         _ = int.TryParse(user.FindFirst("companyId")?.Value, out _companyId);
 
         _employees.AddRange(await EmployeesApi.GetByCompanyAsync(_companyId));
+        foreach (var employee in _employees)
+        {
+            _employeeNames[employee.Id] = employee.FullName;
+        }
 
         var ensure = await ChatApi.EnsureCompanyRoomAsync();
         if (ensure.ok)
@@ -224,10 +241,25 @@
         var connection = await ChatHubClient.GetConnectionAsync();
         connection.On<IncomingMessage>("ReceiveMessage", msg =>
         {
-            if (msg.chatRoomId != _activeRoomId) return;
-            if (_messages.Any(x => x.Id == msg.id)) return;
-            _messages.Add(ChatMessageVm.FromIncoming(msg, _currentUserId));
-            InvokeAsync(StateHasChanged);
+            return InvokeAsync(async () =>
+            {
+                if (msg.chatRoomId != _activeRoomId)
+                {
+                    await ReloadRoomsAsync();
+                    await ChatUnreadState.RefreshAsync();
+                    if (msg.senderId != _currentUserId && IsDirectRoom(msg.chatRoomId))
+                    {
+                        var senderName = string.IsNullOrWhiteSpace(msg.senderName) ? "Сотрудник" : msg.senderName!;
+                        Notify.ShowInfo($"Новое личное сообщение от {senderName}.", pushWhenHidden: true);
+                    }
+                    return;
+                }
+
+                if (_messages.Any(x => x.Id == msg.id)) return;
+                _messages.Add(ChatMessageVm.FromIncoming(msg, _currentUserId));
+                await MarkActiveRoomAsReadAsync();
+                StateHasChanged();
+            });
         });
         connection.On<MessageEditedSignal>("MessageEdited", msg =>
         {
@@ -248,6 +280,7 @@
         {
             await connection.SendAsync("JoinRoom", _activeRoomId);
             await LoadHistoryAsync(_activeRoomId);
+            await MarkActiveRoomAsReadAsync();
         }
 
         if (TargetUserId.HasValue && TargetUserId.Value > 0 && TargetUserId.Value != _currentUserId)
@@ -273,22 +306,42 @@
     private async Task ReloadRoomsAsync()
     {
         _rooms.Clear();
-        _rooms.AddRange(await ChatApi.GetRoomsListAsync());
+        var rooms = await ChatApi.GetRoomsListAsync();
+        _rooms.AddRange(rooms);
+        _roomKinds.Clear();
+        foreach (var room in rooms)
+        {
+            _roomKinds[room.ChatRoomId] = room.RoomKind ?? "company";
+        }
         if (_activeRoomId == 0 && _rooms.Count > 0)
             _activeRoomId = _rooms[0].ChatRoomId;
+        _activeRoomKind = _roomKinds.GetValueOrDefault(_activeRoomId, "company");
     }
 
     private async Task OpenRoomAsync(int roomId)
     {
-        if (roomId <= 0 || roomId == _activeRoomId) return;
+        if (roomId <= 0) return;
+
+        if (roomId == _activeRoomId)
+        {
+            await MarkActiveRoomAsReadAsync();
+            await ReloadRoomsAsync();
+            await ChatUnreadState.RefreshAsync();
+            return;
+        }
+
         var conn = ChatHubClient.Connection;
         if (conn != null && _activeRoomId > 0)
             await conn.SendAsync("LeaveRoom", _activeRoomId);
         _activeRoomId = roomId;
+        _activeRoomKind = _roomKinds.GetValueOrDefault(roomId, "company");
         _messages.Clear();
         if (conn != null)
             await conn.SendAsync("JoinRoom", _activeRoomId);
         await LoadHistoryAsync(_activeRoomId);
+        await MarkActiveRoomAsReadAsync();
+        await ReloadRoomsAsync();
+        await ChatUnreadState.RefreshAsync();
     }
 
     private async Task LoadHistoryAsync(int roomId)
@@ -323,8 +376,6 @@
         var text = _newMessage.Trim();
         if (string.IsNullOrEmpty(text) && string.IsNullOrWhiteSpace(_attachmentUrl))
             return;
-        if (string.IsNullOrEmpty(text) && !string.IsNullOrWhiteSpace(_attachmentUrl))
-            text = "[Файл]";
 
         var ok = await ChatApi.SendMessageAsync(_activeRoomId, text, _attachmentUrl);
         if (!ok)
@@ -337,6 +388,8 @@
         _attachmentUrl = null;
         _attachmentName = null;
         await ReloadRoomsAsync();
+        await MarkActiveRoomAsReadAsync();
+        await ChatUnreadState.RefreshAsync();
     }
 
     private async Task OnKeyDown(KeyboardEventArgs e)
@@ -447,6 +500,20 @@
         _ => category
     };
 
+    private async Task DownloadAttachmentAsync(ChatMessageVm message)
+    {
+        if (string.IsNullOrWhiteSpace(message.AttachmentUrl))
+            return;
+        try
+        {
+            await JS.InvokeVoidAsync("fileDownload.saveFromUrl", message.AttachmentUrl, message.AttachmentFileName);
+        }
+        catch
+        {
+            Notify.ShowError("Не удалось скачать вложение.");
+        }
+    }
+
     private static bool IsImageFile(string? fileName)
     {
         var ext = Path.GetExtension(fileName ?? string.Empty).ToLowerInvariant();
@@ -504,6 +571,28 @@
         return $"{char.ToUpperInvariant(parts[0][0])}{char.ToUpperInvariant(parts[1][0])}";
     }
 
+    private bool IsDirectRoom(int roomId)
+        => string.Equals(_roomKinds.GetValueOrDefault(roomId, "company"), "direct", StringComparison.OrdinalIgnoreCase);
+
+    private bool ShouldShowSenderName(ChatMessageVm message)
+        => !message.IsMine && !string.Equals(_activeRoomKind, "direct", StringComparison.OrdinalIgnoreCase);
+
+    private string GetSenderDisplayName(ChatMessageVm message)
+    {
+        if (!string.IsNullOrWhiteSpace(message.SenderName))
+            return message.SenderName!;
+        if (_employeeNames.TryGetValue(message.SenderId, out var name) && !string.IsNullOrWhiteSpace(name))
+            return name;
+        return $"Пользователь #{message.SenderId}";
+    }
+
+    private async Task MarkActiveRoomAsReadAsync()
+    {
+        if (_activeRoomId <= 0)
+            return;
+        await ChatApi.MarkAllAsReadAsync(_activeRoomId);
+    }
+
     public async ValueTask DisposeAsync()
     {
         var connection = ChatHubClient.Connection;
@@ -521,6 +610,7 @@
     {
         public int Id { get; set; }
         public int SenderId { get; set; }
+        public string? SenderName { get; set; }
         public string Text { get; set; } = "";
         public string? AttachmentUrl { get; set; }
         public string AttachmentFileName { get; set; } = "Вложение";
@@ -533,6 +623,7 @@
         {
             Id = dto.ID_ChatMessage,
             SenderId = dto.Sender_id,
+            SenderName = dto.SenderName,
             Text = dto.MessageText,
             AttachmentUrl = dto.AttachmentUrl,
             AttachmentFileName = ExtractFileName(dto.AttachmentUrl),
@@ -546,6 +637,7 @@
         {
             Id = msg.id,
             SenderId = msg.senderId,
+            SenderName = msg.senderName,
             Text = msg.messageText,
             AttachmentUrl = msg.attachmentUrl,
             AttachmentFileName = ExtractFileName(msg.attachmentUrl),
@@ -560,6 +652,7 @@
         public int id { get; set; }
         public int chatRoomId { get; set; }
         public int senderId { get; set; }
+        public string? senderName { get; set; }
         public string messageText { get; set; } = "";
         public string? attachmentUrl { get; set; }
         public DateTime sentAt { get; set; }

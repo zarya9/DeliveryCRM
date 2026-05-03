@@ -1,0 +1,534 @@
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@using System.Net
+@using Microsoft.AspNetCore.Components
+@implements IAsyncDisposable
+@inject OrdersApiService OrdersApi
+@inject AddressSuggestApiService AddressSuggestApi
+@inject AppNotificationService Notify
+
+<style>
+    .addr-suggest-wrap { position: relative; }
+    .addr-suggest-panel {
+        position: absolute; left: 0; right: 0; top: 100%;
+        z-index: 1060; margin-top: 2px;
+        max-height: 320px; overflow-y: auto;
+        border: 1px solid var(--bs-border-color);
+        border-radius: .5rem;
+        background: var(--bs-body-bg);
+        box-shadow: 0 .5rem 1rem rgba(0, 0, 0, .08);
+    }
+    .addr-suggest-row {
+        display: flex; gap: .5rem; align-items: flex-start;
+        padding: .55rem .75rem; cursor: pointer;
+        border-bottom: 1px solid var(--bs-border-color-translucent);
+    }
+    .addr-suggest-row:last-child { border-bottom: none; }
+    .addr-suggest-row:hover { background: var(--bs-tertiary-bg); }
+    .addr-suggest-pin { color: #e53935; width: 1.25rem; height: 1.25rem; }
+    .addr-suggest-kind { width: 1.25rem; flex-shrink: 0; text-align: center; opacity: .55; font-size: .9rem; margin-top: 1px; }
+</style>
+
+<div class="row g-3">
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="col-12">
+            <div class="alert alert-danger mb-0">@_error</div>
+        </div>
+    }
+    <div class="col-md-6">
+        <label class="form-label">Название заказа</label>
+        <input class="form-control" @bind="_form.Name" />
+    </div>
+    <div class="col-md-6">
+        <label class="form-label">Приоритет</label>
+        <select class="form-select" @bind="_form.Priority">
+            <option value="0">Обычный</option>
+            <option value="1">Срочный</option>
+            <option value="2">Критический</option>
+        </select>
+    </div>
+    <div class="col-12">
+        <label class="form-label">Описание</label>
+        <textarea class="form-control" rows="2" @bind="_form.Description"></textarea>
+    </div>
+
+    <div class="col-12"><h6 class="mt-2 mb-0">Адрес забора</h6></div>
+    <div class="col-12">
+        <label class="form-label">Адрес</label>
+        <div class="addr-suggest-wrap">
+            <div class="input-group">
+                <span class="input-group-text bg-body-secondary py-0">
+                    <HugeIcon Name="location-01" CssClass="addr-suggest-pin" />
+                </span>
+                <input class="form-control"
+                       placeholder="Улица и дом — вводите адрес, выберите подсказку"
+                       value="@_pickupSearchText"
+                       @oninput="OnPickupInput"
+                       @onfocus="OnPickupFocus" />
+                @if (!string.IsNullOrWhiteSpace(_pickupSearchText))
+                {
+                    <button type="button" class="btn btn-outline-secondary px-2" title="Очистить" @onmousedown="ClearPickupMouse" @onmousedown:preventDefault="true">
+                        <HugeIcon Name="delete-02" CssClass="dms-icon" />
+                    </button>
+                }
+            </div>
+            @if (_pickupOpen && _pickupSuggestions.Count > 0)
+            {
+                <div class="addr-suggest-panel">
+                    @foreach (var s in _pickupSuggestions)
+                    {
+                        <div class="addr-suggest-row" @onmousedown="() => PickPickup(s)" @onmousedown:preventDefault="true">
+                            <span class="addr-suggest-kind">@(s.HasHouse ? "⌂" : "⌖")</span>
+                            <div class="flex-grow-1 min-w-0">
+                                <div class="text-body">@((MarkupString)HighlightQuery(GetPrimaryLine(s), _pickupSearchText))</div>
+                                @if (!string.IsNullOrWhiteSpace(GetSecondaryLine(s)))
+                                {
+                                    <div class="small text-muted">@GetSecondaryLine(s)</div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+        <div class="row g-2 mt-1">
+            <div class="col-sm-4">
+                <label class="form-label small text-muted mb-0">Дом</label>
+                <input class="form-control form-control-sm" placeholder="из подсказки или вручную" @bind="_form.PickupHouse" />
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label small text-muted mb-0">Квартира / офис</label>
+                <input class="form-control form-control-sm" @bind="_form.PickupFlat" />
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label small text-muted mb-0">Город</label>
+                <input class="form-control form-control-sm" @bind="_form.PickupCity" />
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12"><h6 class="mt-2 mb-0">Адрес доставки</h6></div>
+    <div class="col-12">
+        <label class="form-label">Адрес</label>
+        <div class="addr-suggest-wrap">
+            <div class="input-group">
+                <span class="input-group-text bg-body-secondary py-0">
+                    <HugeIcon Name="location-01" CssClass="addr-suggest-pin" />
+                </span>
+                <input class="form-control"
+                       placeholder="Улица и дом — вводите адрес, выберите подсказку"
+                       value="@_deliverySearchText"
+                       @oninput="OnDeliveryInput"
+                       @onfocus="OnDeliveryFocus" />
+                @if (!string.IsNullOrWhiteSpace(_deliverySearchText))
+                {
+                    <button type="button" class="btn btn-outline-secondary px-2" title="Очистить" @onmousedown="ClearDeliveryMouse" @onmousedown:preventDefault="true">
+                        <HugeIcon Name="delete-02" CssClass="dms-icon" />
+                    </button>
+                }
+            </div>
+            @if (_deliveryOpen && _deliverySuggestions.Count > 0)
+            {
+                <div class="addr-suggest-panel">
+                    @foreach (var s in _deliverySuggestions)
+                    {
+                        <div class="addr-suggest-row" @onmousedown="() => PickDelivery(s)" @onmousedown:preventDefault="true">
+                            <span class="addr-suggest-kind">@(s.HasHouse ? "⌂" : "⌖")</span>
+                            <div class="flex-grow-1 min-w-0">
+                                <div class="text-body">@((MarkupString)HighlightQuery(GetPrimaryLine(s), _deliverySearchText))</div>
+                                @if (!string.IsNullOrWhiteSpace(GetSecondaryLine(s)))
+                                {
+                                    <div class="small text-muted">@GetSecondaryLine(s)</div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+        <div class="row g-2 mt-1">
+            <div class="col-sm-4">
+                <label class="form-label small text-muted mb-0">Дом</label>
+                <input class="form-control form-control-sm" placeholder="из подсказки или вручную" @bind="_form.DeliveryHouse" />
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label small text-muted mb-0">Квартира / офис</label>
+                <input class="form-control form-control-sm" @bind="_form.DeliveryFlat" />
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label small text-muted mb-0">Город</label>
+                <input class="form-control form-control-sm" @bind="_form.DeliveryCity" />
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12"><h6 class="mt-2 mb-0">Параметры груза</h6></div>
+    <div class="col-md-3">
+        <label class="form-label">Вес, кг</label>
+        <input type="number" min="0.1" step="0.1" class="form-control" @bind="_form.Weight" />
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Высота, см</label>
+        <input type="number" min="0.1" step="0.1" class="form-control" @bind="_form.Height" />
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Длина, см</label>
+        <input type="number" min="0.1" step="0.1" class="form-control" @bind="_form.Length" />
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Ширина, см</label>
+        <input type="number" min="0.1" step="0.1" class="form-control" @bind="_form.Width" />
+    </div>
+</div>
+
+<div class="mt-3 d-flex gap-2 flex-wrap">
+    <button type="button" class="btn btn-primary dms-btn-primary" disabled="@_saving" @onclick="SubmitAsync">
+        @(_saving ? "Создание..." : "Создать заказ")
+    </button>
+    @if (ShowCancel)
+    {
+        <button type="button" class="btn btn-outline-secondary" disabled="@_saving" @onclick="CancelAsync">Отмена</button>
+    }
+</div>
+
+@code {
+    private const int DebounceMs = 320;
+
+    [Parameter]
+    public bool ShowCancel { get; set; } = true;
+
+    [Parameter]
+    public EventCallback OnSuccess { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private CreateCustomerOrderRequestDto _form = new();
+    private bool _saving;
+    private string? _error;
+    private string _pickupSearchText = "";
+    private string _deliverySearchText = "";
+    private List<AddressSuggestItemDto> _pickupSuggestions = new();
+    private List<AddressSuggestItemDto> _deliverySuggestions = new();
+    private bool _pickupOpen;
+    private bool _deliveryOpen;
+    private CancellationTokenSource? _pickupDebounceCts;
+    private CancellationTokenSource? _deliveryDebounceCts;
+
+    protected override void OnInitialized()
+    {
+        _form.Name = "Новый заказ";
+        _form.PickupCity = "Казань";
+        _form.DeliveryCity = "Казань";
+    }
+
+    public void ResetForm()
+    {
+        _error = null;
+        _form = new CreateCustomerOrderRequestDto
+        {
+            Name = "Новый заказ",
+            PickupCity = "Казань",
+            DeliveryCity = "Казань"
+        };
+        _pickupSearchText = "";
+        _deliverySearchText = "";
+        _pickupSuggestions = new List<AddressSuggestItemDto>();
+        _deliverySuggestions = new List<AddressSuggestItemDto>();
+        _pickupOpen = false;
+        _deliveryOpen = false;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await CancelDebounceAsync(_pickupDebounceCts);
+        _pickupDebounceCts = null;
+        await CancelDebounceAsync(_deliveryDebounceCts);
+        _deliveryDebounceCts = null;
+    }
+
+    private static async Task CancelDebounceAsync(CancellationTokenSource? cts)
+    {
+        if (cts is null) return;
+        try
+        {
+            await cts.CancelAsync();
+        }
+        catch
+        {
+            cts.Cancel();
+        }
+        cts.Dispose();
+    }
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+
+        if (string.IsNullOrWhiteSpace(_form.Name) ||
+            string.IsNullOrWhiteSpace(_form.PickupStreet) ||
+            string.IsNullOrWhiteSpace(_form.PickupHouse) ||
+            string.IsNullOrWhiteSpace(_form.DeliveryStreet) ||
+            string.IsNullOrWhiteSpace(_form.DeliveryHouse))
+        {
+            _error = "Заполните название, выберите адреса из подсказок (или улицу и дом вручную в полях ниже).";
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var (created, apiError) = await OrdersApi.CreateMineAsync(_form);
+            if (created is null)
+            {
+                _error = string.IsNullOrWhiteSpace(apiError)
+                    ? "Не удалось создать заказ. Проверьте доступ и корректность данных."
+                    : apiError;
+                return;
+            }
+
+            var windowText = FormatDeliveryWindow(created);
+            Notify.ShowSuccess($"Заказ №{created.Order_Number}. Стоимость: {created.Estimated_cost:0.##} ₽. Доставим {windowText}.");
+            ResetForm();
+            await OnSuccess.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        ResetForm();
+        await OnCancel.InvokeAsync();
+    }
+
+    private async Task OnPickupInput(ChangeEventArgs e)
+    {
+        _pickupSearchText = e.Value?.ToString() ?? "";
+        await DebouncePickupSuggestAsync();
+    }
+
+    private async Task OnDeliveryInput(ChangeEventArgs e)
+    {
+        _deliverySearchText = e.Value?.ToString() ?? "";
+        await DebounceDeliverySuggestAsync();
+    }
+
+    private void OnPickupFocus()
+    {
+        if (_pickupSuggestions.Count > 0 && _pickupSearchText.Trim().Length >= 3)
+            _pickupOpen = true;
+    }
+
+    private void OnDeliveryFocus()
+    {
+        if (_deliverySuggestions.Count > 0 && _deliverySearchText.Trim().Length >= 3)
+            _deliveryOpen = true;
+    }
+
+    private async Task DebouncePickupSuggestAsync()
+    {
+        await CancelDebounceAsync(_pickupDebounceCts);
+        _pickupDebounceCts = new CancellationTokenSource();
+        var token = _pickupDebounceCts.Token;
+        try
+        {
+            await Task.Delay(DebounceMs, token);
+            var q = _pickupSearchText.Trim();
+            if (q.Length < 3)
+            {
+                _pickupSuggestions = new List<AddressSuggestItemDto>();
+                _pickupOpen = false;
+            }
+            else
+            {
+                var list = await AddressSuggestApi.SuggestAsync(q, 10);
+                _pickupSuggestions = list;
+                _pickupOpen = list.Count > 0;
+            }
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task DebounceDeliverySuggestAsync()
+    {
+        await CancelDebounceAsync(_deliveryDebounceCts);
+        _deliveryDebounceCts = new CancellationTokenSource();
+        var token = _deliveryDebounceCts.Token;
+        try
+        {
+            await Task.Delay(DebounceMs, token);
+            var q = _deliverySearchText.Trim();
+            if (q.Length < 3)
+            {
+                _deliverySuggestions = new List<AddressSuggestItemDto>();
+                _deliveryOpen = false;
+            }
+            else
+            {
+                var list = await AddressSuggestApi.SuggestAsync(q, 10);
+                _deliverySuggestions = list;
+                _deliveryOpen = list.Count > 0;
+            }
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void PickPickup(AddressSuggestItemDto s)
+    {
+        ApplySuggestToForm(s, pickup: true);
+        _pickupSearchText = GetPrimaryLine(s);
+        _pickupOpen = false;
+        _pickupSuggestions.Clear();
+    }
+
+    private void PickDelivery(AddressSuggestItemDto s)
+    {
+        ApplySuggestToForm(s, pickup: false);
+        _deliverySearchText = GetPrimaryLine(s);
+        _deliveryOpen = false;
+        _deliverySuggestions.Clear();
+    }
+
+    private void ApplySuggestToForm(AddressSuggestItemDto s, bool pickup)
+    {
+        var street = !string.IsNullOrWhiteSpace(s.Street)
+            ? s.Street!.Trim()
+            : FirstSegmentDisplay(s.DisplayName);
+        var house = s.House?.Trim() ?? "";
+        var city = s.City?.Trim();
+
+        if (pickup)
+        {
+            _form.PickupStreet = street;
+            _form.PickupHouse = house;
+            if (!string.IsNullOrWhiteSpace(city))
+                _form.PickupCity = city;
+        }
+        else
+        {
+            _form.DeliveryStreet = street;
+            _form.DeliveryHouse = house;
+            if (!string.IsNullOrWhiteSpace(city))
+                _form.DeliveryCity = city;
+        }
+    }
+
+    private async Task ClearPickupMouse(MouseEventArgs _)
+    {
+        ClearPickup();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ClearDeliveryMouse(MouseEventArgs _)
+    {
+        ClearDelivery();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void ClearPickup()
+    {
+        _pickupSearchText = "";
+        _form.PickupStreet = "";
+        _form.PickupHouse = "";
+        _form.PickupFlat = null;
+        _form.PickupCity = "Казань";
+        _pickupSuggestions.Clear();
+        _pickupOpen = false;
+    }
+
+    private void ClearDelivery()
+    {
+        _deliverySearchText = "";
+        _form.DeliveryStreet = "";
+        _form.DeliveryHouse = "";
+        _form.DeliveryFlat = null;
+        _form.DeliveryCity = "Казань";
+        _deliverySuggestions.Clear();
+        _deliveryOpen = false;
+    }
+
+    private static string GetPrimaryLine(AddressSuggestItemDto s)
+    {
+        if (!string.IsNullOrWhiteSpace(s.PrimaryLine))
+            return s.PrimaryLine!.Trim();
+        if (!string.IsNullOrWhiteSpace(s.Street))
+            return string.IsNullOrWhiteSpace(s.House) ? s.Street!.Trim() : $"{s.Street!.Trim()}, {s.House.Trim()}";
+        return FirstSegmentDisplay(s.DisplayName);
+    }
+
+    private static string GetSecondaryLine(AddressSuggestItemDto s)
+    {
+        if (!string.IsNullOrWhiteSpace(s.SecondaryLine))
+            return s.SecondaryLine!.Trim();
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(s.City)) parts.Add(s.City!);
+        if (!string.IsNullOrWhiteSpace(s.State)) parts.Add(s.State!);
+        return string.Join(", ", parts);
+    }
+
+    private static string FirstSegmentDisplay(string? display)
+    {
+        if (string.IsNullOrWhiteSpace(display)) return "";
+        var i = display.IndexOf(',');
+        return i > 0 ? display[..i].Trim() : display.Trim();
+    }
+
+    private static string HighlightQuery(string text, string query)
+    {
+        if (string.IsNullOrEmpty(text))
+            return "";
+        var q = query.Trim();
+        if (string.IsNullOrEmpty(q))
+            return WebUtility.HtmlEncode(text);
+
+        var lowerText = text.ToLowerInvariant();
+        var lowerQ = q.ToLowerInvariant();
+        var sb = new System.Text.StringBuilder();
+        var i = 0;
+        while (i < text.Length)
+        {
+            var idx = lowerText.IndexOf(lowerQ, i, StringComparison.Ordinal);
+            if (idx < 0)
+            {
+                sb.Append(WebUtility.HtmlEncode(text[i..]));
+                break;
+            }
+            if (idx > i)
+                sb.Append(WebUtility.HtmlEncode(text[i..idx]));
+            sb.Append("<strong>");
+            sb.Append(WebUtility.HtmlEncode(text.Substring(idx, q.Length)));
+            sb.Append("</strong>");
+            i = idx + q.Length;
+        }
+        return sb.ToString();
+    }
+
+    private static string FormatDeliveryWindow(OrderDto o)
+    {
+        if (o.Eta_at.HasValue && o.Sla_due_at.HasValue)
+        {
+            if (o.Eta_at.Value.Date == o.Sla_due_at.Value.Date)
+                return o.Eta_at.Value.ToString("dd.MM");
+            return $"с {o.Eta_at:dd.MM} по {o.Sla_due_at:dd.MM}";
+        }
+        if (o.Sla_due_at.HasValue)
+            return $"до {o.Sla_due_at:dd.MM}";
+        if (o.Eta_at.HasValue)
+            return $"с {o.Eta_at:dd.MM}";
+        return "в ближайшее время";
+    }
+}

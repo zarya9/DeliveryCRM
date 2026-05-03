@@ -8,7 +8,7 @@ namespace APIDeliveryCRM.Interfaces
 {
     public interface IChatService
     {
-        Task<IActionResult> SendMessageAsync(int chatRoomId, int senderId, string messageText, string? attachmentUrl = null);
+        Task<IActionResult> SendMessageAsync(int chatRoomId, int senderId, string? messageText, string? attachmentUrl = null);
         Task<IActionResult> GetMessagesAsync(int chatRoomId, int skip = 0, int take = 50);
         Task<IActionResult> GetChatRoomsForUserAsync(int userId);
         Task<IActionResult> CreateChatRoomAsync(int orderId, List<int> participantIds);

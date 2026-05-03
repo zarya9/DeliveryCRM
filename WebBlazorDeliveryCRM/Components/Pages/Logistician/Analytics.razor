@@ -1,22 +1,170 @@
 @page "/logistician/analytics"
 @layout LogisticianLayout
+@using System.Linq
+@using Microsoft.JSInterop
 @using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject ReportsApiService ReportsApi
+@inject AppNotificationService Notify
+@inject IJSRuntime JS
 
 <PageTitle>Аналитика — Логист</PageTitle>
 
 <div class="dms-page-header">
     <h1>Аналитика эффективности</h1>
-    <p class="subtitle">Метрики, графики загруженности</p>
+    <p class="subtitle">Показатели по заказам и доставкам компании за период (те же данные, что в финансовом отчёте менеджера).</p>
+</div>
+<div class="mb-2">
+    <button type="button" class="btn btn-outline-danger btn-sm" disabled="@_exportingPdf" @onclick="ExportPdfAsync">
+        @(_exportingPdf ? "Формирую PDF..." : "Скачать PDF отчёт")
+    </button>
 </div>
 
-<div class="dms-stat-grid mb-3">
-    <KpiCard Title="Средняя загрузка" Value="0%" Meta="по активным курьерам" />
-    <KpiCard Title="SLA в норме" Value="0%" Meta="за текущие сутки" />
-    <KpiCard Title="Рейсов с риском" Value="0" Meta="требует внимания" />
-</div>
+@if (_loading)
+{
+    <p class="text-muted">Загрузка…</p>
+}
+else if (_data is null)
+{
+    <div class="alert alert-warning">Не удалось загрузить данные. Проверьте права и сессию.</div>
+}
+else
+{
+    <div class="dms-stat-grid mb-3">
+        <KpiCard Title="Заказов создано" Value="@_data.OrdersCreatedInPeriod.ToString()" Meta="за период" />
+        <KpiCard Title="Доставлено" Value="@_data.CourierRows.Sum(c => c.Delivered).ToString()" Meta="курьеры (сумма строк)" />
+        <KpiCard Title="В срок, %" Value="@($"{_data.OnTimePercent:0.#}")" Meta="@($"SLA порог {_data.SlaOnTimeHours} ч")" />
+        <KpiCard Title="Опоздания, %" Value="@($"{_data.LatePercent:0.#}")" Meta="@($"порог {_data.SlaLateHours} ч")" />
+        <KpiCard Title="Выручка доставленных" Value="@_data.RevenueDeliveredInPeriod.ToString("N0")" Meta="за период" />
+        <KpiCard Title="Среднее время доставки" Value="@($"{_data.AvgDeliveryHours:0.#} ч")" Meta="создание → доставка" />
+        <KpiCard Title="Экономия топлива" Value="@($"{_data.EstimatedFuelSavedLiters:0.#} л")" Meta="@($"{_data.EstimatedFuelSavingsPercent:0.#}%")" />
+    </div>
 
-<div class="dms-card">
-    <h2 class="dms-card-title">Графики и отчёты</h2>
-    <p class="text-muted">Эффективность по зонам и курьерам (API).</p>
-    <StatusBadge Text="Данные будут подгружены из API" Tone="info" />
-</div>
+    <div class="dms-card mb-3">
+        <h2 class="dms-card-title">Заказы по дням</h2>
+        @if (_data.OrdersByDay.Count == 0)
+        {
+            <p class="text-muted mb-0">Нет данных.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Дата (UTC)</th>
+                            <th>Заказов</th>
+                            <th>Выручка</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in _data.OrdersByDay.OrderBy(x => x.Date))
+                        {
+                            <tr>
+                                <td>@d.Date.ToString("yyyy-MM-dd")</td>
+                                <td>@d.Count</td>
+                                <td>@d.Revenue.ToString("N0")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <div class="row g-3">
+        <div class="col-md-6">
+            <div class="dms-card h-100">
+                <h2 class="dms-card-title">По статусам</h2>
+                @if (_data.StatusRows.Count == 0)
+                {
+                    <p class="text-muted mb-0">Нет данных.</p>
+                }
+                else
+                {
+                    <ul class="mb-0">
+                        @foreach (var s in _data.StatusRows.OrderByDescending(x => x.Count))
+                        {
+                            <li>@s.Status — @s.Count (@($"{s.Share:0.#}%"))</li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="dms-card h-100">
+                <h2 class="dms-card-title">Курьеры (доставлено)</h2>
+                @if (_data.CourierRows.Count == 0)
+                {
+                    <p class="text-muted mb-0">Нет доставок за период.</p>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Курьер</th>
+                                    <th>Доставок</th>
+                                    <th>Выручка</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var c in _data.CourierRows.OrderByDescending(x => x.Delivered))
+                                {
+                                    <tr>
+                                        <td>@c.Name</td>
+                                        <td>@c.Delivered</td>
+                                        <td>@c.Revenue.ToString("N0")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private FinanceDashboardDto? _data;
+    private bool _loading = true;
+    private bool _exportingPdf;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        var now = DateTime.UtcNow;
+        var from = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        _data = await ReportsApi.GetFinanceDashboardAsync(from, now, null);
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task ExportPdfAsync()
+    {
+        _exportingPdf = true;
+        try
+        {
+            var now = DateTime.UtcNow;
+            var from = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+            var bytes = await ReportsApi.GetFinancePdfAsync(from, now, null);
+            if (bytes == null || bytes.Length == 0)
+            {
+                Notify.ShowError("Не удалось сформировать PDF отчёт.");
+                return;
+            }
+            var name = $"finance-report-{from:yyyy-MM-dd}-{now:yyyy-MM-dd}.pdf";
+            await using var ms = new MemoryStream(bytes);
+            using var streamRef = new DotNetStreamReference(ms);
+            await JS.InvokeVoidAsync("fileDownload.saveFromStream", streamRef, name, "application/pdf");
+            Notify.ShowSuccess("PDF готов к загрузке.");
+        }
+        finally
+        {
+            _exportingPdf = false;
+        }
+    }
+}

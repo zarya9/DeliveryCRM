@@ -1,7 +1,16 @@
+using System.Collections.Generic;
 using System.Net.Http.Json;
 using System.Text.Json;
 
 namespace WebBlazorDeliveryCRM.Services;
+
+public class HubOrderOnSiteDto
+{
+    public int OrderId { get; set; }
+    public int OrderNumber { get; set; }
+    public string? ClientName { get; set; }
+    public string? DeliveryTo { get; set; }
+}
 
 public class LogisticsHubListItemDto
 {
@@ -10,6 +19,13 @@ public class LogisticsHubListItemDto
     public int AddressId { get; set; }
     public string? City { get; set; }
     public string? Street { get; set; }
+    public string? House { get; set; }
+    public string? Flat { get; set; }
+    public string? Region { get; set; }
+    public string? PostalCode { get; set; }
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+    public List<HubOrderOnSiteDto> OrdersOnSite { get; set; } = new();
 }
 
 public class CreateLogisticsHubApiRequest

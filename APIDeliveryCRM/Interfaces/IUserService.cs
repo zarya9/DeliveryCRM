@@ -9,6 +9,7 @@ namespace APIDeliveryCRM.Interfaces
         Task<IActionResult> GetUserByIdAsync(int id);
         Task<IActionResult> GetAllUsersAsync();
         Task<IActionResult> RegisterClientAsync(RegisterClientRequest dto);
+        Task<IActionResult> RegisterCompanyOwnerAsync(RegisterCompanyOwnerRequest dto);
         Task<IActionResult> RegisterManagerAsync(RegisterManagerRequest dto);
         Task<IActionResult> RegisterLogisticianAsync(RegisterLogisticianRequest dto);
         Task<IActionResult> LoginAsync(LoginRequest dto);

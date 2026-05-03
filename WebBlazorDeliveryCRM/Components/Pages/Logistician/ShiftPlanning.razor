@@ -1,24 +1,33 @@
 @page "/logistician/shifts"
 @layout LogisticianLayout
 @using WebBlazorDeliveryCRM.Components.Shared
+@inject AuthenticationStateProvider AuthStateProvider
+@inject CouriersApiService CouriersApi
 
 <PageTitle>Планирование смен — Логист</PageTitle>
 
 <div class="dms-page-header">
     <h1>Планирование смен</h1>
-    <p class="subtitle">Календарь смен и загрузка курьеров (черновик интерфейса)</p>
+    <p class="subtitle">Текущая загрузка курьеров и оперативное управление сменами</p>
 </div>
 
 <div class="dms-stat-grid mb-3">
-    <KpiCard Title="Смен сегодня" Value="0" Meta="После подключения API" />
-    <KpiCard Title="Активные смены" Value="0" Meta="Live данные SignalR" />
+    <KpiCard Title="Курьеров всего" Value="@_totalCouriers.ToString()" Meta="По компании" />
+    <KpiCard Title="Онлайн сейчас" Value="@_onlineCouriers.ToString()" Meta="По фактическому статусу" />
 </div>
 
 <div class="dms-card mb-3">
     <h2 class="dms-card-title">Ближайшие смены</h2>
-    <p class="text-muted mb-0">
-        Здесь будет интеграция с API смен (старт/окончание смены курьера). Сейчас отображается структура страницы для дальнейшей доработки.
-    </p>
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger mb-0">@_error</div>
+    }
+    else
+    {
+        <p class="text-muted mb-0">
+            Раздел показывает фактическую доступность курьеров. Для детального календарного планирования можно расширить экран отдельными слотами смен и подтверждениями.
+        </p>
+    }
 </div>
 
 <div class="dms-card">
@@ -33,12 +42,82 @@
                 </tr>
             </thead>
             <tbody>
-                <tr>
-                    <td>—</td>
-                    <td><StatusBadge Text="Ожидает интеграции" Tone="warning" /></td>
-                    <td class="text-muted">Подключение к <code>/api/Couriers/.../shift</code></td>
-                </tr>
+                @if (_loading)
+                {
+                    <tr><td colspan="3" class="text-muted">Загрузка...</td></tr>
+                }
+                else if (_couriers.Count == 0)
+                {
+                    <tr><td colspan="3" class="text-muted">Курьеры не найдены.</td></tr>
+                }
+                else
+                {
+                    @foreach (var c in _couriers.OrderBy(x => x.User?.FName).ThenBy(x => x.User?.Name))
+                    {
+                        <tr>
+                            <td>@($"{c.User?.FName} {c.User?.Name}".Trim())</td>
+                            <td>
+                                <StatusBadge Text="@(c.Is_online ? "В смене" : "Оффлайн")" Tone="@(c.Is_online ? "success" : "neutral")" />
+                            </td>
+                            <td class="text-muted">
+                                Последняя активность:
+                                @(c.LastActivity_at == default ? "—" : c.LastActivity_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))
+                            </td>
+                        </tr>
+                    }
+                }
             </tbody>
         </table>
     </div>
 </div>
+
+@code {
+    private bool _loading = true;
+    private bool _dataRequested;
+    private string? _error;
+    private List<CourierProfileDto> _couriers = new();
+    private int _totalCouriers;
+    private int _onlineCouriers;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _dataRequested)
+            return;
+        _dataRequested = true;
+
+        try
+        {
+            var state = await AuthStateProvider.GetAuthenticationStateAsync();
+            if (state.User.Identity?.IsAuthenticated != true)
+            {
+                _error = "Требуется вход.";
+                _loading = false;
+                StateHasChanged();
+                return;
+            }
+
+            if (!int.TryParse(state.User.FindFirst("companyId")?.Value, out _))
+            {
+                _error = "Не удалось определить компанию пользователя.";
+                _loading = false;
+                StateHasChanged();
+                return;
+            }
+
+            // Без companyId в query — компания берётся из JWT на API (как на странице «Курьеры»).
+            _couriers = await CouriersApi.GetAllAsync(null) ?? new();
+            _totalCouriers = _couriers.Count;
+            _onlineCouriers = _couriers.Count(c => c.Is_online);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+}

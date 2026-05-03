@@ -1,14 +1,128 @@
 @page "/customer/tracking"
 @layout CustomerLayout
+@using System.Security.Claims
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ClientsApiService ClientsApi
+@inject OrdersApiService OrdersApi
 
 <PageTitle>Отслеживание заказа — Клиент</PageTitle>
 
 <div class="dms-page-header">
     <h1>Отслеживание заказа</h1>
-    <p class="subtitle">Карта и статус в реальном времени</p>
+    <p class="subtitle">Актуальный статус и история изменений по заказам</p>
 </div>
 
 <div class="dms-card">
-    <h2 class="dms-card-title">Карта и статус</h2>
-    <p class="text-muted">Здесь будет карта и трекинг заказа (интеграция с API).</p>
+    <h2 class="dms-card-title">Статусы заказов</h2>
+    @if (_loading)
+    {
+        <p class="text-muted mb-0">Загрузка заказов...</p>
+    }
+    else if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger mb-0">@_error</div>
+    }
+    else if (_orders.Count == 0)
+    {
+        <p class="text-muted mb-0">Пока нет заказов для отслеживания.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>№</th>
+                        <th>Название</th>
+                        <th>Статус</th>
+                        <th>Создан</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var o in _orders.OrderByDescending(x => x.Created_at))
+                    {
+                        <tr>
+                            <td>@o.Order_Number</td>
+                            <td>@o.Name</td>
+                            <td>@(o.OrderStatus?.Name ?? "Статус уточняется")</td>
+                            <td>@o.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary"
+                                        @onclick="() => LoadTimeline(o.ID_Order)">
+                                    Таймлайн
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
 </div>
+
+@if (_timeline.Count > 0)
+{
+    <div class="dms-card">
+        <h2 class="dms-card-title">Таймлайн выбранного заказа</h2>
+        <ul class="mb-0">
+            @foreach (var e in _timeline.OrderByDescending(x => x.Created_at))
+            {
+                <li class="mb-1">
+                    <strong>@(string.IsNullOrWhiteSpace(e.Title) ? e.EventType : e.Title)</strong>
+                    <span class="text-muted"> · @e.Created_at.ToString("dd.MM.yyyy HH:mm")</span>
+                    @if (!string.IsNullOrWhiteSpace(e.Message))
+                    {
+                        <div class="small text-muted">@e.Message</div>
+                    }
+                </li>
+            }
+        </ul>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private List<OrderDto> _orders = new();
+    private List<OrderTimelineEventDto> _timeline = new();
+    private int _selectedOrderId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var state = await AuthStateProvider.GetAuthenticationStateAsync();
+            var userIdRaw = state.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!int.TryParse(userIdRaw, out var userId))
+            {
+                _error = "Не удалось определить текущего пользователя.";
+                return;
+            }
+
+            var profile = await ClientsApi.GetByUserIdAsync(userId);
+            if (profile is null)
+            {
+                _error = "Профиль клиента не найден.";
+                return;
+            }
+
+            _orders = await OrdersApi.GetByClientAsync(profile.ID_ClientProfile) ?? new();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadTimeline(int orderId)
+    {
+        _selectedOrderId = orderId;
+        _timeline = await OrdersApi.GetTimelineAsync(orderId);
+        StateHasChanged();
+    }
+}

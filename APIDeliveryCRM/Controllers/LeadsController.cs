@@ -1,13 +1,15 @@
 using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Request;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class LeadsController : ControllerBase
+    [Authorize]
+public class LeadsController : Controller
     {
         private readonly ILeadService _leadService;
 
@@ -17,9 +19,12 @@ namespace APIDeliveryCRM.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> GetByCompany([FromQuery] int companyId)
+        public async Task<IActionResult> GetByCompany([FromQuery] int? companyId = null)
         {
-            return await _leadService.GetByCompanyAsync(companyId);
+            var resolvedCompanyId = ResolveCompanyId(companyId, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!resolvedCompanyId.HasValue) return Unauthorized();
+            return await _leadService.GetByCompanyAsync(resolvedCompanyId.Value);
         }
 
         [HttpGet("meta")]
@@ -31,10 +36,18 @@ namespace APIDeliveryCRM.Controllers
         [HttpPost]
         public async Task<IActionResult> Create(
             [FromBody] CreateLeadRequest request,
-            [FromQuery] int companyId,
-            [FromQuery] int managerUserId)
+            [FromQuery] int? companyId = null,
+            [FromQuery] int? managerUserId = null)
         {
-            return await _leadService.CreateAsync(request, companyId, managerUserId);
+            var resolvedCompanyId = ResolveCompanyId(companyId, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!resolvedCompanyId.HasValue) return Unauthorized();
+
+            var currentUserId = GetCurrentUserId();
+            var actorUserId = managerUserId ?? currentUserId;
+            if (!actorUserId.HasValue) return Unauthorized();
+
+            return await _leadService.CreateAsync(request, resolvedCompanyId.Value, actorUserId.Value);
         }
 
         [HttpPost("{id:int}/stage")]
@@ -56,9 +69,34 @@ namespace APIDeliveryCRM.Controllers
         }
 
         [HttpGet("analytics")]
-        public async Task<IActionResult> Analytics([FromQuery] int companyId, [FromQuery] DateTime? from, [FromQuery] DateTime? to)
+        public async Task<IActionResult> Analytics([FromQuery] int? companyId = null, [FromQuery] DateTime? from = null, [FromQuery] DateTime? to = null)
         {
-            return await _leadService.GetAnalyticsAsync(companyId, from, to);
+            var resolvedCompanyId = ResolveCompanyId(companyId, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!resolvedCompanyId.HasValue) return Unauthorized();
+            return await _leadService.GetAnalyticsAsync(resolvedCompanyId.Value, from, to);
+        }
+
+        private int? GetCurrentUserId()
+        {
+            var raw = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            return int.TryParse(raw, out var id) ? id : null;
+        }
+
+        private int? ResolveCompanyId(int? requestedCompanyId, out bool forbidden)
+        {
+            forbidden = false;
+            var raw = User.FindFirst("companyId")?.Value;
+            if (!int.TryParse(raw, out var claimCompanyId))
+                return null;
+
+            if (requestedCompanyId.HasValue && requestedCompanyId.Value != claimCompanyId)
+            {
+                forbidden = true;
+                return null;
+            }
+
+            return claimCompanyId;
         }
     }
 }

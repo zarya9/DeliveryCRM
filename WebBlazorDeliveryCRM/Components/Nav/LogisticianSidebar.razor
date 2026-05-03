@@ -1,4 +1,6 @@
 @using WebBlazorDeliveryCRM.Components.Shared
+@inject ChatUnreadStateService ChatUnreadState
+@implements IDisposable
 
 <div class="sidebar-header">
     <h2 class="sidebar-title">Логист</h2>
@@ -7,8 +9,11 @@
     <NavLink href="/logistician" class="sidebar-link" Match="NavLinkMatch.All">
         <HugeIcon Name="dashboard-square-01" CssClass="icon" /> <span class="sidebar-label">Распределение</span>
     </NavLink>
-    <NavLink href="/logistician/chat" class="sidebar-link">
-        <HugeIcon Name="message-01" CssClass="icon" /> <span class="sidebar-label">Чат</span>
+    <NavLink href="/logistician/chat" class="@(ChatUnreadState.HasAnyChatUnread ? "sidebar-link sidebar-nav-chat-unread" : "sidebar-link")">
+        <span class="sidebar-chat-icon-slot">
+            <HugeIcon Name="message-01" CssClass="icon" />
+        </span>
+        <span class="sidebar-label">Чат</span>
     </NavLink>
     <NavLink href="/logistician/hubs" class="sidebar-link">
         <HugeIcon Name="store-01" CssClass="icon" /> <span class="sidebar-label">Склады (просмотр)</span>
@@ -18,9 +23,6 @@
     </NavLink>
     <NavLink href="/logistician/couriers" class="sidebar-link">
         <HugeIcon Name="user-group" CssClass="icon" /> <span class="sidebar-label">Курьеры</span>
-    </NavLink>
-    <NavLink href="/logistician/vehicles/add" class="sidebar-link">
-        <HugeIcon Name="car-01" CssClass="icon" /> <span class="sidebar-label">Новое ТС</span>
     </NavLink>
     <NavLink href="/logistician/analytics" class="sidebar-link">
         <HugeIcon Name="analytics-up" CssClass="icon" /> <span class="sidebar-label">Аналитика</span>
@@ -32,3 +34,59 @@
         <HugeIcon Name="calendar-03" CssClass="icon" /> <span class="sidebar-label">Смены</span>
     </NavLink>
 </nav>
+
+@code {
+    private PeriodicTimer? _refreshTimer;
+    private CancellationTokenSource? _refreshCts;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        ChatUnreadState.Changed += OnUnreadChanged;
+        await ChatUnreadState.RefreshAsync();
+        StartUnreadRefreshLoop();
+        StateHasChanged();
+    }
+
+    private void StartUnreadRefreshLoop()
+    {
+        StopUnreadRefreshLoop();
+        _refreshCts = new CancellationTokenSource();
+        _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        _ = RunUnreadRefreshAsync(_refreshCts.Token);
+    }
+
+    private async Task RunUnreadRefreshAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (_refreshTimer is not null && await _refreshTimer.WaitForNextTickAsync(ct))
+            {
+                await ChatUnreadState.RefreshAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void OnUnreadChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void StopUnreadRefreshLoop()
+    {
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        _refreshCts = null;
+        _refreshTimer?.Dispose();
+        _refreshTimer = null;
+    }
+
+    public void Dispose()
+    {
+        ChatUnreadState.Changed -= OnUnreadChanged;
+        StopUnreadRefreshLoop();
+    }
+}

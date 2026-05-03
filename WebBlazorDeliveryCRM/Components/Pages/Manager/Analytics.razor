@@ -1,6 +1,6 @@
 @page "/manager/analytics"
 @layout ManagerLayout
-@attribute [Authorize(Roles = "Менеджер,Админ")]
+@attribute [Authorize(Roles = "Менеджер,Администратор,Админ")]
 @using ApexCharts
 @using Microsoft.AspNetCore.Authorization
 @using WebBlazorDeliveryCRM.Models
@@ -36,6 +36,9 @@
         <div class="col-md-3">
             <button type="button" class="btn btn-outline-success" disabled="@_exporting" @onclick="ExportExcelAsync">
                 @(_exporting ? "Формирую…" : "Скачать Excel")
+            </button>
+            <button type="button" class="btn btn-outline-danger ms-1" disabled="@_exportingPdf" @onclick="ExportPdfAsync">
+                @(_exportingPdf ? "Формирую…" : "Скачать PDF")
             </button>
         </div>
     </div>
@@ -94,6 +97,14 @@
     <div class="dms-stat-card">
         <div class="dms-stat-value">@_data.PaidSharePercent.ToString("0.0")@("%")</div>
         <div class="dms-stat-label">Доля оплаченных доставок</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_data.EstimatedFuelSavedLiters.ToString("0.0")</div>
+        <div class="dms-stat-label">Экономия топлива, л (оценка)</div>
+    </div>
+    <div class="dms-stat-card">
+        <div class="dms-stat-value">@_data.EstimatedFuelSavingsPercent.ToString("0.0")@("%")</div>
+        <div class="dms-stat-label">Экономия топлива, %</div>
     </div>
 </div>
 
@@ -308,6 +319,7 @@ else if (_data.LatePercent >= 10)
     private DateTime _periodFrom;
     private DateTime _periodTo;
     private bool _exporting;
+    private bool _exportingPdf;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -385,6 +397,35 @@ else if (_data.LatePercent >= 10)
                 Count = x.Count
             })
             .ToList();
+    }
+
+    private async Task ExportPdfAsync()
+    {
+        _exportingPdf = true;
+        try
+        {
+            var from = DateTime.SpecifyKind(_periodFrom.Date, DateTimeKind.Utc);
+            var to = DateTime.SpecifyKind(_periodTo.Date, DateTimeKind.Utc);
+            var bytes = await ReportsApi.GetFinancePdfAsync(from, to);
+            if (bytes == null || bytes.Length == 0)
+            {
+                Notify.ShowError("Не удалось сформировать PDF отчёт.");
+                return;
+            }
+            var name = $"finance-report-{from:yyyy-MM-dd}-{to:yyyy-MM-dd}.pdf";
+            await using var ms = new MemoryStream(bytes);
+            using var streamRef = new DotNetStreamReference(ms);
+            await JS.InvokeVoidAsync("fileDownload.saveFromStream", streamRef, name, "application/pdf");
+            Notify.ShowSuccess("PDF готов к загрузке.");
+        }
+        catch (Exception ex)
+        {
+            Notify.ShowError(ex.Message);
+        }
+        finally
+        {
+            _exportingPdf = false;
+        }
     }
 
     private async Task SaveSlaAsync()

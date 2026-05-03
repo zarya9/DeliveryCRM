@@ -7,8 +7,8 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize(Roles = "Логист,Админ,Менеджер")]
-    public class ServiceAreaZonesController : ControllerBase
+    [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+public class ServiceAreaZonesController : Controller
     {
         private readonly IServiceAreaZoneService _service;
 

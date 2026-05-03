@@ -1,6 +1,8 @@
 @using System.Security.Claims
 @using WebBlazorDeliveryCRM.Components.Shared
 @inject AuthenticationStateProvider AuthStateProvider
+@inject ChatUnreadStateService ChatUnreadState
+@implements IDisposable
 
 <div class="sidebar-header">
     <h2 class="sidebar-title">@(_fullName ?? "Менеджер")</h2>
@@ -13,8 +15,11 @@
     <NavLink href="/manager" class="sidebar-link" Match="NavLinkMatch.All">
         <HugeIcon Name="dashboard-square-01" CssClass="icon" /> <span class="sidebar-label">Дашборд</span>
     </NavLink>
-    <NavLink href="/manager/chat" class="sidebar-link">
-        <HugeIcon Name="message-01" CssClass="icon" /> <span class="sidebar-label">Чат</span>
+    <NavLink href="/manager/chat" class="@(ChatUnreadState.HasAnyChatUnread ? "sidebar-link sidebar-nav-chat-unread" : "sidebar-link")">
+        <span class="sidebar-chat-icon-slot">
+            <HugeIcon Name="message-01" CssClass="icon" />
+        </span>
+        <span class="sidebar-label">Чат</span>
     </NavLink>
     <NavLink href="/manager/orders" class="sidebar-link">
         <HugeIcon Name="invoice-01" CssClass="icon" /> <span class="sidebar-label">Заказы</span>
@@ -55,6 +60,8 @@
     private string? _fullName;
     private string? _email;
     private bool _isAdmin;
+    private PeriodicTimer? _refreshTimer;
+    private CancellationTokenSource? _refreshCts;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -67,7 +74,53 @@
         var role = user.FindFirst(ClaimTypes.Role)?.Value
                    ?? user.FindFirst("role")?.Value
                    ?? user.FindFirst("http://schemas.microsoft.com/ws/2008/06/identity/claims/role")?.Value;
-        _isAdmin = string.Equals(role, "Админ", StringComparison.Ordinal);
+        _isAdmin = string.Equals(role, "Админ", StringComparison.Ordinal)
+            || string.Equals(role, "Администратор", StringComparison.Ordinal);
+        ChatUnreadState.Changed += OnUnreadChanged;
+        await ChatUnreadState.RefreshAsync();
+        StartUnreadRefreshLoop();
         StateHasChanged();
+    }
+
+    private void StartUnreadRefreshLoop()
+    {
+        StopUnreadRefreshLoop();
+        _refreshCts = new CancellationTokenSource();
+        _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        _ = RunUnreadRefreshAsync(_refreshCts.Token);
+    }
+
+    private async Task RunUnreadRefreshAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (_refreshTimer is not null && await _refreshTimer.WaitForNextTickAsync(ct))
+            {
+                await ChatUnreadState.RefreshAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void OnUnreadChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void StopUnreadRefreshLoop()
+    {
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        _refreshCts = null;
+        _refreshTimer?.Dispose();
+        _refreshTimer = null;
+    }
+
+    public void Dispose()
+    {
+        ChatUnreadState.Changed -= OnUnreadChanged;
+        StopUnreadRefreshLoop();
     }
 }

@@ -14,6 +14,8 @@ namespace APIDeliveryCRM.Services;
 public class ReportService : IReportService
 {
     private readonly ContextDB _context;
+    private const double FuelLitersPer100Km = 10.0;
+    private const double OptimizationSavingsFactor = 0.12;
 
     public ReportService(ContextDB context)
     {
@@ -35,6 +37,20 @@ public class ReportService : IReportService
         var bytes = FinanceReportExcelBuilder.Build(built.Dto!);
         var fileName = $"finance-report-{built.Dto!.PeriodFromUtc:yyyy-MM-dd}-{built.Dto.PeriodToUtc:yyyy-MM-dd}.xlsx";
         return new FileContentResult(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        {
+            FileDownloadName = fileName
+        };
+    }
+
+    public async Task<IActionResult> ExportFinancePdfAsync(int companyId, DateTime? fromUtc, DateTime? toUtc)
+    {
+        var built = await BuildFinanceDashboardAsync(companyId, fromUtc, toUtc);
+        if (built.Error != null)
+            return built.Error;
+
+        var bytes = FinanceReportPdfBuilder.Build(built.Dto!);
+        var fileName = $"finance-report-{built.Dto!.PeriodFromUtc:yyyy-MM-dd}-{built.Dto.PeriodToUtc:yyyy-MM-dd}.pdf";
+        return new FileContentResult(bytes, "application/pdf")
         {
             FileDownloadName = fileName
         };
@@ -121,6 +137,19 @@ public class ReportService : IReportService
         var lateCount = withDuration.Count(o => (o.Delivered_at!.Value - o.Created_at) > lateLimit);
         dto.LatePercent = withDuration.Count > 0
             ? lateCount * 100.0 / withDuration.Count
+            : 0;
+
+        var routedDistanceKm = deliveredInPeriod
+            .Select(EstimateOrderDistanceKm)
+            .Where(x => x > 0)
+            .Sum();
+        var baselineDistanceKm = routedDistanceKm * (1.0 + OptimizationSavingsFactor);
+        var savedDistanceKm = Math.Max(0, baselineDistanceKm - routedDistanceKm);
+        dto.FuelConsumptionLitersPer100Km = FuelLitersPer100Km;
+        dto.EstimatedFuelUsedLiters = routedDistanceKm * FuelLitersPer100Km / 100.0;
+        dto.EstimatedFuelSavedLiters = savedDistanceKm * FuelLitersPer100Km / 100.0;
+        dto.EstimatedFuelSavingsPercent = baselineDistanceKm > 0
+            ? savedDistanceKm * 100.0 / baselineDistanceKm
             : 0;
 
         dto.OrdersByDay = BuildOrdersByDay(ordersCreated, from, to);
@@ -265,4 +294,30 @@ public class ReportService : IReportService
                || s.Contains("заказ")
                || s.Contains("успеш");
     }
+
+    private static double EstimateOrderDistanceKm(Order order)
+    {
+        var pLat = order.PickupAddress?.Latitude;
+        var pLon = order.PickupAddress?.Longitude;
+        var dLat = order.DeliveryAddress?.Latitude;
+        var dLon = order.DeliveryAddress?.Longitude;
+        if (!pLat.HasValue || !pLon.HasValue || !dLat.HasValue || !dLon.HasValue)
+            return 0;
+        return HaversineKm((double)pLat.Value, (double)pLon.Value, (double)dLat.Value, (double)dLon.Value) * 1.18;
+    }
+
+    private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double EarthRadiusKm = 6371.0;
+        var dLat = DegreesToRadians(lat2 - lat1);
+        var dLon = DegreesToRadians(lon2 - lon1);
+        var a =
+            Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+            Math.Cos(DegreesToRadians(lat1)) * Math.Cos(DegreesToRadians(lat2)) *
+            Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+        return EarthRadiusKm * c;
+    }
+
+    private static double DegreesToRadians(double deg) => deg * Math.PI / 180.0;
 }

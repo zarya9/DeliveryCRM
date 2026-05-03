@@ -1,0 +1,143 @@
+.auth-shell {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: radial-gradient(1000px 500px at 10% 10%, rgba(13, 110, 253, 0.16), transparent 70%),
+                radial-gradient(800px 400px at 90% 100%, rgba(25, 135, 84, 0.14), transparent 70%),
+                #f5f7fb;
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 540px;
+    background: #fff;
+    border-radius: 1rem;
+    box-shadow: 0 18px 40px rgba(24, 32, 56, 0.12);
+    padding: 1.5rem;
+    color: #1f2d3d;
+}
+
+.auth-card-head h1 {
+    margin: 0;
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: #1f2d3d;
+}
+
+.auth-card-head p {
+    margin: 0.35rem 0 1rem;
+    color: #5f6b7a;
+}
+
+.auth-segment {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.35rem;
+    margin-bottom: 1rem;
+    background: #eff2f8;
+    padding: 0.3rem;
+    border-radius: 0.7rem;
+}
+
+.auth-segment-btn {
+    border: none;
+    border-radius: 0.55rem;
+    background: transparent;
+    padding: 0.55rem 0.6rem;
+    font-weight: 600;
+    color: #5f6b7a;
+}
+
+.auth-segment-btn.active {
+    background: #fff;
+    color: #1f2d3d;
+    box-shadow: 0 2px 7px rgba(0, 0, 0, 0.1);
+}
+
+.auth-card .form-label {
+    color: #3c4b5f;
+    font-weight: 600;
+}
+
+.auth-card .form-control,
+.auth-card .form-select {
+    background: #ffffff;
+    color: #1f2d3d;
+    border: 1px solid #ced6e3;
+}
+
+.auth-card .form-control::placeholder {
+    color: #8b98ac;
+}
+
+[data-theme="dark"] .auth-card {
+    background: #1f2632;
+    color: #e8eef9;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="dark"] .auth-card-head h1,
+[data-theme="dark"] .auth-card .form-label {
+    color: #e8eef9;
+}
+
+[data-theme="dark"] .auth-card-head p {
+    color: #c3d0e4;
+}
+
+[data-theme="dark"] .auth-segment {
+    background: #2a3444;
+}
+
+[data-theme="dark"] .auth-segment-btn {
+    color: #d0ddf0;
+}
+
+[data-theme="dark"] .auth-segment-btn.active {
+    background: #3c4960;
+    color: #ffffff;
+}
+
+[data-theme="dark"] .auth-choice {
+    background: #273142;
+    border-color: #3a465c;
+}
+
+[data-theme="dark"] .auth-card .form-control,
+[data-theme="dark"] .auth-card .form-select {
+    background: #222a37;
+    color: #e8eef9;
+    border-color: #3a465c;
+}
+
+[data-theme="dark"] .auth-card .form-control::placeholder {
+    color: #9eabc0;
+}
+
+.auth-register-type {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.auth-choice {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid #dee4ef;
+    border-radius: 0.6rem;
+    background: #fafcff;
+}
+
+@media (max-width: 576px) {
+    .auth-card {
+        padding: 1rem;
+        border-radius: 0.75rem;
+    }
+
+    .auth-card-head h1 {
+        font-size: 1.4rem;
+    }
+}

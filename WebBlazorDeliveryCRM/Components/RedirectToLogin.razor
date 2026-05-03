@@ -1,10 +1,19 @@
 @inject NavigationManager Navigation
 
-<p>Перенаправление на страницу входа… <a href="/">Войти</a></p>
+<p>Перенаправление на страницу входа… <a href="/login">Войти</a></p>
 
 @code {
     protected override void OnInitialized()
     {
-        Navigation.NavigateTo("/", forceLoad: true);
+        var relative = Navigation.ToBaseRelativePath(Navigation.Uri);
+        var path = "/" + relative.TrimStart('/');
+        if (path.StartsWith("/login", StringComparison.OrdinalIgnoreCase))
+        {
+            Navigation.NavigateTo("/login", forceLoad: true);
+            return;
+        }
+
+        var returnUrl = Uri.EscapeDataString(path);
+        Navigation.NavigateTo($"/login?ReturnUrl={returnUrl}", forceLoad: true);
     }
 }

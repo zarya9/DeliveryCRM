@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
+using APIDeliveryCRM.Helpers;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
@@ -14,11 +15,13 @@ namespace APIDeliveryCRM.Services
     {
         private readonly ContextDB _context;
         private readonly IAuditService _audit;
+        private readonly IShiftService _shifts;
 
-        public CourierService(ContextDB context, IAuditService audit)
+        public CourierService(ContextDB context, IAuditService audit, IShiftService shifts)
         {
             _context = context;
             _audit = audit;
+            _shifts = shifts;
         }
 
         public async Task<CourierProfile> GetProfileAsync(int courierProfileId)
@@ -45,6 +48,9 @@ namespace APIDeliveryCRM.Services
 
         public async Task<IReadOnlyList<CourierProfile>> GetAllAsync(int? companyId = null)
         {
+            if (companyId.HasValue)
+                await SyncMissingCourierProfilesForCompanyAsync(companyId.Value);
+
             var query = _context.CourierProfiles
                 .Include(c => c.User)
                 .Include(c => c.CourierStatus)
@@ -56,6 +62,66 @@ namespace APIDeliveryCRM.Services
             return await query.ToListAsync();
         }
 
+        /// <summary>Создаёт профиль курьера для сотрудников с ролью «Курьер», добавленных без RegisterCourier.</summary>
+        private async Task SyncMissingCourierProfilesForCompanyAsync(int companyId)
+        {
+            var courierRoleId = await _context.Roles.AsNoTracking()
+                .Where(r => r.Name == "Курьер")
+                .Select(r => r.ID_Role)
+                .FirstOrDefaultAsync();
+            if (courierRoleId == 0)
+                return;
+
+            var courierUserIds = await _context.Users.AsNoTracking()
+                .Where(u => u.Company_id == companyId && u.Is_Active && u.Role_id == courierRoleId)
+                .Select(u => u.ID_User)
+                .ToListAsync();
+
+            var usersWithProfile = await _context.CourierProfiles.AsNoTracking()
+                .Where(cp => cp.Company_id == companyId)
+                .Select(cp => cp.User_id)
+                .ToListAsync();
+
+            var missingUserIds = courierUserIds.Where(id => !usersWithProfile.Contains(id)).ToList();
+            if (missingUserIds.Count == 0)
+                return;
+
+            var defaultCategory = await _context.VehicleCategories.OrderBy(c => c.ID_Category).FirstOrDefaultAsync();
+            var defaultSchedule = await _context.ScheduleTypes.OrderBy(s => s.ID_SheduleType).FirstOrDefaultAsync();
+            if (defaultCategory == null || defaultSchedule == null)
+                return;
+
+            var defaultStatus = await _context.CourierStatuses.FirstOrDefaultAsync(s => s.Name == "Не на смене");
+            if (defaultStatus == null)
+            {
+                defaultStatus = new CourierStatus { Name = "Не на смене", Description = "Курьер не на смене" };
+                _context.CourierStatuses.Add(defaultStatus);
+                await _context.SaveChangesAsync();
+            }
+
+            foreach (var uid in missingUserIds)
+            {
+                var user = await _context.Users.FirstAsync(u => u.ID_User == uid);
+                var profile = new CourierProfile
+                {
+                    Company_id = companyId,
+                    User_id = uid,
+                    VehicleCategory_id = defaultCategory.ID_Category,
+                    WorkSchedule_id = defaultSchedule.ID_SheduleType,
+                    CurrentStatus_id = defaultStatus.ID_CourierStatus,
+                    Total_deliveries = 0,
+                    Current_lat = 0,
+                    Current_lon = 0,
+                    Rating = 0,
+                    Is_online = false,
+                    LastActivity_at = System.DateTime.UtcNow
+                };
+                _context.CourierProfiles.Add(profile);
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
         public async Task<IReadOnlyList<Order>> GetActiveOrdersAsync(int courierProfileId)
         {
             return await _context.Orders
@@ -65,8 +131,59 @@ namespace APIDeliveryCRM.Services
                 .ToListAsync();
         }
 
+        public async Task EnsureCourierProfileForUserAsync(int userId, int companyId)
+        {
+            var courierRoleId = await _context.Roles.AsNoTracking()
+                .Where(r => r.Name == "Курьер")
+                .Select(r => r.ID_Role)
+                .FirstOrDefaultAsync();
+            if (courierRoleId == 0)
+                return;
+
+            var user = await _context.Users.AsNoTracking()
+                .FirstOrDefaultAsync(u => u.ID_User == userId && u.Company_id == companyId && u.Role_id == courierRoleId);
+            if (user == null)
+                return;
+
+            if (await _context.CourierProfiles.AnyAsync(c => c.User_id == userId))
+                return;
+
+            var defaultCategory = await _context.VehicleCategories.OrderBy(c => c.ID_Category).FirstOrDefaultAsync();
+            var defaultSchedule = await _context.ScheduleTypes.OrderBy(s => s.ID_SheduleType).FirstOrDefaultAsync();
+            if (defaultCategory == null || defaultSchedule == null)
+                return;
+
+            var defaultStatus = await _context.CourierStatuses.FirstOrDefaultAsync(s => s.Name == "Не на смене");
+            if (defaultStatus == null)
+            {
+                defaultStatus = new CourierStatus { Name = "Не на смене", Description = "Курьер не на смене" };
+                _context.CourierStatuses.Add(defaultStatus);
+                await _context.SaveChangesAsync();
+            }
+
+            _context.CourierProfiles.Add(new CourierProfile
+            {
+                Company_id = companyId,
+                User_id = userId,
+                VehicleCategory_id = defaultCategory.ID_Category,
+                WorkSchedule_id = defaultSchedule.ID_SheduleType,
+                CurrentStatus_id = defaultStatus.ID_CourierStatus,
+                Total_deliveries = 0,
+                Current_lat = 0,
+                Current_lon = 0,
+                Rating = 0,
+                Is_online = false,
+                LastActivity_at = System.DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync();
+        }
+
         public async Task UpdateLocationAsync(int courierProfileId, decimal lat, decimal lon)
         {
+            var active = await _shifts.GetActiveShiftAsync(courierProfileId);
+            if (active == null)
+                throw new InvalidOperationException("Передача координат доступна только во время активной смены.");
+
             var courier = await _context.CourierProfiles
                 .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId);
             if (courier == null)
@@ -87,6 +204,13 @@ namespace APIDeliveryCRM.Services
             if (courier == null)
             {
                 return;
+            }
+
+            if (isOnline)
+            {
+                var active = await _shifts.GetActiveShiftAsync(courierProfileId);
+                if (active == null)
+                    throw new InvalidOperationException("Выйти «в сеть» можно только после начала смены.");
             }
 
             courier.Is_online = isOnline;
@@ -159,23 +283,31 @@ namespace APIDeliveryCRM.Services
         {
             if (string.IsNullOrWhiteSpace(dto.License_plate))
                 throw new InvalidOperationException("Укажите гос. номер.");
-            if (string.IsNullOrWhiteSpace(dto.VIN))
-                throw new InvalidOperationException("Укажите VIN.");
+            if (!VinHelper.IsValid(dto.VIN, out var vinError))
+                throw new InvalidOperationException(vinError ?? "Некорректный VIN.");
 
             var category = await _context.VehicleCategories.AsNoTracking().FirstOrDefaultAsync(c => c.ID_Category == dto.Category_id);
             if (category == null)
                 throw new InvalidOperationException("Категория ТС не найдена.");
 
+            var brandName = (dto.Brand_name ?? string.Empty).Trim();
+            var modelName = (dto.Model_name ?? string.Empty).Trim();
+            var year = dto.Year;
+
             if (dto.Model_id is int catalogModelId && catalogModelId > 0)
             {
-                var exists = await _context.VehicleModels.AsNoTracking().AnyAsync(m => m.ID_Model == catalogModelId);
-                if (!exists)
+                var catalogModel = await _context.VehicleModels.AsNoTracking()
+                    .Include(m => m.VehicleBrand)
+                    .FirstOrDefaultAsync(m => m.ID_Model == catalogModelId);
+                if (catalogModel == null)
                     throw new InvalidOperationException("Модель ТС из справочника не найдена.");
+                brandName = (catalogModel.VehicleBrand?.Name ?? brandName).Trim();
+                modelName = (catalogModel.Name ?? modelName).Trim();
+                year = catalogModel.Year;
             }
-            else
+            else if (string.IsNullOrWhiteSpace(brandName) || string.IsNullOrWhiteSpace(modelName))
             {
-                if (string.IsNullOrWhiteSpace(dto.Brand_name) || string.IsNullOrWhiteSpace(dto.Model_name))
-                    throw new InvalidOperationException("Укажите марку и модель ТС (вручную) или выберите модель из справочника.");
+                throw new InvalidOperationException("Укажите марку и модель ТС (вручную) или выберите модель из справочника.");
             }
 
             var body = await _context.VehicleBodyTypes.AsNoTracking().FirstOrDefaultAsync(b => b.ID_BodyType == dto.BodyType_id);
@@ -200,12 +332,12 @@ namespace APIDeliveryCRM.Services
             {
                 Company_id = companyId,
                 License_plate = dto.License_plate.Trim(),
-                VIN = dto.VIN.Trim(),
+                VIN = dto.VIN.Trim().ToUpperInvariant(),
                 Category_id = dto.Category_id,
                 Model_id = dto.Model_id is int mid && mid > 0 ? mid : null,
-                Brand_name = (dto.Brand_name ?? string.Empty).Trim(),
-                Model_name = (dto.Model_name ?? string.Empty).Trim(),
-                Year = dto.Year,
+                Brand_name = brandName,
+                Model_name = modelName,
+                Year = year,
                 Color = dto.Color ?? string.Empty,
                 BodyType_id = dto.BodyType_id,
                 Cargo_volume = dto.Cargo_volume,
@@ -248,12 +380,14 @@ namespace APIDeliveryCRM.Services
             return entity;
         }
 
-        public async Task UpdateCourierDocumentsAsync(int courierProfileId, string? driverLicense, string? passportData)
+        public async Task UpdateCourierDocumentsAsync(int courierProfileId, int companyId, string? driverLicense, string? passportData)
         {
             var courier = await _context.CourierProfiles
                 .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId);
             if (courier == null)
                 throw new KeyNotFoundException("Курьер не найден.");
+            if (courier.Company_id != companyId)
+                throw new InvalidOperationException("Нет доступа к этому профилю курьера.");
 
             courier.DriverLicense = string.IsNullOrWhiteSpace(driverLicense) ? null : driverLicense.Trim();
             courier.Passport_data = string.IsNullOrWhiteSpace(passportData) ? null : passportData.Trim();

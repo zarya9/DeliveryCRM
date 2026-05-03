@@ -9,8 +9,8 @@ namespace APIDeliveryCRM.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Менеджер,Админ")]
-public class CompanySettingsController : ControllerBase
+[Authorize(Roles = "Менеджер,Администратор,Админ")]
+public class CompanySettingsController : Controller
 {
     private readonly ICompanySettingsService _companySettingsService;
 
@@ -69,7 +69,8 @@ public class CompanySettingsController : ControllerBase
     private bool IsAdmin()
     {
         var role = User.FindFirst(ClaimTypes.Role)?.Value ?? User.FindFirst("role")?.Value;
-        return string.Equals(role, "Админ", System.StringComparison.OrdinalIgnoreCase);
+        return string.Equals(role, "Админ", System.StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, "Администратор", System.StringComparison.OrdinalIgnoreCase);
     }
 }
 

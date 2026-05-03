@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -25,8 +26,14 @@ namespace APIDeliveryCRM.Services
                 return activeShift;
             }
 
+            var courier = await _context.CourierProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId);
+            if (courier == null)
+                throw new KeyNotFoundException("Профиль курьера не найден.");
+
             var shift = new CourierShift
             {
+                Company_id = courier.Company_id,
                 Courier_id = courierProfileId,
                 Date = System.DateOnly.FromDateTime(System.DateTime.UtcNow),
                 TimeStart = System.DateTime.UtcNow,
@@ -52,7 +59,16 @@ namespace APIDeliveryCRM.Services
             return true;
         }
 
-        public async Task<CourierShift> GetActiveShiftAsync(int courierProfileId)
+        public async Task<CourierShift?> GetByIdAsync(int shiftId)
+        {
+            return await _context.CourierShifts
+                .Include(s => s.CourierProfile)
+                .ThenInclude(c => c.User)
+                .Include(s => s.ShiftStatus)
+                .FirstOrDefaultAsync(s => s.ID_Shift == shiftId);
+        }
+
+        public async Task<CourierShift?> GetActiveShiftAsync(int courierProfileId)
         {
             return await _context.CourierShifts
                 .Include(s => s.CourierProfile)

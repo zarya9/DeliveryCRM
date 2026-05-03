@@ -9,8 +9,8 @@ namespace APIDeliveryCRM.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Менеджер,Админ")]
-public class ReportsController : ControllerBase
+[Authorize(Roles = "Менеджер,Администратор,Админ,Логист")]
+public class ReportsController : Controller
 {
     private readonly IReportService _reportService;
 
@@ -49,6 +49,21 @@ public class ReportsController : ControllerBase
         return await _reportService.ExportFinanceExcelAsync(resolvedCompanyId, from, to);
     }
 
+    [HttpGet("finance/export-pdf")]
+    public async Task<IActionResult> ExportFinancePdf(
+        [FromQuery] int? companyId = null,
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null)
+    {
+        var resolvedCompanyId = ResolveCompanyId(companyId, out var forbidden);
+        if (forbidden)
+            return new ForbidResult();
+        if (resolvedCompanyId <= 0)
+            return new BadRequestObjectResult(new { message = "Не удалось определить компанию." });
+
+        return await _reportService.ExportFinancePdfAsync(resolvedCompanyId, from, to);
+    }
+
     private int ResolveCompanyId(int? requestedCompanyId, out bool forbidden)
     {
         forbidden = false;
@@ -75,6 +90,7 @@ public class ReportsController : ControllerBase
     private bool IsAdmin()
     {
         var role = User.FindFirst(ClaimTypes.Role)?.Value ?? User.FindFirst("role")?.Value;
-        return string.Equals(role, "Админ", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(role, "Админ", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, "Администратор", StringComparison.OrdinalIgnoreCase);
     }
 }

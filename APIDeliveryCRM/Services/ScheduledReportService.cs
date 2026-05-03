@@ -160,7 +160,7 @@ namespace APIDeliveryCRM.Services
         {
             var id = await _context.Users
                 .AsNoTracking()
-                .Where(u => u.Company_id == companyId && (u.Role.Name == "Менеджер" || u.Role.Name == "Админ"))
+                .Where(u => u.Company_id == companyId && (u.Role.Name == "Менеджер" || u.Role.Name == "Админ" || u.Role.Name == "Администратор"))
                 .Select(u => u.ID_User)
                 .FirstOrDefaultAsync(ct);
             if (id != 0) return id;

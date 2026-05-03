@@ -18,7 +18,13 @@ public class ChatApiService
     {
         using var stream = await _http.GetStreamAsync($"/api/Chat/rooms/{roomId}/messages?skip={skip}&take={take}");
         var list = await JsonSerializer.DeserializeAsync<List<ChatMessageDto>>(stream, JsonOptions);
-        return list ?? new List<ChatMessageDto>();
+        if (list is null)
+            return new List<ChatMessageDto>();
+
+        foreach (var message in list)
+            message.AttachmentUrl = NormalizeAttachmentUrl(message.AttachmentUrl);
+
+        return list;
     }
 
     public async Task<List<ChatRoomListItemDto>> GetRoomsListAsync()
@@ -48,7 +54,7 @@ public class ChatApiService
 
     public async Task<bool> SendMessageAsync(int roomId, string text, string? attachmentUrl = null)
     {
-        var res = await _http.PostAsJsonAsync($"/api/Chat/messages?chatRoomId={roomId}", new { messageText = text, attachmentUrl });
+        var res = await _http.PostAsJsonAsync($"/api/Chat/messages?chatRoomId={roomId}", new { messageText = text, attachmentUrl = NormalizeAttachmentUrl(attachmentUrl) });
         return res.IsSuccessStatusCode;
     }
 
@@ -73,12 +79,29 @@ public class ChatApiService
 
             var payload = await JsonSerializer.DeserializeAsync<UploadAttachmentResponse>(
                 await response.Content.ReadAsStreamAsync(), JsonOptions);
-            return (true, payload?.Path, null);
+            return (true, NormalizeAttachmentUrl(payload?.Path), null);
         }
         catch
         {
             return (false, null, "Ошибка загрузки файла.");
         }
+    }
+
+    private string? NormalizeAttachmentUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return null;
+
+        if (Uri.TryCreate(url, UriKind.Absolute, out _))
+            return url;
+
+        if (_http.BaseAddress is null)
+            return url;
+
+        if (!url.StartsWith('/'))
+            url = "/" + url;
+
+        return new Uri(_http.BaseAddress, url).ToString();
     }
 
     public async Task<bool> EditMessageAsync(int messageId, string text)
@@ -90,6 +113,19 @@ public class ChatApiService
     public async Task<bool> DeleteMessageAsync(int messageId)
     {
         var res = await _http.DeleteAsync($"/api/Chat/messages/{messageId}");
+        return res.IsSuccessStatusCode;
+    }
+
+    public async Task<int> GetUnreadCountAsync(int roomId)
+    {
+        using var stream = await _http.GetStreamAsync($"/api/Chat/rooms/{roomId}/unread");
+        var payload = await JsonSerializer.DeserializeAsync<UnreadCountResponse>(stream, JsonOptions);
+        return payload?.UnreadCount ?? 0;
+    }
+
+    public async Task<bool> MarkAllAsReadAsync(int roomId)
+    {
+        var res = await _http.PostAsync($"/api/Chat/rooms/{roomId}/read-all", null);
         return res.IsSuccessStatusCode;
     }
 
@@ -123,10 +159,16 @@ public class ChatMessageDto
     public int ChatRoom_id { get; set; }
     public int Sender_id { get; set; }
     public string MessageText { get; set; } = "";
+    public string? SenderName { get; set; }
     public string? AttachmentUrl { get; set; }
     public DateTime Sent_at { get; set; }
     public DateTime? Edited_at { get; set; }
     public bool Is_deleted { get; set; }
+}
+
+public sealed class UnreadCountResponse
+{
+    public int UnreadCount { get; set; }
 }
 
 public sealed class UploadAttachmentResponse
@@ -163,6 +205,7 @@ public sealed class ChatRoomListItemDto
     public int? PeerUserId { get; set; }
     public string? LastMessageText { get; set; }
     public DateTime? LastMessageAt { get; set; }
+    public int UnreadCount { get; set; }
 }
 
 public sealed class EnsureRoomResponse

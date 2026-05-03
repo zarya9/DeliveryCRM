@@ -19,7 +19,7 @@
 
         var url = role switch
         {
-            "Менеджер" or "Админ" => "/manager/chat",
+            "Менеджер" or "Админ" or "Администратор" => "/manager/chat",
             "Логист" => "/logistician/chat",
             "Клиент" => "/customer/chat",
             _ => "/manager/chat"

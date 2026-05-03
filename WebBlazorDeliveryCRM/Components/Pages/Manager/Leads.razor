@@ -74,7 +74,7 @@
                 <label class="form-label">Источник</label>
                 <select class="form-select" @bind="_selectedSourceId">
                     <option value="0">— выберите источник —</option>
-                    @foreach (var s in _meta?.Sources ?? new List<IdNameDto>())
+                    @foreach (var s in _meta?.Sources ?? new List<LeadsApiService.IdNameDto>())
                     {
                         <option value="@s.Id">@s.Name</option>
                     }
@@ -84,7 +84,7 @@
                 <label class="form-label">Стадия</label>
                 <select class="form-select" @bind="_selectedStageId">
                     <option value="0">— выберите стадию —</option>
-                    @foreach (var s in _meta?.Stages ?? new List<IdNameDto>())
+                    @foreach (var s in _meta?.Stages ?? new List<LeadsApiService.IdNameDto>())
                     {
                         <option value="@s.Id">@s.Name</option>
                     }

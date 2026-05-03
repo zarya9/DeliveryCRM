@@ -9,8 +9,8 @@ namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize(Roles = "Админ")]
-    public class AuditLogsController : ControllerBase
+    [Authorize(Roles = "Администратор,Админ")]
+    public class AuditLogsController : Controller
     {
         private readonly ContextDB _db;
 

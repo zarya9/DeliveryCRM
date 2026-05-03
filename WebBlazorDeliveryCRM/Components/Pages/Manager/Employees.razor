@@ -1,4 +1,5 @@
 @page "/manager/employees"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Менеджер,Администратор,Админ")]
 @layout ManagerLayout
 @implements IDisposable
 @using System.Security.Claims
@@ -156,7 +157,13 @@
                         <p class="mb-1"><strong>Email:</strong> @_selectedEmployee.Email</p>
                     }
                     <p class="mb-1"><strong>Создан:</strong> @_selectedEmployee.Created_at.ToString("dd.MM.yyyy HH:mm")</p>
-                    <button type="button" class="btn btn-outline-primary mt-2" @onclick="GoToChat">Написать</button>
+                    <div class="d-flex gap-2 mt-2">
+                        <button type="button" class="btn btn-outline-primary" @onclick="GoToChat">Написать</button>
+                        @if (_selectedEmployee.Id != _currentUserId)
+                        {
+                            <button type="button" class="btn btn-outline-danger" @onclick="FireSelectedEmployeeAsync">Уволить</button>
+                        }
+                    </div>
                 </div>
             </div>
         </div>
@@ -369,6 +376,24 @@
     private void CloseEmployee()
     {
         _selectedEmployee = null;
+    }
+
+    private async Task FireSelectedEmployeeAsync()
+    {
+        if (_selectedEmployee is null)
+            return;
+        var targetId = _selectedEmployee.Id;
+        var ok = await EmployeesApi.FireAsync(targetId, _companyId);
+        if (!ok)
+        {
+            Notify.ShowError("Не удалось уволить сотрудника.");
+            return;
+        }
+
+        Notify.ShowSuccess("Сотрудник уволен и скрыт из активного списка.");
+        CloseEmployee();
+        await LoadEmployees();
+        StateHasChanged();
     }
 
     private static string GetRoleTone(string? role)

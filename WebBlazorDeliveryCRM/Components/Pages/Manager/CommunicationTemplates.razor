@@ -3,6 +3,7 @@
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
 @inject CommunicationTemplatesApiService Api
+@inject OrdersApiService OrdersApi
 
 <PageTitle>Шаблоны коммуникаций</PageTitle>
 
@@ -19,8 +20,14 @@
             <input class="form-control" @bind="_model.Code" placeholder="ORDER_STATUS_CHANGED" />
         </div>
         <div class="col-md-4">
-            <label class="form-label">Trigger Status ID (опц.)</label>
-            <input class="form-control" type="number" @bind="_model.TriggerStatus_id" />
+            <label class="form-label">Статус заказа-триггер (опц.)</label>
+            <select class="form-select" value="@(_model.TriggerStatus_id?.ToString() ?? "")" @onchange="OnTriggerStatusChange">
+                <option value="">— не выбран —</option>
+                @foreach (var s in _orderStatuses)
+                {
+                    <option value="@s.Id">@s.Name</option>
+                }
+            </select>
         </div>
         <div class="col-md-4 d-flex align-items-end">
             <div class="form-check">
@@ -56,7 +63,7 @@
                 <thead>
                     <tr>
                         <th>Код</th>
-                        <th>Status ID</th>
+                        <th>Статус-триггер</th>
                         <th>Активен</th>
                         <th>Заголовок</th>
                         <th>Текст</th>
@@ -67,7 +74,7 @@
                     {
                         <tr>
                             <td>@t.Code</td>
-                            <td>@(t.TriggerStatus_id?.ToString() ?? "—")</td>
+                            <td>@TriggerStatusLabel(t.TriggerStatus_id)</td>
                             <td>@(t.Is_active ? "Да" : "Нет")</td>
                             <td>@t.TitleTemplate</td>
                             <td>@t.BodyTemplate</td>
@@ -89,9 +96,11 @@
     };
 
     private List<CommunicationTemplateDto> _items = new();
+    private List<OrderStatusOptionDto> _orderStatuses = new();
 
     protected override async Task OnInitializedAsync()
     {
+        _orderStatuses = await OrdersApi.GetOrderStatusesAsync();
         await Reload();
     }
 
@@ -99,6 +108,18 @@
     {
         _items = await Api.GetMineAsync();
         StateHasChanged();
+    }
+
+    private void OnTriggerStatusChange(ChangeEventArgs e)
+    {
+        var v = e.Value?.ToString();
+        _model.TriggerStatus_id = int.TryParse(v, out var id) ? id : null;
+    }
+
+    private string TriggerStatusLabel(int? id)
+    {
+        if (id is null) return "—";
+        return _orderStatuses.FirstOrDefault(s => s.Id == id)?.Name ?? id.Value.ToString();
     }
 
     private async Task SaveTemplate()

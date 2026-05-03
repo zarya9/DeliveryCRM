@@ -1,6 +1,6 @@
 @page "/manager/couriers/{CourierId:int}"
 @layout ManagerLayout
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Менеджер,Админ")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Менеджер,Администратор,Админ")]
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
 @inject CouriersApiService CouriersApi
@@ -44,7 +44,14 @@ else
                     <h2 class="dms-card-title mb-0">Документы и допуски</h2>
                     @if (!_editingDocs)
                     {
-                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => _editingDocs = true">Редактировать</button>
+                        @if (DocsIncomplete)
+                        {
+                            <button type="button" class="btn btn-sm btn-primary" @onclick="() => _editingDocs = true">Заполнить</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => _editingDocs = true">Редактировать</button>
+                        }
                     }
                     else
                     {
@@ -159,6 +166,10 @@ else
     private bool _savingDocs;
     private string _editDriverLicense = "";
     private string _editPassport = "";
+
+    private bool DocsIncomplete =>
+        _courier is not null &&
+        (string.IsNullOrWhiteSpace(_courier.DriverLicense) || string.IsNullOrWhiteSpace(_courier.Passport_data));
 
     protected override async Task OnParametersSetAsync()
     {

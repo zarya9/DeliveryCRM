@@ -16,6 +16,10 @@ public sealed class FinanceDashboardDto
     public double AvgDeliveryHours { get; set; }
     public double OnTimePercent { get; set; }
     public double LatePercent { get; set; }
+    public double FuelConsumptionLitersPer100Km { get; set; } = 10.0;
+    public double EstimatedFuelUsedLiters { get; set; }
+    public double EstimatedFuelSavedLiters { get; set; }
+    public double EstimatedFuelSavingsPercent { get; set; }
 
     public List<OrdersByDayRowDto> OrdersByDay { get; set; } = new();
     public List<StatusRowDto> StatusRows { get; set; } = new();

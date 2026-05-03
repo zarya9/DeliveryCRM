@@ -1,0 +1,133 @@
+@page "/customer/orders/history"
+@layout CustomerLayout
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@using System.Security.Claims
+@inject ClientsApiService ClientsApi
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>История заказов — Клиент</PageTitle>
+
+<div class="dms-page-header">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <a href="/customer/orders" class="btn btn-outline-secondary btn-sm">← К списку заказов</a>
+    </div>
+    <h1>История заказов</h1>
+    <p class="subtitle">Название, даты, статусы, оплата и суммы по всем заказам.</p>
+</div>
+
+<div class="dms-card">
+    @if (_orders != null && _orders.Count > 0)
+    {
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>№</th>
+                        <th>Название</th>
+                        <th>Создан</th>
+                        <th>Статус</th>
+                        <th>Оплата</th>
+                        <th>Сумма</th>
+                        <th>Приоритет</th>
+                        <th>Окно доставки</th>
+                        <th>Маршрут</th>
+                        <th>Доставлен</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var o in _orders.OrderByDescending(x => x.Created_at))
+                    {
+                        <tr>
+                            <td>@o.Order_Number</td>
+                            <td>@o.Name</td>
+                            <td>@o.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
+                            <td>@(o.OrderStatus?.Name ?? "—")</td>
+                            <td>
+                                @if (o.Is_paid)
+                                {
+                                    <span class="badge text-bg-success">Оплачен</span>
+                                }
+                                else
+                                {
+                                    <span class="badge text-bg-secondary">Не оплачен</span>
+                                }
+                            </td>
+                            <td>@(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost) ₽</td>
+                            <td>@PriorityLabel(o.Priority)</td>
+                            <td>@FormatDeliveryWindow(o)</td>
+                            <td>@FormatRouteKind(o.DeliveryRouteKind)</td>
+                            <td>@(o.Delivered_at.HasValue ? o.Delivered_at.Value.ToString("dd.MM.yyyy HH:mm") : "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (_loaded)
+    {
+        <p class="text-muted mb-0">Заказов пока нет.</p>
+    }
+    else
+    {
+        <p class="text-muted mb-0">Загрузка…</p>
+    }
+</div>
+
+@code {
+    private List<OrderDto>? _orders;
+    private bool _loaded;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userIdStr = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(userIdStr, out var userId))
+        {
+            _loaded = true;
+            StateHasChanged();
+            return;
+        }
+        var client = await ClientsApi.GetByUserIdAsync(userId);
+        if (client == null)
+        {
+            _loaded = true;
+            StateHasChanged();
+            return;
+        }
+        _orders = await ClientsApi.GetOrdersAsync(client.ID_ClientProfile) ?? new List<OrderDto>();
+        _loaded = true;
+        StateHasChanged();
+    }
+
+    private static string PriorityLabel(byte p) => p switch
+    {
+        2 => "Критический",
+        1 => "Срочный",
+        _ => "Обычный"
+    };
+
+    private static string FormatRouteKind(string? k) => string.IsNullOrWhiteSpace(k) ? "—" : k switch
+    {
+        "LocalUrban" => "Город",
+        "ViaHub" => "Через хаб",
+        "DirectIntercity" => "Межгород",
+        _ => k
+    };
+
+    private static string FormatDeliveryWindow(OrderDto o)
+    {
+        var from = o.Eta_at;
+        var to = o.Sla_due_at;
+        if (!from.HasValue && !to.HasValue)
+            return "—";
+        if (!from.HasValue)
+            return $"до {to:dd.MM.yyyy}";
+        if (!to.HasValue)
+            return $"с {from:dd.MM.yyyy}";
+        if (from.Value.Date == to.Value.Date)
+            return from.Value.ToString("dd.MM.yyyy");
+        return $"с {from:dd.MM} по {to:dd.MM}";
+    }
+}

@@ -7,6 +7,7 @@ namespace WebBlazorDeliveryCRM.Services;
 
 public class VehiclesApiService
 {
+    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
     private readonly HttpClient _http;
 
     public VehiclesApiService(IHttpClientFactory factory)
@@ -20,6 +21,30 @@ public class VehiclesApiService
         if (!resp.IsSuccessStatusCode)
             return null;
         return await resp.Content.ReadFromJsonAsync<VehicleFormLookupsDto>();
+    }
+
+    public async Task<List<IdNameDto>> GetCatalogBrandsAsync()
+    {
+        var resp = await _http.GetAsync("/api/Vehicles/catalog/brands");
+        if (!resp.IsSuccessStatusCode)
+            return new List<IdNameDto>();
+        await using var stream = await resp.Content.ReadAsStreamAsync();
+        var list = await JsonSerializer.DeserializeAsync<List<IdNameDto>>(stream, JsonOpts);
+        return list ?? new List<IdNameDto>();
+    }
+
+    /// <param name="brandId">Если null или ≤ 0 — все модели с полями марки; иначе только эта марка.</param>
+    public async Task<List<VehicleCatalogModelDto>> GetCatalogModelsAsync(int? brandId = null)
+    {
+        var url = brandId is > 0
+            ? $"/api/Vehicles/catalog/models?brandId={brandId.Value}"
+            : "/api/Vehicles/catalog/models";
+        var resp = await _http.GetAsync(url);
+        if (!resp.IsSuccessStatusCode)
+            return new List<VehicleCatalogModelDto>();
+        await using var stream = await resp.Content.ReadAsStreamAsync();
+        var list = await JsonSerializer.DeserializeAsync<List<VehicleCatalogModelDto>>(stream, JsonOpts);
+        return list ?? new List<VehicleCatalogModelDto>();
     }
 
     public async Task<(bool ok, string? error, int? id)> CreateVehicleAsync(CreateVehicleApiRequest body)

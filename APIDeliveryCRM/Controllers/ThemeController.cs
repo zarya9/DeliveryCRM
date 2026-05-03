@@ -1,12 +1,14 @@
 using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Request;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace APIDeliveryCRM.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
     public class ThemeController : Controller
     {
         private readonly IThemeService _themeService;

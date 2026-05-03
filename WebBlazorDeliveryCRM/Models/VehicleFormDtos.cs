@@ -13,6 +13,24 @@ public class IdNameDto
     public string? Name { get; set; }
 }
 
+/// <summary>Модель из справочника VehicleModels (ответ GET catalog/models).</summary>
+public class VehicleCatalogModelDto
+{
+    public int Id { get; set; }
+    public int BrandId { get; set; }
+    public string? BrandName { get; set; }
+    public string? Name { get; set; }
+    public DateOnly Year { get; set; }
+    public decimal AvgFuelCity { get; set; }
+    public decimal AvgFuelHighWay { get; set; }
+    public decimal EngineCapacity { get; set; }
+    public int HorsePower { get; set; }
+    public int TransmissionTypeId { get; set; }
+    public int DriveTypeId { get; set; }
+    public string? TransmissionTypeName { get; set; }
+    public string? DriveTypeName { get; set; }
+}
+
 /// <summary>Тело POST /api/Vehicles — совпадает с API.</summary>
 public class CreateVehicleApiRequest
 {

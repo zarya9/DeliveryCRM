@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -7,6 +8,7 @@ using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.RegularExpressions;
 
 namespace APIDeliveryCRM.Services
 {
@@ -50,10 +52,27 @@ namespace APIDeliveryCRM.Services
 
         public async Task<IActionResult> UpdateProfileAsync(int clientProfileId, UpdateClientProfileRequest request)
         {
-            var profile = await _context.ClientProfiles.FindAsync(clientProfileId);
+            var profile = await _context.ClientProfiles
+                .Include(x => x.User)
+                .FirstOrDefaultAsync(x => x.ID_ClientProfile == clientProfileId);
             if (profile == null)
             {
                 return new NotFoundObjectResult(new { message = "Профиль клиента не найден" });
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.FName))
+            {
+                profile.User.FName = request.FName.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Name))
+            {
+                profile.User.Name = request.Name.Trim();
+            }
+
+            if (request.Patronumic != null)
+            {
+                profile.User.Patronumic = string.IsNullOrWhiteSpace(request.Patronumic) ? null : request.Patronumic.Trim();
             }
 
             if (!string.IsNullOrEmpty(request.Default_address))
@@ -73,6 +92,137 @@ namespace APIDeliveryCRM.Services
 
             await _context.SaveChangesAsync();
             return new OkObjectResult(new { message = "Профиль успешно обновлен", profile });
+        }
+
+        public async Task<IActionResult> GetPaymentMethodsAsync()
+        {
+            var methods = await _context.PaymentMethods
+                .AsNoTracking()
+                .OrderBy(x => x.Name)
+                .Select(x => new { x.ID_PaymentMethod, x.Name })
+                .ToListAsync();
+
+            return new OkObjectResult(methods);
+        }
+
+        public async Task<IActionResult> BindCardAsync(int clientProfileId, BindClientCardRequest request)
+        {
+            var profile = await _context.ClientProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.ID_ClientProfile == clientProfileId);
+            if (profile == null)
+                return new NotFoundObjectResult(new { message = "Профиль клиента не найден" });
+
+            var author = await _context.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.ID_User == profile.User_id);
+            if (author == null)
+                return new BadRequestObjectResult(new { message = "Не найден пользователь клиента." });
+
+            var digits = new string((request.CardNumber ?? string.Empty).Where(char.IsDigit).ToArray());
+            if (digits.Length < 16 || digits.Length > 19)
+                return new BadRequestObjectResult(new { message = "Некорректный номер карты." });
+
+            var masked = $"**** **** **** {digits[^4..]}";
+            var expiry = (request.Expiry ?? string.Empty).Trim();
+            var holder = (request.CardHolder ?? string.Empty).Trim();
+            var cvv = (request.Cvv ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(expiry) || string.IsNullOrWhiteSpace(holder) || string.IsNullOrWhiteSpace(cvv))
+                return new BadRequestObjectResult(new { message = "Укажите срок действия, имя владельца и CVV." });
+            if (!Regex.IsMatch(expiry, "^(0[1-9]|1[0-2])\\/\\d{2}$"))
+                return new BadRequestObjectResult(new { message = "Срок действия укажите в формате MM/YY." });
+            if (!Regex.IsMatch(cvv, "^\\d{3,4}$"))
+                return new BadRequestObjectResult(new { message = "CVV должен содержать 3 или 4 цифры." });
+
+            var noteType = await EnsureCardNoteTypeAsync();
+            var token = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
+            // Не храним PAN/CVV, только маску + метаданные.
+            var payload = $"CARDV2|{masked}|{expiry}|{holder}|{token}";
+
+            var cardNote = new ClientNote
+            {
+                ClientProfile_id = clientProfileId,
+                Author_id = author.ID_User,
+                ClientNoteType_id = noteType.ID_ClientNoteType,
+                Text = payload,
+                Created_at = DateTime.UtcNow
+            };
+            _context.ClientNotes.Add(cardNote);
+
+            await _context.SaveChangesAsync();
+            return new OkObjectResult(new { message = "Карта успешно привязана", maskedCard = masked, expiry, cardHolder = holder });
+        }
+
+        public async Task<IActionResult> GetBoundCardAsync(int clientProfileId)
+        {
+            var noteType = await _context.ClientNoteTypes
+                .AsNoTracking()
+                .FirstOrDefaultAsync(t => t.Code == "CARD_BINDING");
+            if (noteType == null)
+                return new OkObjectResult(new { isBound = false });
+
+            var note = await _context.ClientNotes
+                .AsNoTracking()
+                .Where(n => n.ClientProfile_id == clientProfileId && n.ClientNoteType_id == noteType.ID_ClientNoteType)
+                .OrderByDescending(n => n.Created_at)
+                .FirstOrDefaultAsync();
+            if (note == null || string.IsNullOrWhiteSpace(note.Text))
+                return new OkObjectResult(new { isBound = false });
+
+            var parts = note.Text.Split('|');
+            if (parts.Length >= 5 && string.Equals(parts[0], "CARDV2", StringComparison.OrdinalIgnoreCase))
+            {
+                return new OkObjectResult(new
+                {
+                    isBound = true,
+                    maskedCard = parts[1],
+                    expiry = parts[2],
+                    cardHolder = parts[3]
+                });
+            }
+
+            if (parts.Length < 4 || !string.Equals(parts[0], "CARD", StringComparison.OrdinalIgnoreCase))
+                return new OkObjectResult(new { isBound = false });
+
+            return new OkObjectResult(new
+            {
+                isBound = true,
+                maskedCard = parts[1],
+                expiry = parts[2],
+                cardHolder = parts[3]
+            });
+        }
+
+        public async Task<IActionResult> GetBoundCardsAsync(int clientProfileId)
+        {
+            var noteType = await _context.ClientNoteTypes
+                .AsNoTracking()
+                .FirstOrDefaultAsync(t => t.Code == "CARD_BINDING");
+            if (noteType == null)
+                return new OkObjectResult(new List<object>());
+
+            var notes = await _context.ClientNotes
+                .AsNoTracking()
+                .Where(n => n.ClientProfile_id == clientProfileId && n.ClientNoteType_id == noteType.ID_ClientNoteType)
+                .OrderByDescending(n => n.Created_at)
+                .ToListAsync();
+
+            var rows = notes
+                .Select(n =>
+                {
+                    if (string.IsNullOrWhiteSpace(n.Text))
+                        return null;
+                    var parts = n.Text.Split('|');
+                    if (parts.Length >= 5 && string.Equals(parts[0], "CARDV2", StringComparison.OrdinalIgnoreCase))
+                        return new { id = n.ID_ClientNote, maskedCard = parts[1], expiry = parts[2], cardHolder = parts[3], createdAt = n.Created_at };
+                    if (parts.Length >= 4 && string.Equals(parts[0], "CARD", StringComparison.OrdinalIgnoreCase))
+                        return new { id = n.ID_ClientNote, maskedCard = parts[1], expiry = parts[2], cardHolder = parts[3], createdAt = n.Created_at };
+                    return null;
+                })
+                .Where(x => x != null)
+                .ToList();
+
+            return new OkObjectResult(rows);
         }
 
         public async Task<IActionResult> GetClientDetailsAsync(int clientProfileId)
@@ -183,6 +333,23 @@ namespace APIDeliveryCRM.Services
             _context.ClientNotes.Add(note);
             await _context.SaveChangesAsync();
             return new OkObjectResult(note);
+        }
+
+        private async Task<ClientNoteType> EnsureCardNoteTypeAsync()
+        {
+            var noteType = await _context.ClientNoteTypes
+                .FirstOrDefaultAsync(t => t.Code == "CARD_BINDING");
+            if (noteType != null)
+                return noteType;
+
+            noteType = new ClientNoteType
+            {
+                Name = "Привязка карты",
+                Code = "CARD_BINDING"
+            };
+            _context.ClientNoteTypes.Add(noteType);
+            await _context.SaveChangesAsync();
+            return noteType;
         }
     }
 }

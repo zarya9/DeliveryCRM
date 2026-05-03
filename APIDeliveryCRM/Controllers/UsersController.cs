@@ -2,6 +2,7 @@ using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Request;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,15 +25,20 @@ namespace APIDeliveryCRM.Controllers
 
         /// <summary>Список id пользователей компании, у которых есть активное SignalR-подключение (чат).</summary>
         [HttpGet("online")]
-        public async Task<IActionResult> GetOnlineUsers([FromQuery] int companyId)
+        [Authorize]
+        public async Task<IActionResult> GetOnlineUsers([FromQuery] int? companyId = null)
         {
+            var resolvedCompanyId = ResolveCompanyId(companyId, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!resolvedCompanyId.HasValue) return Unauthorized();
+
             var onlineIds = _presenceService.GetOnlineUserIds().ToHashSet();
             if (onlineIds.Count == 0)
                 return Ok(new List<int>());
 
             var companyOnlineIds = await _context.Users
                 .AsNoTracking()
-                .Where(u => u.Company_id == companyId && onlineIds.Contains(u.ID_User))
+                .Where(u => u.Company_id == resolvedCompanyId.Value && onlineIds.Contains(u.ID_User))
                 .Select(u => u.ID_User)
                 .ToListAsync();
 
@@ -41,6 +47,7 @@ namespace APIDeliveryCRM.Controllers
 
         [HttpGet]
         [Route("getById")]
+        [Authorize]
         public async Task<IActionResult> GetUserByIdAsync(int id)
         {
             return await _userService.GetUserByIdAsync(id);
@@ -48,6 +55,7 @@ namespace APIDeliveryCRM.Controllers
 
         [HttpGet]
         [Route("getAllUsers")]
+        [Authorize]
         public async Task<IActionResult> GetAllUsersAsync()
         {
             return await _userService.GetAllUsersAsync();
@@ -55,13 +63,23 @@ namespace APIDeliveryCRM.Controllers
 
         [HttpPost]
         [Route("RegisterClient")]
+        [AllowAnonymous]
         public async Task<IActionResult> RegisterClientAsync(RegisterClientRequest dto)
         {
             return await _userService.RegisterClientAsync(dto);
         }
 
         [HttpPost]
+        [Route("RegisterCompanyOwner")]
+        [AllowAnonymous]
+        public async Task<IActionResult> RegisterCompanyOwnerAsync(RegisterCompanyOwnerRequest dto)
+        {
+            return await _userService.RegisterCompanyOwnerAsync(dto);
+        }
+
+        [HttpPost]
         [Route("RegisterManager")]
+        [AllowAnonymous]
         public async Task<IActionResult> RegisterManagerAsync(RegisterManagerRequest dto)
         {
             return await _userService.RegisterManagerAsync(dto);
@@ -69,6 +87,7 @@ namespace APIDeliveryCRM.Controllers
 
         [HttpPost]
         [Route("RegisterLogistician")]
+        [AllowAnonymous]
         public async Task<IActionResult> RegisterLogisticianAsync(RegisterLogisticianRequest dto)
         {
             return await _userService.RegisterLogisticianAsync(dto);
@@ -76,6 +95,7 @@ namespace APIDeliveryCRM.Controllers
 
         [HttpPost]
         [Route("Login")]
+        [AllowAnonymous]
         public async Task<IActionResult> LoginAsync(LoginRequest dto)
         {
             return await _userService.LoginAsync(dto);
@@ -83,6 +103,7 @@ namespace APIDeliveryCRM.Controllers
 
         [HttpPost]
         [Route("RegisterCourier")]
+        [AllowAnonymous]
         public async Task<IActionResult> RegisterCourierAsync(RegisterCourierRequest dto)
         {
             return await _userService.RegisterCourierAsync(dto);
@@ -90,6 +111,7 @@ namespace APIDeliveryCRM.Controllers
 
         [HttpGet]
         [Route("GetAllManagers")]
+        [Authorize]
         public async Task<IActionResult> GetAllManagersAsync()
         {
             return await _userService.GetAllManagersAsync();
@@ -97,15 +119,33 @@ namespace APIDeliveryCRM.Controllers
 
         [HttpGet]
         [Route("GetAllCourier")]
+        [Authorize]
         public async Task<IActionResult> GetAllCourierAsync()
         {
             return await _userService.GetAllCourierAsync();
         }
 
         [HttpPut("{id:int}")]
+        [Authorize]
         public async Task<IActionResult> UpdateUser(int id, [FromBody] UpdateUserRequest request)
         {
             return await _userService.UpdateUserAsync(id, request);
+        }
+
+        private int? ResolveCompanyId(int? requestedCompanyId, out bool forbidden)
+        {
+            forbidden = false;
+            var raw = User.FindFirst("companyId")?.Value;
+            if (!int.TryParse(raw, out var claimCompanyId))
+                return null;
+
+            if (requestedCompanyId.HasValue && requestedCompanyId.Value != claimCompanyId)
+            {
+                forbidden = true;
+                return null;
+            }
+
+            return claimCompanyId;
         }
     }
 }

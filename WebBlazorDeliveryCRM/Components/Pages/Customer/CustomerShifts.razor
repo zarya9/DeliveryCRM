@@ -1,16 +1,77 @@
 @page "/customer/shifts"
 @layout CustomerLayout
+@using System.Security.Claims
+@inject AuthenticationStateProvider AuthStateProvider
+@inject CouriersApiService CouriersApi
 
 <PageTitle>Смены — Клиент</PageTitle>
 
 <div class="dms-page-header">
     <h1>Смены и доступность</h1>
-    <p class="subtitle">Информация о сроках доставки в зависимости от графика курьерской службы (заглушка).</p>
+    <p class="subtitle">Текущая доступность курьерской службы компании</p>
 </div>
 
 <div class="dms-card">
     <h2 class="dms-card-title">График работы службы</h2>
-    <p class="text-muted mb-0">
-        Здесь можно разместить часы работы, праздничные дни и среднее время реакции. Реальные данные подставляются из настроек компании.
-    </p>
+    @if (_loading)
+    {
+        <p class="text-muted mb-0">Загрузка данных...</p>
+    }
+    else if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger mb-0">@_error</div>
+    }
+    else
+    {
+        <div class="row g-3">
+            <div class="col-md-4">
+                <div class="small text-muted">Курьеров в компании</div>
+                <div>@_totalCouriers</div>
+            </div>
+            <div class="col-md-4">
+                <div class="small text-muted">Сейчас онлайн</div>
+                <div>@_onlineCouriers</div>
+            </div>
+            <div class="col-md-4">
+                <div class="small text-muted">Средняя доступность</div>
+                <div>@(_totalCouriers == 0 ? "0%" : $"{Math.Round((double)_onlineCouriers / _totalCouriers * 100)}%")</div>
+            </div>
+        </div>
+        <p class="text-muted mt-3 mb-0">
+            Данные рассчитываются по фактическому онлайн-статусу курьеров в системе. Чем больше активных курьеров, тем выше вероятность быстрой доставки.
+        </p>
+    }
 </div>
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private int _totalCouriers;
+    private int _onlineCouriers;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var state = await AuthStateProvider.GetAuthenticationStateAsync();
+            var companyRaw = state.User.FindFirst("companyId")?.Value;
+            if (!int.TryParse(companyRaw, out var companyId))
+            {
+                _error = "Не удалось определить компанию пользователя.";
+                return;
+            }
+
+            var couriers = await CouriersApi.GetAllAsync(companyId) ?? new List<CourierProfileDto>();
+            _totalCouriers = couriers.Count;
+            _onlineCouriers = couriers.Count(c => c.Is_online);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

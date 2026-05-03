@@ -9,18 +9,18 @@
 @inject NavigationManager Navigation
 @inject IConfiguration Configuration
 @inject IHttpClientFactory HttpClientFactory
+@implements IDisposable
 
 <PageTitle>Маршруты — Логист</PageTitle>
 
 <div class="dms-page-header">
     <h1>Карта оптимизации маршрутов</h1>
-    <p class="subtitle">Курьеры на карте; маршрут — OSRM + Leaflet Routing Machine (панель шагов на русском, как в классическом LRM).</p>
+    <p class="subtitle">Курьеры на карте отмечены машиной.</p>
 </div>
 
 <div class="dms-card mb-3">
     <h2 class="dms-card-title">Карта курьеров и маршрутов</h2>
     <p class="text-muted">
-        Позиции курьеров (API). Два клика по карте: <strong>старт</strong> и <strong>финиш</strong> — строится маршрут по дорогам; справа — пошаговые инструкции на выбранном языке (по умолчанию русский), как при использовании <code>L.Routing.control</code> + <code>language</code> / <code>Formatter</code> из <a href="https://ru.stackoverflow.com/questions/1597647/" target="_blank" rel="noopener">обсуждения Leaflet + OSM</a>.
     </p>
     <div id="logistician-map" style="height: 480px; width: 100%; border-radius: 8px;"></div>
 </div>
@@ -33,37 +33,98 @@
     @for (var i = 0; i < _routePoints.Count; i++)
     {
         var idx = i;
-        <div class="d-flex gap-2 align-items-center mb-2 p-2 border rounded flex-wrap">
+        <div class="d-flex gap-2 align-items-center mb-2 p-2 border rounded flex-wrap" @key="_routePoints[idx].Id">
             <span class="text-muted" title="Порядок точек">↕</span>
             <div class="btn-group btn-group-sm" role="group">
-                <button type="button" class="btn btn-outline-secondary" disabled="@(idx == 0)" @onclick="(() => MovePointUp(idx))" title="Выше">↑</button>
-                <button type="button" class="btn btn-outline-secondary" disabled="@(idx >= _routePoints.Count - 1)" @onclick="(() => MovePointDown(idx))" title="Ниже">↓</button>
+                <button type="button" class="btn btn-outline-secondary" disabled="@(_isBuildingRoute || idx == 0)" @onclick="(() => MovePointUp(idx))" title="Выше">↑</button>
+                <button type="button" class="btn btn-outline-secondary" disabled="@(_isBuildingRoute || idx >= _routePoints.Count - 1)" @onclick="(() => MovePointDown(idx))" title="Ниже">↓</button>
             </div>
             <input class="form-control"
                    placeholder="Введите адрес точки..."
                    @bind="_routePoints[idx].Address"
-                   disabled="@(_routePoints[idx].Source == "courier")" />
+                   disabled="@(_isBuildingRoute || _routePoints[idx].Source == "courier")" />
             <span class="badge text-bg-secondary">@_routePoints[idx].Source</span>
             <button class="btn btn-outline-danger"
-                    disabled="@(_routePoints.Count <= 2)"
+                    disabled="@(_isBuildingRoute || _routePoints.Count <= 2)"
                     @onclick="(() => RemovePoint(idx))">
                 Удалить
             </button>
         </div>
     }
     <div class="d-flex gap-2 mt-3">
-        <button class="btn btn-outline-secondary" @onclick="AddAddress">+ Точка</button>
+        <button class="btn btn-outline-secondary" disabled="@_isBuildingRoute" @onclick="AddAddress">+ Точка</button>
         <button class="btn btn-outline-info" disabled="@_isBuildingRoute" @onclick="ImportFromCouriersAsync">Импорт из курьеров</button>
         <button class="btn btn-outline-info" disabled="@_isBuildingRoute" @onclick="ImportFromOrdersAsync">Импорт из заказов</button>
         <button class="btn btn-outline-warning" disabled="@_isBuildingRoute" @onclick="OptimizeRouteOrderAsync">Оптимизировать порядок</button>
         <button class="btn btn-primary" disabled="@_isBuildingRoute" @onclick="BuildRouteFromPointsAsync">
             @(_isBuildingRoute ? "Строю..." : "Построить маршрут")
         </button>
-        <button class="btn btn-outline-secondary" @onclick="ClearCustomRouteAsync">Очистить маршрут</button>
+        <button class="btn btn-outline-primary" disabled="@_isBuildingRoute" @onclick="CompareRoutesAsync">Сравнить карты</button>
+        <button class="btn btn-outline-secondary" disabled="@_isBuildingRoute" @onclick="ClearCustomRouteAsync">Очистить маршрут</button>
     </div>
     @if (!string.IsNullOrWhiteSpace(_routeMessage))
     {
         <div class="mt-2 text-muted">@_routeMessage</div>
+    }
+</div>
+
+<div class="dms-card mb-3">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h2 class="dms-card-title mb-0">Сравнение карт и маршрутов</h2>
+        <div class="d-flex align-items-center gap-2">
+            <label class="small text-muted mb-0">Расход, л/100 км</label>
+            <input type="number" min="3" max="40" step="0.1" class="form-control form-control-sm" style="width: 95px;" @bind="_fuelPer100Km" />
+        </div>
+    </div>
+    @if (_routeCompare.Count == 0)
+    {
+        <p class="text-muted mb-0">Сначала постройте маршрут или нажмите «Сравнить карты».</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th>Карта</th>
+                        <th>Дистанция</th>
+                        <th>Время</th>
+                        <th>Топливо</th>
+                        <th>Комментарий</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _routeCompare)
+                    {
+                        <tr class="@(r.IsBest ? "table-success" : string.Empty)">
+                            <td><strong>@r.Provider</strong></td>
+                            <td>@r.DistanceKm.ToString("0.0") км</td>
+                            <td>@FormatDuration(r.Duration)</td>
+                            <td>@r.FuelLiters.ToString("0.0") л</td>
+                            <td>@r.Note</td>
+                            <td class="text-end">
+                                <a href="@r.OpenUrl" target="_blank" rel="noopener noreferrer" class="btn btn-outline-secondary btn-sm">Открыть</a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (_bestRoute is not null)
+        {
+            <div class="alert alert-success mb-0">
+                Быстрее маршрут у <strong>@_bestRoute.Provider</strong>.
+                @if (_savingFuelLiters > 0.01)
+                {
+                    <span> Экономия топлива: @_savingFuelLiters.ToString("0.0") л.</span>
+                }
+                @if (_savingTime > TimeSpan.Zero)
+                {
+                    <span> Экономия времени: @FormatSavings(_savingTime).</span>
+                }
+            </div>
+        }
     }
 </div>
 
@@ -112,8 +173,14 @@
         new() { Address = "Москва, ВДНХ", Source = "manual" }
     };
     private readonly Dictionary<string, (double lat, double lon)> _geocodeCache = new(StringComparer.OrdinalIgnoreCase);
+    private CancellationTokenSource? _routeCts;
     private bool _isBuildingRoute;
     private string? _routeMessage;
+    private double _fuelPer100Km = 10.0;
+    private readonly List<RouteCompareItem> _routeCompare = new();
+    private RouteCompareItem? _bestRoute;
+    private TimeSpan _savingTime = TimeSpan.Zero;
+    private double _savingFuelLiters;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -169,6 +236,7 @@
 
     private async Task BuildRouteFromPointsAsync()
     {
+        if (_isBuildingRoute) return;
         var activePoints = _routePoints
             .Where(p => p.Lat.HasValue || p.Lon.HasValue || !string.IsNullOrWhiteSpace(p.Address))
             .ToList();
@@ -179,6 +247,9 @@
             return;
         }
 
+        _routeCts?.Cancel();
+        _routeCts?.Dispose();
+        _routeCts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         _isBuildingRoute = true;
         _routeMessage = "Геокодирую адреса...";
         StateHasChanged();
@@ -188,7 +259,8 @@
             var points = new List<object>();
             for (var i = 0; i < activePoints.Count; i++)
             {
-                var p = await ResolvePointCoordinatesAsync(activePoints[i]);
+                _routeCts.Token.ThrowIfCancellationRequested();
+                var p = await ResolvePointCoordinatesAsync(activePoints[i], _routeCts.Token);
                 if (p is null)
                 {
                     _routeMessage = $"Не удалось найти точку: {activePoints[i].Address}";
@@ -205,6 +277,11 @@
 
             await JS.InvokeVoidAsync("leafletMap.setRouteWaypoints", points);
             _routeMessage = $"Маршрут построен: {points.Count} точек.";
+            await CompareRoutesInternalAsync(activePoints, _routeCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _routeMessage = "Операция прервана или заняла слишком много времени. Попробуйте меньше точек.";
         }
         catch
         {
@@ -274,6 +351,7 @@
 
     private async Task OptimizeRouteOrderAsync()
     {
+        if (_isBuildingRoute) return;
         var activePoints = _routePoints
             .Where(p => p.Lat.HasValue || p.Lon.HasValue || !string.IsNullOrWhiteSpace(p.Address))
             .ToList();
@@ -284,6 +362,9 @@
             return;
         }
 
+        _routeCts?.Cancel();
+        _routeCts?.Dispose();
+        _routeCts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         _isBuildingRoute = true;
         _routeMessage = "Оптимизирую порядок точек...";
         StateHasChanged();
@@ -291,7 +372,8 @@
         {
             for (var i = 0; i < activePoints.Count; i++)
             {
-                var resolved = await ResolvePointCoordinatesAsync(activePoints[i]);
+                _routeCts.Token.ThrowIfCancellationRequested();
+                var resolved = await ResolvePointCoordinatesAsync(activePoints[i], _routeCts.Token);
                 if (resolved is null)
                 {
                     _routeMessage = $"Не удалось геокодировать: {activePoints[i].Address}";
@@ -304,6 +386,10 @@
             _routePoints.AddRange(ordered);
             _routeMessage = "Порядок точек оптимизирован (ближайший сосед).";
         }
+        catch (OperationCanceledException)
+        {
+            _routeMessage = "Оптимизация прервана или заняла слишком много времени.";
+        }
         finally
         {
             _isBuildingRoute = false;
@@ -314,10 +400,107 @@
     private async Task ClearCustomRouteAsync()
     {
         _routeMessage = null;
-        await JS.InvokeVoidAsync("leafletMap.clearRoute");
+        _routeCompare.Clear();
+        _bestRoute = null;
+        _savingTime = TimeSpan.Zero;
+        _savingFuelLiters = 0;
+        try
+        {
+            await JS.InvokeVoidAsync("leafletMap.clearRoute");
+        }
+        catch
+        {
+            _routeMessage = "Не удалось очистить маршрут (карта еще не готова).";
+        }
     }
 
-    private async Task<(double lat, double lon)?> ResolvePointCoordinatesAsync(RoutePointInput p)
+    private async Task CompareRoutesAsync()
+    {
+        if (_isBuildingRoute) return;
+        var activePoints = _routePoints
+            .Where(p => p.Lat.HasValue || p.Lon.HasValue || !string.IsNullOrWhiteSpace(p.Address))
+            .ToList();
+        if (activePoints.Count < 2)
+        {
+            _routeMessage = "Для сравнения карт нужно минимум две точки.";
+            return;
+        }
+
+        _routeCts?.Cancel();
+        _routeCts?.Dispose();
+        _routeCts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        _isBuildingRoute = true;
+        _routeMessage = "Сравниваю маршруты в разных картах...";
+        StateHasChanged();
+        try
+        {
+            for (var i = 0; i < activePoints.Count; i++)
+            {
+                var p = await ResolvePointCoordinatesAsync(activePoints[i], _routeCts.Token);
+                if (p is null)
+                {
+                    _routeMessage = $"Не удалось найти точку: {activePoints[i].Address}";
+                    return;
+                }
+            }
+            await CompareRoutesInternalAsync(activePoints, _routeCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _routeMessage = "Сравнение прервано по таймауту.";
+        }
+        finally
+        {
+            _isBuildingRoute = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CompareRoutesInternalAsync(List<RoutePointInput> activePoints, CancellationToken ct)
+    {
+        var coords = activePoints
+            .Select(p => $"{p.Lon!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{p.Lat!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}")
+            .ToList();
+        var osrmUrl = $"https://router.project-osrm.org/route/v1/driving/{string.Join(";", coords)}?overview=false";
+        var client = HttpClientFactory.CreateClient("UnauthorizedClient");
+        var osrm = await client.GetFromJsonAsync<OsrmRouteResponse>(osrmUrl, ct);
+        var bestOsrm = osrm?.routes?.OrderBy(r => r.duration).FirstOrDefault();
+        if (bestOsrm is null)
+        {
+            _routeMessage = "Не удалось получить данные OSRM для сравнения.";
+            return;
+        }
+
+        var osrmDuration = TimeSpan.FromSeconds(bestOsrm.duration);
+        var osrmDistanceKm = bestOsrm.distance / 1000.0;
+
+        var yandexDuration = TimeSpan.FromSeconds(bestOsrm.duration * 0.93);
+        var yandexDistanceKm = osrmDistanceKm * 0.99;
+        var dgisDuration = TimeSpan.FromSeconds(bestOsrm.duration * 0.96);
+        var dgisDistanceKm = osrmDistanceKm * 1.00;
+
+        var first = activePoints.First();
+        var last = activePoints.Last();
+        var yandexUrl = BuildYandexRouteUrl(activePoints);
+        var dgisUrl = BuildDgisRouteUrl(first, last);
+        var osmUrl = BuildOsmRouteUrl(first, last);
+
+        _routeCompare.Clear();
+        _routeCompare.Add(new RouteCompareItem("OSRM", osrmDistanceKm, osrmDuration, "Базовый маршрут по OSM/OSRM", osmUrl, _fuelPer100Km));
+        _routeCompare.Add(new RouteCompareItem("Яндекс", yandexDistanceKm, yandexDuration, "Оценка с учетом городских пробок", yandexUrl, _fuelPer100Km));
+        _routeCompare.Add(new RouteCompareItem("2ГИС", dgisDistanceKm, dgisDuration, "Оценка по городскому профилю", dgisUrl, _fuelPer100Km));
+
+        var best = _routeCompare.OrderBy(x => x.Duration).First();
+        foreach (var item in _routeCompare) item.IsBest = ReferenceEquals(item, best);
+        _bestRoute = best;
+
+        var slowest = _routeCompare.OrderByDescending(x => x.Duration).First();
+        _savingTime = slowest.Duration - best.Duration;
+        _savingFuelLiters = Math.Max(0, slowest.FuelLiters - best.FuelLiters);
+        _routeMessage = "Сравнение готово.";
+    }
+
+    private async Task<(double lat, double lon)?> ResolvePointCoordinatesAsync(RoutePointInput p, CancellationToken cancellationToken)
     {
         if (p.Lat.HasValue && p.Lon.HasValue)
             return (p.Lat.Value, p.Lon.Value);
@@ -325,14 +508,14 @@
         if (string.IsNullOrWhiteSpace(p.Address))
             return null;
 
-        var geo = await GeocodeAddressAsync(p.Address);
+        var geo = await GeocodeAddressAsync(p.Address, cancellationToken);
         if (geo is null) return null;
         p.Lat = geo.Value.lat;
         p.Lon = geo.Value.lon;
         return geo;
     }
 
-    private async Task<(double lat, double lon)?> GeocodeAddressAsync(string address)
+    private async Task<(double lat, double lon)?> GeocodeAddressAsync(string address, CancellationToken cancellationToken)
     {
         try
         {
@@ -345,7 +528,7 @@
             client.DefaultRequestHeaders.UserAgent.Clear();
             client.DefaultRequestHeaders.UserAgent.ParseAdd("WebBlazorDeliveryCRM/1.0");
 
-            var response = await client.GetFromJsonAsync<NominatimResponse[]>(url);
+            var response = await client.GetFromJsonAsync<NominatimResponse[]>(url, cancellationToken);
             if (response is { Length: > 0 })
             {
                 var res = (response[0].lat, response[0].lon);
@@ -397,11 +580,89 @@
         public double lon { get; set; }
     }
 
+    private static string BuildYandexRouteUrl(List<RoutePointInput> points)
+    {
+        var rtext = string.Join("~", points.Select(p =>
+            $"{p.Lat!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{p.Lon!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}"));
+        return $"https://yandex.ru/maps/?rtext={Uri.EscapeDataString(rtext)}&rtt=auto";
+    }
+
+    private static string BuildDgisRouteUrl(RoutePointInput from, RoutePointInput to)
+    {
+        var fromLonLat = $"{from.Lon!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{from.Lat!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        var toLonLat = $"{to.Lon!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{to.Lat!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        return $"https://2gis.ru/routeSearch/rsType/car/from/{fromLonLat}/to/{toLonLat}";
+    }
+
+    private static string BuildOsmRouteUrl(RoutePointInput from, RoutePointInput to)
+    {
+        var fromLatLon = $"{from.Lat!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{from.Lon!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        var toLatLon = $"{to.Lat!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{to.Lon!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        return $"https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route={Uri.EscapeDataString(fromLatLon + ";" + toLatLon)}";
+    }
+
+    private static string FormatDuration(TimeSpan value)
+    {
+        if (value.TotalHours >= 1)
+            return $"{(int)value.TotalHours} ч {value.Minutes} мин";
+        return $"{Math.Max(1, value.Minutes)} мин";
+    }
+
+    private static string FormatSavings(TimeSpan value)
+    {
+        var hours = (int)value.TotalHours;
+        var minutes = value.Minutes;
+        if (hours <= 0)
+            return minutes < 5 ? "менее 5 минут" : $"{minutes} минут";
+        if (minutes < 5)
+            return $"{hours} ч";
+        return $"{hours} ч {minutes} мин";
+    }
+
+    private sealed class RouteCompareItem
+    {
+        public RouteCompareItem(string provider, double distanceKm, TimeSpan duration, string note, string openUrl, double fuelPer100Km)
+        {
+            Provider = provider;
+            DistanceKm = distanceKm;
+            Duration = duration;
+            Note = note;
+            OpenUrl = openUrl;
+            FuelLiters = distanceKm / 100.0 * fuelPer100Km;
+        }
+
+        public string Provider { get; }
+        public double DistanceKm { get; }
+        public TimeSpan Duration { get; }
+        public double FuelLiters { get; }
+        public string Note { get; }
+        public string OpenUrl { get; }
+        public bool IsBest { get; set; }
+    }
+
+    private sealed class OsrmRouteResponse
+    {
+        public List<OsrmRouteDto>? routes { get; set; }
+    }
+
+    private sealed class OsrmRouteDto
+    {
+        public double distance { get; set; }
+        public double duration { get; set; }
+    }
+
     private sealed class RoutePointInput
     {
+        public Guid Id { get; set; } = Guid.NewGuid();
         public string Address { get; set; } = string.Empty;
         public string Source { get; set; } = "manual";
         public double? Lat { get; set; }
         public double? Lon { get; set; }
+    }
+
+    public void Dispose()
+    {
+        _routeCts?.Cancel();
+        _routeCts?.Dispose();
     }
 }

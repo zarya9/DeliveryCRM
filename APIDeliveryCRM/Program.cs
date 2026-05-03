@@ -107,7 +107,25 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowBlazor", policy =>
     {
-        policy.SetIsOriginAllowed(_ => true)
+        var configuredOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+        var origins = configuredOrigins
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim().TrimEnd('/'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (origins.Length == 0)
+        {
+            origins = new[]
+            {
+                "https://localhost:7266",
+                "http://localhost:7266",
+                "https://localhost:5218",
+                "http://localhost:5218"
+            };
+        }
+
+        policy.WithOrigins(origins)
               .AllowAnyMethod()
               .AllowAnyHeader()
               .AllowCredentials();

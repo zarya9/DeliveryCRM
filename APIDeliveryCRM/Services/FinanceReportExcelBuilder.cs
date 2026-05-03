@@ -34,6 +34,14 @@ internal static class FinanceReportExcelBuilder
         summary.Cell(10, 2).Value = d.OnTimePercent;
         summary.Cell(11, 1).Value = "Опоздания %";
         summary.Cell(11, 2).Value = d.LatePercent;
+        summary.Cell(12, 1).Value = "Расход модели, л/100км";
+        summary.Cell(12, 2).Value = d.FuelConsumptionLitersPer100Km;
+        summary.Cell(13, 1).Value = "Топлива израсходовано (оценка), л";
+        summary.Cell(13, 2).Value = d.EstimatedFuelUsedLiters;
+        summary.Cell(14, 1).Value = "Экономия топлива (оценка), л";
+        summary.Cell(14, 2).Value = d.EstimatedFuelSavedLiters;
+        summary.Cell(15, 1).Value = "Экономия топлива, %";
+        summary.Cell(15, 2).Value = d.EstimatedFuelSavingsPercent;
 
         var daily = wb.Worksheets.Add("По дням");
         daily.Cell(1, 1).Value = "Дата";

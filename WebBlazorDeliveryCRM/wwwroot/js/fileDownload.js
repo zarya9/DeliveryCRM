@@ -27,5 +27,24 @@ window.fileDownload = {
         a.download = fileName || "download";
         a.click();
         URL.revokeObjectURL(url);
+    },
+    saveFromUrl: async function (url, fileName) {
+        if (!url) return;
+        try {
+            const response = await fetch(url, { credentials: "include" });
+            if (!response.ok) throw new Error("download failed");
+            const blob = await response.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = objectUrl;
+            a.download = fileName || "download";
+            a.click();
+            URL.revokeObjectURL(objectUrl);
+        } catch {
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = fileName || "download";
+            a.click();
+        }
     }
 };

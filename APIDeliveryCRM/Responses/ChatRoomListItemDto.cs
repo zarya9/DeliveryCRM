@@ -8,4 +8,7 @@ public class ChatRoomListItemDto
     public int? PeerUserId { get; set; }
     public string? LastMessageText { get; set; }
     public DateTime? LastMessageAt { get; set; }
+
+    /// <summary>Число непрочитанных входящих сообщений для текущего пользователя.</summary>
+    public int UnreadCount { get; set; }
 }

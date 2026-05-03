@@ -21,12 +21,26 @@ namespace APIDeliveryCRM.Controllers
         [HttpPost("avatar")]
         public async Task<IActionResult> UploadAvatar(IFormFile file, [FromQuery] int userId)
         {
+            var currentUserId = GetCurrentUserId();
+            if (!currentUserId.HasValue)
+                return Unauthorized();
+
+            if (!IsElevatedRole() && currentUserId.Value != userId)
+                return Forbid();
+
             return await _fileService.UploadAvatarAsync(file, userId);
         }
 
         [HttpPut("avatar")]
         public async Task<IActionResult> UpdateAvatar(IFormFile file, [FromQuery] int userId)
         {
+            var currentUserId = GetCurrentUserId();
+            if (!currentUserId.HasValue)
+                return Unauthorized();
+
+            if (!IsElevatedRole() && currentUserId.Value != userId)
+                return Forbid();
+
             return await _fileService.UpdateAvatarAsync(file, userId);
         }
 
@@ -63,6 +77,16 @@ namespace APIDeliveryCRM.Controllers
             var claim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                         ?? User.FindFirst("sub")?.Value;
             return int.TryParse(claim, out var id) ? id : null;
+        }
+
+        private bool IsElevatedRole()
+        {
+            var role = User.FindFirst(ClaimTypes.Role)?.Value
+                       ?? User.FindFirst("role")?.Value;
+
+            return string.Equals(role, "Админ", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Администратор", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Менеджер", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

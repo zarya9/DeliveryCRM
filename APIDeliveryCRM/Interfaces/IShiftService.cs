@@ -8,7 +8,8 @@ namespace APIDeliveryCRM.Interfaces
     {
         Task<CourierShift> StartShiftAsync(int courierProfileId);
         Task<bool> EndShiftAsync(int shiftId);
-        Task<CourierShift> GetActiveShiftAsync(int courierProfileId);
+        Task<CourierShift?> GetByIdAsync(int shiftId);
+        Task<CourierShift?> GetActiveShiftAsync(int courierProfileId);
         Task<IReadOnlyList<CourierShift>> GetHistoryAsync(int courierProfileId);
         Task<IReadOnlyList<ShiftAssignment>> GetAssignmentsAsync(int shiftId);
     }

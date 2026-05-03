@@ -6,7 +6,7 @@
 @inject AuditApiService AuditApi
 @inject AuthenticationStateProvider AuthState
 
-<PageTitle>Аудит — Админ</PageTitle>
+<PageTitle>Аудит — Администратор</PageTitle>
 
 <div class="dms-page-header">
     <h1>Журнал аудита</h1>
@@ -15,7 +15,7 @@
 
 @if (!_isAdmin)
 {
-    <div class="alert alert-warning">Раздел доступен только роли «Админ».</div>
+    <div class="alert alert-warning">Раздел доступен только роли «Администратор».</div>
 }
 else if (_loading)
 {
@@ -71,7 +71,8 @@ else
         var role = state.User.FindFirst(ClaimTypes.Role)?.Value
                    ?? state.User.FindFirst("role")?.Value
                    ?? state.User.FindFirst("http://schemas.microsoft.com/ws/2008/06/identity/claims/role")?.Value;
-        _isAdmin = string.Equals(role, "Админ", StringComparison.Ordinal);
+        _isAdmin = string.Equals(role, "Админ", StringComparison.Ordinal)
+            || string.Equals(role, "Администратор", StringComparison.Ordinal);
         if (!_isAdmin)
         {
             _loading = false;
