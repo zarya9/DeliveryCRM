@@ -20,7 +20,9 @@ namespace APIDeliveryCRM.Services
         private readonly INotificationService _notificationService;
         private readonly IHubContext<ChatHub> _hubContext;
         private readonly IKafkaProducer _kafkaProducer;
+        private readonly IFuelPriceService _fuelPriceService;
         private readonly IConfiguration _configuration;
+        private readonly IShiftPlannerService _shiftPlanner;
 
         public OrderService(
             ContextDB context,
@@ -28,14 +30,18 @@ namespace APIDeliveryCRM.Services
             INotificationService notificationService,
             IHubContext<ChatHub> hubContext,
             IKafkaProducer kafkaProducer,
-            IConfiguration configuration)
+            IFuelPriceService fuelPriceService,
+            IConfiguration configuration,
+            IShiftPlannerService shiftPlanner)
         {
             _context = context;
             _templateService = templateService;
             _notificationService = notificationService;
             _hubContext = hubContext;
             _kafkaProducer = kafkaProducer;
+            _fuelPriceService = fuelPriceService;
             _configuration = configuration;
+            _shiftPlanner = shiftPlanner;
         }
 
         public async Task<Order> GetByIdAsync(int id)
@@ -161,6 +167,11 @@ namespace APIDeliveryCRM.Services
             }
             var stops = OrderRoutePlanner.BuildStops(routeKind, pickup, delivery, originHub, destHub);
             var distanceKm = EstimateRouteDistanceKm(routeKind, pickup, delivery, originHub, destHub);
+            var fuelCostRub = await EstimateFuelCostRubAsync(
+                companyId: client.Company_id,
+                courierProfileId: request.Courier_id,
+                routeKind: routeKind,
+                distanceKm: distanceKm);
             var estimatedCost = CalculateEstimatedCost(
                 distanceKm: distanceKm,
                 weightKg: request.Weight,
@@ -169,7 +180,8 @@ namespace APIDeliveryCRM.Services
                 heightCm: request.Height,
                 priority: request.Priority,
                 routeKind: routeKind,
-                createdAtUtc: DateTime.UtcNow);
+                createdAtUtc: DateTime.UtcNow,
+                fuelCostRub: fuelCostRub);
             var (windowFromUtc, windowToUtc, etaUtc) = EstimateDeliveryWindowUtc(
                 nowUtc: DateTime.UtcNow,
                 priority: request.Priority,
@@ -221,7 +233,7 @@ namespace APIDeliveryCRM.Services
                 Order_id = order.ID_Order,
                 EventType = "ORDER_CREATED",
                 Title = "Заказ создан",
-                Message = $"Создан новый заказ. Ориентировочная доставка: {FormatDeliveryWindowRu(windowFromUtc, windowToUtc)}. Предварительная стоимость: {estimatedCost:0.##}."
+                Message = $"Создан новый заказ. Ориентировочная доставка: {FormatDeliveryWindowRu(windowFromUtc, windowToUtc)}. Предварительная стоимость: {estimatedCost:0.##} ₽."
             });
             await _context.SaveChangesAsync();
             await PublishOrderEventAsync("order.created", order, new
@@ -233,6 +245,7 @@ namespace APIDeliveryCRM.Services
                 deliveryWindowToUtc = windowToUtc,
                 estimatedCost
             });
+            await TryRebuildPlannerAsync(order.Company_id, "order.created");
             return order;
         }
 
@@ -247,6 +260,8 @@ namespace APIDeliveryCRM.Services
         {
             var order = await _context.Orders
                 .Include(o => o.OrderStatus)
+                .Include(o => o.OriginHub)
+                .Include(o => o.DestinationHub)
                 .FirstOrDefaultAsync(o => o.ID_Order == orderId);
             if (order == null)
             {
@@ -270,6 +285,12 @@ namespace APIDeliveryCRM.Services
                 NewStatus_id = statusId
             });
 
+            var activeAssignment = await _context.ShiftAssignments
+                .Where(a => a.Order_id == order.ID_Order && (a.Status == ShiftAssignmentStatus.Pending || a.Status == ShiftAssignmentStatus.InProgress))
+                .OrderByDescending(a => a.Assignment_sequence)
+                .FirstOrDefaultAsync();
+            ApplyHandoffByStatusEvent(order, statusId, activeAssignment);
+
             await SendStatusAutomationAsync(order, statusId);
 
             if (isSlaRisk)
@@ -291,6 +312,7 @@ namespace APIDeliveryCRM.Services
                 newStatusId = statusId,
                 isSlaRisk
             });
+            await TryRebuildPlannerAsync(order.Company_id, "order.status_changed");
             return true;
         }
 
@@ -307,6 +329,8 @@ namespace APIDeliveryCRM.Services
             var courier = await _context.CourierProfiles.AsNoTracking()
                 .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId && c.Company_id == order.Company_id);
             if (courier == null)
+                return false;
+            if (!courier.Is_online)
                 return false;
 
             var allowed = await IsCourierAllowedByZonesAsync(order, courierProfileId);
@@ -334,6 +358,7 @@ namespace APIDeliveryCRM.Services
                 newCourierId = courierProfileId,
                 assignmentType = "standard"
             });
+            await TryRebuildPlannerAsync(order.Company_id, "order.assigned");
             return true;
         }
 
@@ -348,6 +373,8 @@ namespace APIDeliveryCRM.Services
             var courier = await _context.CourierProfiles.AsNoTracking()
                 .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId && c.Company_id == order.Company_id);
             if (courier == null)
+                return false;
+            if (!courier.Is_online)
                 return false;
 
             var allowed = await IsCourierAllowedByZonesAsync(order, courierProfileId);
@@ -377,6 +404,7 @@ namespace APIDeliveryCRM.Services
                 assignmentType = "manual_override",
                 reason
             });
+            await TryRebuildPlannerAsync(order.Company_id, "order.manual_override");
             return true;
         }
 
@@ -473,6 +501,7 @@ namespace APIDeliveryCRM.Services
                 winner.ActiveOrders,
                 isSlaRisk
             });
+            await TryRebuildPlannerAsync(order.Company_id, "order.auto_dispatch");
 
             return new OrderDispatchDto
             {
@@ -563,7 +592,8 @@ namespace APIDeliveryCRM.Services
             decimal heightCm,
             byte priority,
             DeliveryRouteKind routeKind,
-            DateTime createdAtUtc)
+            DateTime createdAtUtc,
+            decimal fuelCostRub)
         {
             var baseFare = 180m;
             var perKm = routeKind switch
@@ -595,9 +625,53 @@ namespace APIDeliveryCRM.Services
             else if (localHour >= 10 && localHour < 17 && dayOfWeek is >= DayOfWeek.Monday and <= DayOfWeek.Friday)
                 timeMul -= 0.07m;
 
-            var subtotal = baseFare + safeDistance * perKm + weightSurcharge;
+            var subtotal = baseFare + safeDistance * perKm + weightSurcharge + Math.Max(0m, fuelCostRub);
             var result = subtotal * priorityMul * timeMul;
             return Math.Round(Math.Max(120m, result), 2);
+        }
+
+        private async Task<decimal> EstimateFuelCostRubAsync(
+            int companyId,
+            int? courierProfileId,
+            DeliveryRouteKind routeKind,
+            decimal distanceKm)
+        {
+            var safeDistance = Math.Max(1m, distanceKm);
+            var defaultConsumption = routeKind switch
+            {
+                DeliveryRouteKind.LocalUrban => 10.5m,
+                DeliveryRouteKind.ViaHub => 9.6m,
+                DeliveryRouteKind.DirectIntercity => 8.7m,
+                _ => 10.0m
+            };
+
+            var consumptionL100 = defaultConsumption;
+            var fuelPriceRubPerLiter = await _fuelPriceService.GetPriceRubPerLiterAsync(null, cancellationToken: CancellationToken.None);
+
+            if (courierProfileId.HasValue)
+            {
+                var vehicle = await _context.Vehicles
+                    .AsNoTracking()
+                    .Include(v => v.VehicleModel)
+                    .Include(v => v.FuelType)
+                    .Where(v => v.Company_id == companyId && v.CurrentCourier_id == courierProfileId.Value)
+                    .OrderByDescending(v => v.ID_Vehicle)
+                    .FirstOrDefaultAsync();
+
+                if (vehicle?.VehicleModel != null)
+                {
+                    var modelConsumption = routeKind == DeliveryRouteKind.LocalUrban
+                        ? vehicle.VehicleModel.AvgFuelCity
+                        : vehicle.VehicleModel.AvgFuelHighWay;
+                    if (modelConsumption > 0m)
+                        consumptionL100 = modelConsumption;
+                }
+
+                fuelPriceRubPerLiter = await _fuelPriceService.GetPriceRubPerLiterAsync(vehicle?.FuelType?.Name);
+            }
+
+            var liters = safeDistance * consumptionL100 / 100m;
+            return Math.Round(Math.Max(0m, liters * fuelPriceRubPerLiter), 2);
         }
 
         private static decimal EstimateRouteDistanceKm(
@@ -702,6 +776,66 @@ namespace APIDeliveryCRM.Services
                 order.In_transit_at = DateTime.UtcNow;
             if (statusId == 5 && !order.Delivered_at.HasValue)
                 order.Delivered_at = DateTime.UtcNow;
+        }
+
+        private void ApplyHandoffByStatusEvent(Order order, int statusId, ShiftAssignment? activeAssignment)
+        {
+            if (order.DeliveryRouteKind != DeliveryRouteKind.ViaHub || activeAssignment == null)
+                return;
+
+            var stage = activeAssignment.Stage;
+            var shouldAdvanceLeg = statusId >= 4; // in-transit/reached transfer point
+            var isFinalDelivery = statusId >= 5;
+            var changed = false;
+
+            if (stage == ShiftAssignmentStage.PickupToHub && shouldAdvanceLeg)
+            {
+                order.HandoffStage = OrderHandoffStage.AtHub;
+                order.Courier_id = null;
+                order.Plan_locked_shiftPlan_id = null;
+                order.Plan_locked_at = null;
+                activeAssignment.Status = ShiftAssignmentStatus.Done;
+                changed = true;
+
+                _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+                {
+                    Order_id = order.ID_Order,
+                    EventType = "HANDOFF_STAGE",
+                    Title = "Передача на хаб отправления",
+                    Message = "Заказ доставлен в хаб и готов к следующему плечу."
+                });
+            }
+            else if (stage == ShiftAssignmentStage.HubToHub && shouldAdvanceLeg)
+            {
+                order.HandoffStage = OrderHandoffStage.LastMileInProgress;
+                order.Courier_id = null;
+                order.Plan_locked_shiftPlan_id = null;
+                order.Plan_locked_at = null;
+                activeAssignment.Status = ShiftAssignmentStatus.Done;
+                changed = true;
+
+                _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+                {
+                    Order_id = order.ID_Order,
+                    EventType = "HANDOFF_STAGE",
+                    Title = "Прибытие в хаб назначения",
+                    Message = "Заказ прибыл в хаб назначения и ожидает курьера последней мили."
+                });
+            }
+            else if (stage == ShiftAssignmentStage.HubToRecipient && isFinalDelivery)
+            {
+                order.HandoffStage = OrderHandoffStage.Completed;
+                activeAssignment.Status = ShiftAssignmentStatus.Done;
+                changed = true;
+            }
+
+            if (!changed)
+            {
+                if (shouldAdvanceLeg && stage != ShiftAssignmentStage.HubToRecipient)
+                    activeAssignment.Status = ShiftAssignmentStatus.Done;
+                else if (isFinalDelivery)
+                    activeAssignment.Status = ShiftAssignmentStatus.Done;
+            }
         }
 
         private static void UpdateSlaFlags(Order order)
@@ -812,6 +946,11 @@ namespace APIDeliveryCRM.Services
 
             var title = _templateService.Render(template.TitleTemplate, order, statusName);
             var body = _templateService.Render(template.BodyTemplate, order, statusName);
+            if (TryBuildCustomerRealtimeMessage(statusName, order.Order_Number, out var rtTitle, out var rtBody))
+            {
+                title = rtTitle;
+                body = rtBody;
+            }
 
             var clientUserId = await _context.ClientProfiles
                 .AsNoTracking()
@@ -882,6 +1021,59 @@ namespace APIDeliveryCRM.Services
                 .FirstOrDefaultAsync();
         }
 
+        private static bool TryBuildCustomerRealtimeMessage(string? statusName, int orderNumber, out string title, out string body)
+        {
+            var s = (statusName ?? string.Empty).ToLowerInvariant();
+            if (s.Contains("назнач"))
+            {
+                title = "Курьер едет к вам";
+                body = $"Курьер назначен на заказ #{orderNumber} и направляется к точке забора.";
+                return true;
+            }
+            if (s.Contains("в пути") || s.Contains("доставля"))
+            {
+                title = "Курьер доставляет заказ";
+                body = $"Заказ #{orderNumber} уже в пути. Курьер движется к точке доставки.";
+                return true;
+            }
+            title = string.Empty;
+            body = string.Empty;
+            return false;
+        }
+
+        public async Task<(bool ok, string? error)> ClientCompleteOrderPaymentAsync(int orderId, int userId)
+        {
+            var client = await _context.ClientProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.User_id == userId);
+            if (client == null)
+                return (false, "Профиль клиента не найден.");
+
+            var order = await _context.Orders.FirstOrDefaultAsync(o =>
+                o.ID_Order == orderId && o.Client_id == client.ID_ClientProfile);
+            if (order == null)
+                return (false, "Заказ не найден.");
+            if (order.Is_paid)
+                return (false, "Заказ уже оплачен.");
+
+            var provider = _configuration["Billing:Provider"]?.Trim();
+            if (string.IsNullOrWhiteSpace(provider))
+                provider = "MockPay";
+
+            if (!string.Equals(provider, "MockPay", StringComparison.OrdinalIgnoreCase))
+                return (false, "Онлайн-оплата заказа картой пока доступна только в тестовом режиме (MockPay). Обратитесь в компанию доставки.");
+
+            order.Is_paid = true;
+            _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+            {
+                Order_id = order.ID_Order,
+                EventType = "PAYMENT_SUCCEEDED",
+                Title = "Оплата",
+                Message = "Заказ отмечен как оплаченный (тестовый режим MockPay)."
+            });
+            await _context.SaveChangesAsync();
+            return (true, null);
+        }
+
         private async Task PublishOrderEventAsync(string eventType, Order order, object details)
         {
             var topic = _configuration["Kafka:OrderEventsTopic"] ?? "orders-events";
@@ -899,6 +1091,18 @@ namespace APIDeliveryCRM.Services
             };
 
             await _kafkaProducer.ProduceAsync(topic, payload, key: $"{order.Company_id}:{order.ID_Order}");
+        }
+
+        private async Task TryRebuildPlannerAsync(int companyId, string reason)
+        {
+            try
+            {
+                await _shiftPlanner.RebuildCompanyPlanAsync(companyId, reason);
+            }
+            catch
+            {
+                // Planner failures must not break order operations.
+            }
         }
     }
 }

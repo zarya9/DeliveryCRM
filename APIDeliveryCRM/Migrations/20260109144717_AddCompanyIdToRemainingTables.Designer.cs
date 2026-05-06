@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20260109144717_AddCompanyIdToRemainingTables")]
     partial class AddCompanyIdToRemainingTables
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

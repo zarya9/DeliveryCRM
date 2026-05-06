@@ -32,6 +32,7 @@
             <thead>
                 <tr>
                     <th>ФИО</th>
+                    <th>Смена</th>
                     <th>Рейтинг</th>
                     <th>Доставок</th>
                     <th>KPI</th>
@@ -51,6 +52,22 @@
                             @if (c.User_id == _currentUserId)
                             {
                                 <span class="text-muted ms-1">(Вы)</span>
+                            }
+                        </td>
+                        <td>
+                            @if (IsOnShift(c.ID_CourierProfile))
+                            {
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-success"
+                                        title="Открыть карту смены"
+                                        @onclick:stopPropagation="true"
+                                        @onclick="@(() => OpenCourierShiftMap(c.ID_CourierProfile))">
+                                    На смене
+                                </button>
+                            }
+                            else
+                            {
+                                <StatusBadge Text="Не на смене" Tone="neutral" />
                             }
                         </td>
                         <td>@c.Rating</td>
@@ -125,10 +142,10 @@
                 <div class="row g-3">
                     <div class="col-md-6">
                         <label class="form-label">Гос. номер *</label>
-                        <input class="form-control" @bind="_newVehicle.License_plate" />
+                        <input class="form-control" value="@_newVehicle.License_plate" @oninput="OnLicensePlateInput" />
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">VIN *</label>
+                        <label class="form-label">VIN * (17 символов, без I, O, Q)</label>
                         <input class="form-control" maxlength="17" value="@_newVehicle.VIN" @oninput="OnVinInput" />
                     </div>
                     @if (UseVehicleCatalog)
@@ -173,7 +190,7 @@
                     }
                     <div class="col-md-4">
                         <label class="form-label">Категория *</label>
-                        <select class="form-select" @bind="_newVehicle.Category_id">
+                        <select class="form-select" @bind="_newVehicle.Category_id" @bind:after="OnCategoryChangedAfter">
                             <option value="0">—</option>
                             @foreach (var c in _lookups.Categories)
                             {
@@ -269,8 +286,10 @@
     private int _selectedBrandId;
     private int _selectedModelId;
     private string _catalogHint = string.Empty;
+    private readonly Dictionary<int, bool> _onShiftByCourier = new();
 
-    private bool UseVehicleCatalog => _allCatalogModels.Count > 0;
+    private bool _hasCatalogData;
+    private bool UseVehicleCatalog => _hasCatalogData;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -289,6 +308,12 @@
     private async Task ReloadAsync()
     {
         _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
+        _onShiftByCourier.Clear();
+        foreach (var courier in _couriers)
+        {
+            var shift = await CouriersApi.GetActiveShiftAsync(courier.ID_CourierProfile);
+            _onShiftByCourier[courier.ID_CourierProfile] = shift.active;
+        }
         var cid = _couriers.FirstOrDefault()?.Company_id;
         if (!cid.HasValue)
         {
@@ -323,6 +348,14 @@
         return v is null ? "—" : FormatVehicleShort(v);
     }
 
+    private bool IsOnShift(int courierProfileId)
+        => _onShiftByCourier.TryGetValue(courierProfileId, out var onShift) && onShift;
+
+    private void OpenCourierShiftMap(int courierProfileId)
+    {
+        Navigation.NavigateTo($"/logistician/couriers/{courierProfileId}/map");
+    }
+
     private static string FormatVehicleShort(VehicleDto v)
     {
         var brand = v.VehicleModel?.VehicleBrand?.Name ?? v.Brand_name ?? "";
@@ -354,14 +387,45 @@
                 .Select(g => new IdNameDto { Id = g.Key, Name = g.First().BrandName ?? "" })
                 .OrderBy(b => b.Name)
                 .ToList();
+        _hasCatalogData = _catalogBrands.Count > 0 || _allCatalogModels.Count > 0;
         _selectedBrandId = 0;
         _selectedModelId = 0;
         _catalogHint = string.Empty;
         _showAddVehicleModal = true;
     }
 
-    private void OnCatalogBrandChangedAfter()
+    private async Task OnCatalogBrandChangedAfter()
     {
+        _selectedModelId = 0;
+        _newVehicle.Model_id = null;
+        _newVehicle.Model_name = string.Empty;
+        _catalogHint = string.Empty;
+
+        if (_selectedBrandId > 0)
+        {
+            var byBrand = await VehiclesApi.GetCatalogModelsAsync(_selectedBrandId);
+            if (byBrand.Count > 0)
+            {
+                _allCatalogModels = byBrand;
+            }
+            else
+            {
+                var selectedBrandName = _catalogBrands.FirstOrDefault(b => b.Id == _selectedBrandId)?.Name;
+                if (!string.IsNullOrWhiteSpace(selectedBrandName))
+                {
+                    var all = await VehiclesApi.GetCatalogModelsAsync(null);
+                    var byName = all
+                        .Where(m => string.Equals((m.BrandName ?? string.Empty).Trim(), selectedBrandName.Trim(), StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    _allCatalogModels = byName.Count > 0 ? byName : all;
+                }
+            }
+        }
+        else
+        {
+            _allCatalogModels = await VehiclesApi.GetCatalogModelsAsync(null);
+        }
+
         if (_selectedModelId <= 0)
         {
             SyncBrandNameFromSelection();
@@ -380,7 +444,7 @@
         SyncBrandNameFromSelection();
     }
 
-    private void OnCatalogModelChangedAfter()
+    private Task OnCatalogModelChangedAfter()
     {
         var m = _allCatalogModels.FirstOrDefault(x => x.Id == _selectedModelId);
         if (m is null || _selectedModelId <= 0)
@@ -389,7 +453,7 @@
             _newVehicle.Model_name = string.Empty;
             _catalogHint = string.Empty;
             SyncBrandNameFromSelection();
-            return;
+            return Task.CompletedTask;
         }
 
         _selectedBrandId = m.BrandId;
@@ -398,6 +462,16 @@
         _newVehicle.Brand_name = m.BrandName ?? string.Empty;
         _newVehicle.Model_name = m.Name ?? string.Empty;
         _catalogHint = BuildCatalogHint(m);
+        SyncBrandNameFromSelection();
+        return Task.CompletedTask;
+    }
+
+    private Task OnCategoryChangedAfter()
+    {
+        var maxWeight = _lookups?.Categories.FirstOrDefault(c => c.Id == _newVehicle.Category_id)?.MaxWeight;
+        if (maxWeight.HasValue && maxWeight.Value > 0)
+            _newVehicle.Max_cargo_weight = maxWeight.Value;
+        return Task.CompletedTask;
     }
 
     private void SyncBrandNameFromSelection()
@@ -454,6 +528,11 @@
             Notify.ShowWarning("Укажите гос. номер и VIN.");
             return;
         }
+        if (!System.Text.RegularExpressions.Regex.IsMatch(_newVehicle.License_plate, "^[АВЕКМНОРСТУХ]\\d{3}[АВЕКМНОРСТУХ]{2}\\d{2,3}$"))
+        {
+            Notify.ShowWarning("Гос. номер должен быть в формате А123ВС77.");
+            return;
+        }
         if (!VinHelper.IsValid(_newVehicle.VIN, out var vinErr))
         {
             Notify.ShowWarning(vinErr ?? "Некорректный VIN.");
@@ -468,6 +547,11 @@
         if (_newVehicle.Category_id <= 0 || _newVehicle.BodyType_id <= 0 || _newVehicle.FuelType_id <= 0)
         {
             Notify.ShowWarning("Выберите категорию, кузов и топливо.");
+            return;
+        }
+        if (UseVehicleCatalog && _selectedBrandId > 0 && GetFilteredCatalogModels().Count == 0)
+        {
+            Notify.ShowWarning("Для выбранной марки в справочнике нет моделей. Выберите другую марку или заполните вручную.");
             return;
         }
 
@@ -506,6 +590,16 @@
         Current_mileage = 0,
         Is_available = true
     };
+
+    private void OnLicensePlateInput(ChangeEventArgs e)
+    {
+        var raw = (e.Value?.ToString() ?? string.Empty).ToUpperInvariant();
+        raw = raw.Replace('A', 'А').Replace('B', 'В').Replace('E', 'Е').Replace('K', 'К').Replace('M', 'М')
+                 .Replace('H', 'Н').Replace('O', 'О').Replace('P', 'Р').Replace('C', 'С').Replace('T', 'Т')
+                 .Replace('Y', 'У').Replace('X', 'Х');
+        raw = new string(raw.Where(ch => char.IsDigit(ch) || "АВЕКМНОРСТУХ".Contains(ch)).ToArray());
+        _newVehicle.License_plate = raw.Length > 9 ? raw[..9] : raw;
+    }
 
     private void StartAutoRefreshLoop()
     {

@@ -32,7 +32,6 @@ public static class VinHelper
         return true;
     }
 
-    /// <summary>Оставляет в строке только допустимые символы VIN, в верхнем регистре.</summary>
     public static string SanitizeInput(string? raw)
     {
         if (string.IsNullOrEmpty(raw))

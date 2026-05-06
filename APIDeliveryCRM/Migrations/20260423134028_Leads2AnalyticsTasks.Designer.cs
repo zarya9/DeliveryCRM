@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20260423134028_Leads2AnalyticsTasks")]
     partial class Leads2AnalyticsTasks
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

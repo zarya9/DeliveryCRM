@@ -1,4 +1,4 @@
-namespace WebBlazorDeliveryCRM.Services;
+﻿namespace WebBlazorDeliveryCRM.Services;
 
 public sealed class ChatUnreadStateService
 {
@@ -10,7 +10,6 @@ public sealed class ChatUnreadStateService
     public int DirectUnreadCount { get; private set; }
     public bool HasDirectUnread => DirectUnreadCount > 0;
 
-    /// <summary>Все комнаты (включая общий чат компании).</summary>
     public int TotalChatUnreadCount { get; private set; }
     public bool HasAnyChatUnread => TotalChatUnreadCount > 0;
 

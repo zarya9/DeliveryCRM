@@ -1,13 +1,9 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json.Serialization;
 
 namespace APIDeliveryCRM.Model;
 
-/// <summary>
-/// Одна остановка в упорядоченном маршруте (индекс в коллекции = порядок обхода).
-/// Переезд i→j моделируется как движение от остановки [i] к остановке [i+1].
-/// </summary>
 public class OrderRouteStop
 {
     [Key]

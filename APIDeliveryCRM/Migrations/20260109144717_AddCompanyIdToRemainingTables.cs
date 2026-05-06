@@ -4,10 +4,8 @@
 
 namespace APIDeliveryCRM.Migrations
 {
-    /// <inheritdoc />
     public partial class AddCompanyIdToRemainingTables : Migration
     {
-        /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AddColumn<int>(
@@ -71,7 +69,6 @@ namespace APIDeliveryCRM.Migrations
                 onDelete: ReferentialAction.Restrict);
         }
 
-        /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropForeignKey(

@@ -1,9 +1,8 @@
-using System.Linq;
+﻿using System.Linq;
 using APIDeliveryCRM.Model;
 
 namespace APIDeliveryCRM.Helpers;
 
-/// <summary>Определяет, считается ли заказ находящимся на конкретном хабе (по маршрутным остановкам).</summary>
 public static class HubOccupancyHelper
 {
     public static bool IsOrderAtHub(Order order, int hubId)
@@ -34,18 +33,18 @@ public static class HubOccupancyHelper
     public static string FormatClientName(ClientProfile? client)
     {
         if (client?.User == null)
-            return "Клиент";
+            return "РљР»РёРµРЅС‚";
         return $"{client.User.FName} {client.User.Name}".Trim();
     }
 
     public static string FormatDeliveryLine(Address? addr)
     {
         if (addr == null)
-            return "—";
+            return "вЂ”";
         var parts = new[] { addr.City, addr.Street, addr.House }
             .Where(p => !string.IsNullOrWhiteSpace(p))
             .Select(p => p!.Trim());
         var s = string.Join(", ", parts);
-        return string.IsNullOrWhiteSpace(s) ? "—" : s;
+        return string.IsNullOrWhiteSpace(s) ? "вЂ”" : s;
     }
 }

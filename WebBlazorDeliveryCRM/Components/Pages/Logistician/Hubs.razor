@@ -3,6 +3,7 @@
 @using WebBlazorDeliveryCRM.Services
 @using WebBlazorDeliveryCRM.Components.Shared
 @inject LogisticsHubsApiService HubsApi
+@implements IDisposable
 
 <PageTitle>Склады (хабы) — Логист</PageTitle>
 
@@ -64,11 +65,14 @@
 
 @code {
     private List<LogisticsHubListItemDto>? _list;
+    private PeriodicTimer? _refreshTimer;
+    private CancellationTokenSource? _refreshCts;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
         _list = await HubsApi.GetMineAsync();
+        StartAutoRefreshLoop();
         StateHasChanged();
     }
 
@@ -99,5 +103,42 @@
         var top = (h.Latitude.Value + delta).ToString(System.Globalization.CultureInfo.InvariantCulture);
         var bottom = (h.Latitude.Value - delta).ToString(System.Globalization.CultureInfo.InvariantCulture);
         return $"https://www.openstreetmap.org/export/embed.html?bbox={left}%2C{bottom}%2C{right}%2C{top}&layer=mapnik&marker={lat}%2C{lon}";
+    }
+
+    private void StartAutoRefreshLoop()
+    {
+        StopAutoRefreshLoop();
+        _refreshCts = new CancellationTokenSource();
+        _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(12));
+        _ = RunAutoRefreshAsync(_refreshCts.Token);
+    }
+
+    private async Task RunAutoRefreshAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (_refreshTimer is not null && await _refreshTimer.WaitForNextTickAsync(ct))
+            {
+                _list = await HubsApi.GetMineAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void StopAutoRefreshLoop()
+    {
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        _refreshCts = null;
+        _refreshTimer?.Dispose();
+        _refreshTimer = null;
+    }
+
+    public void Dispose()
+    {
+        StopAutoRefreshLoop();
     }
 }

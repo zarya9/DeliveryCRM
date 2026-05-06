@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20260109144546_AddCompanyAndTenantId")]
     partial class AddCompanyAndTenantId
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

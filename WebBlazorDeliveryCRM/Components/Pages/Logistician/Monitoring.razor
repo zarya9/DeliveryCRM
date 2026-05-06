@@ -12,7 +12,8 @@
 <div class="dms-page-header">
     <h1>Мониторинг операций</h1>
     <p class="subtitle">
-        Лента событий по заказам компании и карта: курьеры на <strong>активной смене</strong> (координаты после выхода в сеть на странице курьера) и склады.
+        Лента событий по заказам компании и карта: все курьеры компании и склады.
+        Курьеры офлайн отмечаются серым, онлайн — зеленым.
     </p>
 </div>
 
@@ -57,7 +58,7 @@
     <div class="col-lg-5">
         <div class="dms-card">
             <h2 class="dms-card-title">Карта</h2>
-            <p class="small text-muted mb-2">Маркеры курьеров — только при открытой смене; координаты курьер передаёт после «В сеть» на своей странице.</p>
+            <p class="small text-muted mb-2">Показываются все курьеры с координатами: серый — офлайн, зеленый — онлайн.</p>
             <div id="logistician-monitoring-map" style="height: 420px; width: 100%; border-radius: 8px;"></div>
         </div>
     </div>
@@ -123,7 +124,7 @@
             foreach (var c in live.Couriers)
             {
                 if (c.Lat == 0 && c.Lon == 0) continue;
-                markers.Add(new { lat = c.Lat, lon = c.Lon, title = c.Title ?? "Курьер", kind = "courier" });
+                markers.Add(new { lat = c.Lat, lon = c.Lon, title = c.Title ?? "Курьер", kind = "courier", online = c.Online });
             }
         }
 

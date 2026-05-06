@@ -1,5 +1,8 @@
 @page "/home"
 @attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@using System.Security.Claims
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
 
 <PageTitle>Система управления службой доставки</PageTitle>
 
@@ -23,5 +26,40 @@
             <span class="role-name">Менеджер</span>
             <span class="role-desc">Дашборд, заказы, курьеры, аналитика</span>
         </a>
+        <a href="/login" class="role-card">
+            <span class="role-icon">🛵</span>
+            <span class="role-name">Курьер</span>
+            <span class="role-desc">Смена, геолокация, заказы и чат компании</span>
+        </a>
     </div>
 </div>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (state.User.Identity?.IsAuthenticated != true)
+        {
+            Navigation.NavigateTo("/login", forceLoad: true);
+            return;
+        }
+        var roles = state.User.Claims
+            .Where(c => c.Type == ClaimTypes.Role || c.Type == "role")
+            .Select(c => c.Value)
+            .Distinct()
+            .ToList();
+        string? role = roles.FirstOrDefault(r => r is "Клиент" or "Логист" or "Логистика" or "Менеджер" or "Админ" or "Администратор" or "Курьер")
+                     ?? roles.FirstOrDefault();
+        if (role == "Клиент")
+            Navigation.NavigateTo("/customer", forceLoad: true);
+        else if (role == "Менеджер")
+            Navigation.NavigateTo("/manager", forceLoad: true);
+        else if (role == "Логист" || string.Equals(role, "Логистика", StringComparison.Ordinal))
+            Navigation.NavigateTo("/logistician", forceLoad: true);
+        else if (role == "Админ" || role == "Администратор")
+            Navigation.NavigateTo("/admin/employees", forceLoad: true);
+        else if (role == "Курьер")
+            Navigation.NavigateTo("/courier/shift", forceLoad: true);
+    }
+}

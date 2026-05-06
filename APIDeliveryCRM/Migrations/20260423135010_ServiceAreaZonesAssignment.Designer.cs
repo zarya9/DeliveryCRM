@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20260423135010_ServiceAreaZonesAssignment")]
     partial class ServiceAreaZonesAssignment
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

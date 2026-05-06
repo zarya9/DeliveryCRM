@@ -6,4 +6,5 @@ public class UserDto
     public string FName { get; set; } = "";
     public string Name { get; set; } = "";
     public string? Patronumic { get; set; }
+    public string? BirthDate { get; set; }
 }

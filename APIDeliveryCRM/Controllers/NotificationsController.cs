@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
@@ -21,7 +21,6 @@ namespace APIDeliveryCRM.Controllers
             _notificationService = notificationService;
         }
 
-        /// <summary>Список уведомлений текущего пользователя (JWT).</summary>
         [HttpGet("me")]
         public async Task<IActionResult> GetMine([FromQuery] bool onlyCritical = false, [FromQuery] bool onlyUnread = false, [FromQuery] byte? minPriority = null, [FromQuery] bool onlyRequiresAck = false)
         {
@@ -66,7 +65,7 @@ namespace APIDeliveryCRM.Controllers
 
             var ok = await _notificationService.AcknowledgeForUserAsync(id, userId.Value);
             if (!ok)
-                return BadRequest(new { message = "Уведомление не найдено или не требует подтверждения." });
+                return BadRequest(new { message = "РЈРІРµРґРѕРјР»РµРЅРёРµ РЅРµ РЅР°Р№РґРµРЅРѕ РёР»Рё РЅРµ С‚СЂРµР±СѓРµС‚ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ." });
             return Ok();
         }
 

@@ -1,10 +1,7 @@
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 
 namespace WebBlazorDeliveryCRM.Services;
 
-/// <summary>
-/// Клиент API: список пользователей компании, которые сейчас онлайн (SignalR).
-/// </summary>
 public class UserPresenceApiService
 {
     private readonly HttpClient _http;

@@ -54,19 +54,94 @@ namespace APIDeliveryCRM.Services
             if (subscription == null)
                 return new NotFoundObjectResult(new { message = "Не найдена подписка компании." });
 
-            return new OkObjectResult(MapSubscription(subscription));
+            await ApplyScheduledDowngradeIfDueAsync(subscription);
+            return new OkObjectResult(await MapSubscriptionAsync(subscription));
         }
 
         public async Task<IActionResult> CreateCheckoutSessionAsync(int companyId, CreateCheckoutSessionRequest request)
         {
             await EnsureDefaultPlansAsync();
+            if (string.IsNullOrWhiteSpace(request.PlanCode))
+                return new BadRequestObjectResult(new { message = "Не указан код тарифа." });
             var planCode = request.PlanCode.Trim().ToUpperInvariant();
             var plan = await _context.SubscriptionPlans
                 .FirstOrDefaultAsync(p => p.Code == planCode && p.IsActive);
             if (plan == null)
                 return new BadRequestObjectResult(new { message = "Тариф не найден." });
 
-            var amount = plan.MonthlyPrice * request.PeriodMonths;
+            var subscription = await EnsureSubscriptionAsync(companyId);
+            if (subscription == null)
+                return new BadRequestObjectResult(new { message = "Подписка компании не инициализирована." });
+
+            await CleanupDuplicateSubscriptionsAsync(companyId, subscription.ID_CompanySubscription);
+            await ApplyScheduledDowngradeIfDueAsync(subscription);
+
+            var hasPendingPayment = await _context.BillingInvoices.AsNoTracking()
+                .AnyAsync(i => i.Company_id == companyId && (i.Status == "pending" || i.Status == "pending_upgrade"));
+            if (hasPendingPayment)
+                return new ConflictObjectResult(new { message = "У вас уже есть ожидающий оплату счёт. Завершите его или дождитесь отмены." });
+
+            if (string.Equals(subscription.Plan.Code, plan.Code, StringComparison.OrdinalIgnoreCase))
+                return new BadRequestObjectResult(new { message = "Этот тариф уже активен у компании." });
+
+            var isUpgrade = plan.MonthlyPrice > subscription.Plan.MonthlyPrice;
+            if (!isUpgrade)
+            {
+                var existingScheduled = await _context.BillingInvoices.AsNoTracking()
+                    .AnyAsync(i => i.Company_id == companyId && i.Status == "scheduled_downgrade");
+                if (existingScheduled)
+                    return new ConflictObjectResult(new { message = "Понижение уже запланировано на следующий период." });
+
+                var scheduledInvoice = new BillingInvoice
+                {
+                    Company_id = companyId,
+                    SubscriptionPlan_id = plan.ID_SubscriptionPlan,
+                    Number = $"SCH-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}",
+                    Amount = 0m,
+                    Currency = "RUB",
+                    Status = "scheduled_downgrade",
+                    Issued_at = DateTime.UtcNow,
+                    Due_at = subscription.CurrentPeriodEnd_at,
+                    PeriodMonths = 1
+                };
+                _context.BillingInvoices.Add(scheduledInvoice);
+                await _context.SaveChangesAsync();
+
+                return new OkObjectResult(new CheckoutSessionResponse
+                {
+                    InvoiceId = scheduledInvoice.ID_BillingInvoice,
+                    InvoiceNumber = scheduledInvoice.Number,
+                    ProviderPaymentId = string.Empty,
+                    CheckoutUrl = string.Empty,
+                    Amount = 0m,
+                    Currency = "RUB",
+                    Action = "scheduled_downgrade",
+                    Message = $"Понижение до тарифа {plan.Name} запланировано на {subscription.CurrentPeriodEnd_at:dd.MM.yyyy}."
+                });
+            }
+
+            var amount = CalculateProratedUpgradeAmount(subscription, plan);
+            if (amount <= 0m)
+            {
+                subscription.SubscriptionPlan_id = plan.ID_SubscriptionPlan;
+                subscription.Status = "active";
+                subscription.Canceled_at = null;
+                await _context.SaveChangesAsync();
+                await SyncCompanyPlanAsync(companyId, plan, subscription.CurrentPeriodEnd_at);
+
+                return new OkObjectResult(new CheckoutSessionResponse
+                {
+                    InvoiceId = 0,
+                    InvoiceNumber = string.Empty,
+                    ProviderPaymentId = string.Empty,
+                    CheckoutUrl = string.Empty,
+                    Amount = 0m,
+                    Currency = "RUB",
+                    Action = "upgraded",
+                    Message = $"Тариф повышен до {plan.Name}. Доплата не требуется."
+                });
+            }
+
             var invoiceNumber = $"INV-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
 
             var invoice = new BillingInvoice
@@ -76,10 +151,10 @@ namespace APIDeliveryCRM.Services
                 Number = invoiceNumber,
                 Amount = amount,
                 Currency = "RUB",
-                Status = "pending",
+                Status = "pending_upgrade",
                 Issued_at = DateTime.UtcNow,
                 Due_at = DateTime.UtcNow.AddDays(3),
-                PeriodMonths = request.PeriodMonths
+                PeriodMonths = 1
             };
             _context.BillingInvoices.Add(invoice);
             await _context.SaveChangesAsync();
@@ -116,7 +191,9 @@ namespace APIDeliveryCRM.Services
                 ProviderPaymentId = tx.ProviderPaymentId,
                 CheckoutUrl = checkoutUrl,
                 Amount = amount,
-                Currency = invoice.Currency
+                Currency = invoice.Currency,
+                Action = "checkout",
+                Message = $"Доплата за повышение тарифа до {plan.Name}."
             };
             return new OkObjectResult(checkout);
         }
@@ -139,6 +216,7 @@ namespace APIDeliveryCRM.Services
                 {
                     tx.Status = "succeeded";
                     tx.Succeeded_at = DateTime.UtcNow;
+                    var invoiceStatusBeforePay = tx.Invoice.Status;
                     tx.Invoice.Status = "paid";
                     tx.Invoice.Paid_at = DateTime.UtcNow;
 
@@ -147,13 +225,16 @@ namespace APIDeliveryCRM.Services
                         return new BadRequestObjectResult(new { message = "Подписка компании не инициализирована." });
 
                     var now = DateTime.UtcNow;
-                    var periodStart = subscription.CurrentPeriodEnd_at > now ? subscription.CurrentPeriodEnd_at : now;
-
+                    var isUpgradeInvoice = string.Equals(invoiceStatusBeforePay, "pending_upgrade", StringComparison.OrdinalIgnoreCase);
                     subscription.SubscriptionPlan_id = tx.Invoice.SubscriptionPlan_id;
                     subscription.Status = "active";
-                    subscription.CurrentPeriodStart_at = periodStart;
-                    subscription.CurrentPeriodEnd_at = periodStart.AddMonths(tx.Invoice.PeriodMonths);
                     subscription.Canceled_at = null;
+                    if (!isUpgradeInvoice)
+                    {
+                        var periodStart = subscription.CurrentPeriodEnd_at > now ? subscription.CurrentPeriodEnd_at : now;
+                        subscription.CurrentPeriodStart_at = periodStart;
+                        subscription.CurrentPeriodEnd_at = periodStart.AddMonths(tx.Invoice.PeriodMonths);
+                    }
 
                     tx.Invoice.Company.SubscriptionPlan = tx.Invoice.Plan.Code;
                     tx.Invoice.Company.MaxUsers = tx.Invoice.Plan.MaxUsers;
@@ -262,7 +343,8 @@ namespace APIDeliveryCRM.Services
                     issuedAt = i.Issued_at,
                     dueAt = i.Due_at,
                     paidAt = i.Paid_at,
-                    periodMonths = i.PeriodMonths
+                    periodMonths = i.PeriodMonths,
+                    description = i.Status == "scheduled_downgrade" ? "Запланированное понижение тарифа" : null
                 })
                 .ToListAsync();
 
@@ -276,7 +358,11 @@ namespace APIDeliveryCRM.Services
                 .Include(s => s.Plan)
                 .FirstOrDefaultAsync(s => s.Company_id == companyId);
             if (sub != null)
+            {
+                await CleanupDuplicateSubscriptionsAsync(companyId, sub.ID_CompanySubscription);
+                await ApplyScheduledDowngradeIfDueAsync(sub);
                 return sub;
+            }
 
             var basicPlan = await _context.SubscriptionPlans
                 .FirstOrDefaultAsync(p => p.Code == "BASIC" && p.IsActive);
@@ -301,8 +387,15 @@ namespace APIDeliveryCRM.Services
                 .FirstOrDefaultAsync(s => s.ID_CompanySubscription == sub.ID_CompanySubscription);
         }
 
-        private static CompanySubscriptionDto MapSubscription(CompanySubscription s)
+        private async Task<CompanySubscriptionDto> MapSubscriptionAsync(CompanySubscription s)
         {
+            var pending = await _context.BillingInvoices
+                .AsNoTracking()
+                .Include(i => i.Plan)
+                .Where(i => i.Company_id == s.Company_id && i.Status == "scheduled_downgrade")
+                .OrderBy(i => i.Due_at)
+                .FirstOrDefaultAsync();
+
             return new CompanySubscriptionDto
             {
                 CompanyId = s.Company_id,
@@ -310,8 +403,70 @@ namespace APIDeliveryCRM.Services
                 PlanCode = s.Plan.Code,
                 PlanName = s.Plan.Name,
                 CurrentPeriodEndAt = s.CurrentPeriodEnd_at,
-                AutoRenew = s.AutoRenew
+                AutoRenew = s.AutoRenew,
+                PendingPlanCode = pending?.Plan?.Code,
+                PendingPlanName = pending?.Plan?.Name,
+                PendingPlanEffectiveAt = pending?.Due_at
             };
+        }
+
+        private async Task CleanupDuplicateSubscriptionsAsync(int companyId, int keepSubscriptionId)
+        {
+            var duplicateSubs = await _context.CompanySubscriptions
+                .Where(s => s.Company_id == companyId && s.ID_CompanySubscription != keepSubscriptionId)
+                .ToListAsync();
+            if (duplicateSubs.Count == 0)
+                return;
+
+            _context.CompanySubscriptions.RemoveRange(duplicateSubs);
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task ApplyScheduledDowngradeIfDueAsync(CompanySubscription subscription)
+        {
+            var scheduled = await _context.BillingInvoices
+                .Include(i => i.Plan)
+                .Where(i => i.Company_id == subscription.Company_id && i.Status == "scheduled_downgrade")
+                .OrderBy(i => i.Due_at)
+                .FirstOrDefaultAsync();
+            if (scheduled == null || scheduled.Due_at > DateTime.UtcNow)
+                return;
+
+            subscription.SubscriptionPlan_id = scheduled.SubscriptionPlan_id;
+            subscription.Status = "active";
+            subscription.CurrentPeriodStart_at = scheduled.Due_at;
+            subscription.CurrentPeriodEnd_at = scheduled.Due_at.AddMonths(1);
+            scheduled.Status = "applied";
+            scheduled.Paid_at = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            await _context.Entry(subscription).Reference(x => x.Plan).LoadAsync();
+            await SyncCompanyPlanAsync(subscription.Company_id, scheduled.Plan, subscription.CurrentPeriodEnd_at);
+        }
+
+        private decimal CalculateProratedUpgradeAmount(CompanySubscription subscription, SubscriptionPlan targetPlan)
+        {
+            var cycleSeconds = (subscription.CurrentPeriodEnd_at - subscription.CurrentPeriodStart_at).TotalSeconds;
+            if (cycleSeconds <= 0)
+                cycleSeconds = TimeSpan.FromDays(30).TotalSeconds;
+            var remainingSeconds = Math.Max(0d, (subscription.CurrentPeriodEnd_at - DateTime.UtcNow).TotalSeconds);
+            var ratio = Math.Min(1d, remainingSeconds / cycleSeconds);
+            var current = subscription.Plan.MonthlyPrice;
+            var target = targetPlan.MonthlyPrice;
+            var due = (target - current) * (decimal)ratio;
+            return Math.Round(Math.Max(0m, due), 2, MidpointRounding.AwayFromZero);
+        }
+
+        private async Task SyncCompanyPlanAsync(int companyId, SubscriptionPlan plan, DateTime periodEnd)
+        {
+            var company = await _context.Companies.FirstOrDefaultAsync(c => c.ID_Company == companyId);
+            if (company == null)
+                return;
+            company.SubscriptionPlan = plan.Code;
+            company.MaxUsers = plan.MaxUsers;
+            company.MaxOrdersPerMonth = plan.MaxOrdersPerMonth;
+            company.SubscriptionExpiresAt = periodEnd;
+            company.Is_Active = true;
+            await _context.SaveChangesAsync();
         }
 
         private async Task EnsureDefaultPlansAsync()
@@ -368,6 +523,7 @@ namespace APIDeliveryCRM.Services
 
             var client = _httpClientFactory.CreateClient();
             client.BaseAddress = new Uri("https://api.yookassa.ru/v3/");
+            client.Timeout = TimeSpan.FromSeconds(20);
             var basic = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{shopId}:{secret}"));
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", basic);
             client.DefaultRequestHeaders.Add("Idempotence-Key", Guid.NewGuid().ToString("N"));

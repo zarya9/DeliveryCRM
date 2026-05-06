@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20260329140707_ReplaceOrderLegsWithRouteStops")]
     partial class ReplaceOrderLegsWithRouteStops
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

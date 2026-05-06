@@ -1,6 +1,8 @@
+using System.Net.Http;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Linq;
+using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Request;
 using Microsoft.AspNetCore.Authorization;
@@ -49,7 +51,18 @@ namespace APIDeliveryCRM.Controllers
             var companyId = GetCompanyId();
             if (!companyId.HasValue)
                 return Unauthorized(new { message = "Не указана компания в токене." });
-            return await _billingService.CreateCheckoutSessionAsync(companyId.Value, request);
+            try
+            {
+                return await _billingService.CreateCheckoutSessionAsync(companyId.Value, request);
+            }
+            catch (TaskCanceledException)
+            {
+                return StatusCode(504, new { message = "Платежный провайдер не ответил вовремя. Повторите попытку." });
+            }
+            catch (HttpRequestException ex)
+            {
+                return StatusCode(502, new { message = $"Ошибка связи с платежным провайдером: {ex.Message}" });
+            }
         }
 
         [AllowAnonymous]

@@ -1,6 +1,5 @@
-namespace WebBlazorDeliveryCRM.Models;
+﻿namespace WebBlazorDeliveryCRM.Models;
 
-/// <summary>Ответ GET /api/Couriers/vehicles — транспорт компании.</summary>
 public class VehicleDto
 {
     public int ID_Vehicle { get; set; }
@@ -12,9 +11,7 @@ public class VehicleDto
     public DateTime? Registration_expires_at { get; set; }
     public DateTime? Maintenance_due_at { get; set; }
     public bool Is_available { get; set; }
-    /// <summary>Если задана запись в справочнике моделей.</summary>
     public int? Model_id { get; set; }
-    /// <summary>Марка/модель вручную (если нет справочника).</summary>
     public string? Brand_name { get; set; }
     public string? Model_name { get; set; }
     public VehicleModelDto? VehicleModel { get; set; }

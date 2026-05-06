@@ -1,4 +1,5 @@
 @page "/courier/shift"
+@layout CourierLayout
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Курьер")]
 @using System.Linq
 @using System.Security.Claims
@@ -204,6 +205,18 @@ else
             }
 
             _online = true;
+            var firstPos = await TryGetPositionSafeAsync();
+            if (firstPos.HasValue)
+            {
+                var (okLoc, errLoc) = await CouriersApi.UpdateLocationAsync(_profileId.Value, firstPos.Value.lat, firstPos.Value.lon);
+                if (!okLoc)
+                    _lastGeoError = errLoc ?? "Ошибка отправки координат.";
+            }
+            else if (string.IsNullOrWhiteSpace(_lastGeoError))
+            {
+                _lastGeoError = "Координаты пока недоступны. Курьер уже в сети, повторим автоматически.";
+            }
+
             StartGeoPolling();
             Notify.ShowSuccess("Вы в сети. Передаём координаты.");
         }
@@ -253,11 +266,11 @@ else
             {
                 try
                 {
-                    var pos = await JS.InvokeAsync<double[]>("courierGeo.tryGetPosition");
-                    if (pos is { Length: 2 })
+                    var pos = await TryGetPositionSafeAsync();
+                    if (pos.HasValue)
                     {
-                        var lat = (decimal)pos[0];
-                        var lon = (decimal)pos[1];
+                        var lat = pos.Value.lat;
+                        var lon = pos.Value.lon;
                         var (ok, err) = await CouriersApi.UpdateLocationAsync(profileId, lat, lon);
                         if (!ok)
                             _lastGeoError = err ?? "Ошибка отправки координат.";
@@ -265,9 +278,9 @@ else
                             _lastGeoError = null;
                     }
                 }
-                catch (Exception ex)
+                catch
                 {
-                    _lastGeoError = ex.Message;
+                    _lastGeoError = "Не удалось обновить координаты. Повторим автоматически.";
                 }
 
                 await InvokeAsync(StateHasChanged);
@@ -284,6 +297,64 @@ else
         catch (TaskCanceledException)
         {
         }
+    }
+
+    private async Task<(decimal lat, decimal lon)?> TryGetPositionSafeAsync()
+    {
+        try
+        {
+            var pos = await JS.InvokeAsync<double[]>("courierGeo.tryGetPosition");
+            if (pos is { Length: 2 })
+            {
+                _lastGeoError = null;
+                return ((decimal)pos[0], (decimal)pos[1]);
+            }
+        }
+        catch (JSException jsEx)
+        {
+            var message = jsEx.Message ?? string.Empty;
+            if (message.Contains("GEO_1", StringComparison.OrdinalIgnoreCase))
+            {
+                _lastGeoError = "Нет доступа к геолокации. Разрешите доступ для сайта в настройках браузера.";
+                return null;
+            }
+
+            if (message.Contains("GEO_2", StringComparison.OrdinalIgnoreCase))
+            {
+                _lastGeoError = "Геопозиция недоступна (код 2). Проверьте службы геолокации Windows, сеть/Wi‑Fi и повторите попытку.";
+                return null;
+            }
+
+            if (message.Contains("GEO_3", StringComparison.OrdinalIgnoreCase))
+            {
+                _lastGeoError = "Не удалось определить координаты (таймаут, код 3). Попробуйте ещё раз.";
+                return null;
+            }
+
+            if (message.Contains("not supported", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("не поддерж", StringComparison.OrdinalIgnoreCase))
+            {
+                _lastGeoError = "Браузер не поддерживает геолокацию.";
+                return null;
+            }
+
+            if (message.Contains("timeout", StringComparison.OrdinalIgnoreCase))
+            {
+                _lastGeoError = "Не удалось определить координаты (таймаут). Попробуйте ещё раз.";
+                return null;
+            }
+
+            _lastGeoError = "Нет доступа к геолокации. Разрешите доступ для сайта в настройках браузера.";
+            return null;
+        }
+        catch
+        {
+            _lastGeoError = "Не удалось получить координаты. Проверьте доступ к геолокации.";
+            return null;
+        }
+
+        _lastGeoError = "Не удалось получить координаты.";
+        return null;
     }
 
     private void StopGeoPolling()

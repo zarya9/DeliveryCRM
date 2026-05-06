@@ -23,12 +23,35 @@ public class BillingApiService
         return await _http.GetFromJsonAsync<CompanySubscriptionDto>("/api/Billing/subscription", cancellationToken);
     }
 
-    public async Task<CheckoutSessionResponseDto?> CreateCheckoutAsync(CreateCheckoutSessionRequestDto req, CancellationToken cancellationToken = default)
+    public async Task<BillingCheckoutResultDto> CreateCheckoutAsync(CreateCheckoutSessionRequestDto req, CancellationToken cancellationToken = default)
     {
-        var resp = await _http.PostAsJsonAsync("/api/Billing/checkout", req, cancellationToken);
-        if (!resp.IsSuccessStatusCode)
-            return null;
-        return await resp.Content.ReadFromJsonAsync<CheckoutSessionResponseDto>(cancellationToken: cancellationToken);
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(25));
+            var resp = await _http.PostAsJsonAsync("/api/Billing/checkout", req, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var errorBody = await resp.Content.ReadAsStringAsync(cts.Token);
+                var error = string.IsNullOrWhiteSpace(errorBody)
+                    ? $"Ошибка оплаты (HTTP {(int)resp.StatusCode})."
+                    : errorBody;
+                return new BillingCheckoutResultDto { Ok = false, Error = error };
+            }
+
+            var payload = await resp.Content.ReadFromJsonAsync<CheckoutSessionResponseDto>(cancellationToken: cts.Token);
+            if (payload is null)
+                return new BillingCheckoutResultDto { Ok = false, Error = "Сервер вернул пустой ответ оплаты." };
+            return new BillingCheckoutResultDto { Ok = true, Session = payload };
+        }
+        catch (TaskCanceledException)
+        {
+            return new BillingCheckoutResultDto { Ok = false, Error = "Платежный сервис не ответил вовремя. Попробуйте снова." };
+        }
+        catch (Exception ex)
+        {
+            return new BillingCheckoutResultDto { Ok = false, Error = $"Не удалось начать оплату: {ex.Message}" };
+        }
     }
 
     public async Task<List<BillingInvoiceDto>> GetInvoicesAsync(CancellationToken cancellationToken = default)

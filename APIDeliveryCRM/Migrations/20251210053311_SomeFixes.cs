@@ -4,10 +4,8 @@
 
 namespace APIDeliveryCRM.Migrations
 {
-    /// <inheritdoc />
     public partial class SomeFixes : Migration
     {
-        /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropForeignKey(
@@ -31,7 +29,6 @@ namespace APIDeliveryCRM.Migrations
                 table: "CourierProfiles");
         }
 
-        /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AddColumn<decimal>(

@@ -18,6 +18,9 @@ namespace APIDeliveryCRM.Responses
         public string PlanName { get; set; } = string.Empty;
         public DateTime CurrentPeriodEndAt { get; set; }
         public bool AutoRenew { get; set; }
+        public string? PendingPlanCode { get; set; }
+        public string? PendingPlanName { get; set; }
+        public DateTime? PendingPlanEffectiveAt { get; set; }
     }
 
     public class CheckoutSessionResponse
@@ -28,5 +31,7 @@ namespace APIDeliveryCRM.Responses
         public string CheckoutUrl { get; set; } = string.Empty;
         public decimal Amount { get; set; }
         public string Currency { get; set; } = "RUB";
+        public string Action { get; set; } = "checkout";
+        public string Message { get; set; } = string.Empty;
     }
 }

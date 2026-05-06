@@ -1,8 +1,7 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace WebBlazorDeliveryCRM.Models;
 
-/// <summary>Push из ChatHub после сохранения уведомления в БД.</summary>
 public class NotificationReceivedSignalDto
 {
     [JsonPropertyName("id")]

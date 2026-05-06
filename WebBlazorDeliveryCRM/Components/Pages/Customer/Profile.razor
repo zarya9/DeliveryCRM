@@ -2,10 +2,15 @@
 @layout CustomerLayout
 @using System.Linq
 @using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Forms
 @using WebBlazorDeliveryCRM.Components.Shared
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ClientsApiService ClientsApi
 @inject OrdersApiService OrdersApi
+@inject AccountApiService AccountApi
+@inject AddressSuggestApiService AddressSuggestApi
+@inject AppNotificationService Notify
+@inject IJSRuntime JS
 
 <PageTitle>Профиль — Клиент</PageTitle>
 
@@ -17,13 +22,6 @@
 <div class="dms-card">
     <div class="d-flex justify-content-between align-items-start mb-2">
         <h2 class="dms-card-title mb-0">Личные данные</h2>
-        @if (_profile is not null)
-        {
-            <button class="btn btn-sm btn-outline-primary" @onclick="ToggleEditProfile">
-                <HugeIcon Name="edit-01" CssClass="dms-icon me-1" />
-                Редактировать профиль
-            </button>
-        }
     </div>
     @if (_loading)
     {
@@ -40,17 +38,57 @@
     else
     {
         <div class="row g-3">
+            <div class="col-md-3">
+                <div class="d-flex flex-column gap-2">
+                    <img src="@AvatarUrl" alt="Аватар" class="rounded border" style="width:120px;height:120px;object-fit:cover;" @onerror="OnAvatarError" />
+                    <InputFile OnChange="OnAvatarSelected" />
+                </div>
+            </div>
+            <div class="col-md-9">
+                <div class="row g-3">
             <div class="col-md-6">
-                <div class="small text-muted">ФИО</div>
-                <div>@GetFullName(_profile)</div>
+                <label class="form-label">Имя</label>
+                <input class="form-control" @bind="_editFName" />
             </div>
             <div class="col-md-6">
-                <div class="small text-muted">Способ оплаты</div>
-                <div>@SelectedPaymentMethodName</div>
+                <label class="form-label">Фамилия</label>
+                <input class="form-control" @bind="_editName" />
             </div>
             <div class="col-md-6">
-                <div class="small text-muted">Адрес по умолчанию</div>
-                <div>@(string.IsNullOrWhiteSpace(_profile.Default_address) ? "Не указан" : _profile.Default_address)</div>
+                <label class="form-label">Отчество</label>
+                <input class="form-control" @bind="_editPatronymic" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Email</label>
+                <input class="form-control" value="@_loginEmail" readonly />
+            </div>
+            <div class="col-md-8 position-relative">
+                <label class="form-label">Адрес по умолчанию</label>
+                <input class="form-control" value="@_editDefaultAddress" @oninput="OnProfileAddressInput" />
+                @if (_addressSuggestions.Count > 0)
+                {
+                    <div class="position-absolute bg-body border rounded shadow-sm w-100 mt-1" style="z-index:50;max-height:240px;overflow:auto;">
+                        @foreach (var s in _addressSuggestions)
+                        {
+                            <button type="button" class="w-100 text-start border-0 bg-transparent p-2" @onclick="@(() => PickAddressSuggestion(s))">
+                                <div>@(s.PrimaryLine ?? s.DisplayName ?? "Адрес")</div>
+                                @if (!string.IsNullOrWhiteSpace(s.SecondaryLine))
+                                {
+                                    <div class="small text-muted">@s.SecondaryLine</div>
+                                }
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Предпочтительный способ оплаты</label>
+                <select class="form-select" @bind="_editPaymentMethodId">
+                    @foreach (var method in _paymentMethods)
+                    {
+                        <option value="@method.ID_PaymentMethod">@method.Name</option>
+                    }
+                </select>
             </div>
             <div class="col-md-4">
                 <div class="small text-muted">Рейтинг</div>
@@ -64,48 +102,14 @@
                 <div class="small text-muted">Последний заказ</div>
                 <div>@(_lastOrderAt?.ToString("dd.MM.yyyy HH:mm") ?? "—")</div>
             </div>
-        </div>
-
-        @if (_showEditProfile)
-        {
-            <hr />
-            @if (!string.IsNullOrWhiteSpace(_success))
-            {
-                <div class="alert alert-success">@_success</div>
-            }
-            <div class="row g-3">
-                <div class="col-md-4">
-                    <label class="form-label">Имя</label>
-                    <input class="form-control" @bind="_editFName" />
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Фамилия</label>
-                    <input class="form-control" @bind="_editName" />
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Отчество</label>
-                    <input class="form-control" @bind="_editPatronymic" />
-                </div>
-                <div class="col-md-8">
-                    <label class="form-label">Адрес по умолчанию</label>
-                    <input class="form-control" @bind="_editDefaultAddress" />
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Предпочтительный способ оплаты</label>
-                    <select class="form-select" @bind="_editPaymentMethodId">
-                        @foreach (var method in _paymentMethods)
-                        {
-                            <option value="@method.ID_PaymentMethod">@method.Name</option>
-                        }
-                    </select>
-                </div>
-                <div class="col-12">
-                    <button class="btn btn-primary" disabled="@_savingProfile" @onclick="SaveProfileAsync">
-                        @(_savingProfile ? "Сохранение..." : "Сохранить изменения")
-                    </button>
+            <div class="col-12">
+                <button class="btn btn-primary" disabled="@_savingProfile" @onclick="SaveProfileAsync">
+                    @(_savingProfile ? "Сохранение..." : "Сохранить изменения")
+                </button>
+            </div>
                 </div>
             </div>
-        }
+        </div>
 
         <hr />
 
@@ -123,31 +127,48 @@
         }
         else
         {
-            <div class="table-responsive">
-                <table class="table table-sm">
-                    <thead>
-                        <tr>
-                            <th>Карта</th>
-                            <th>Срок</th>
-                            <th>Владелец</th>
-                            <th>Добавлена</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var c in _cards)
-                        {
-                            <tr>
-                                <td>@c.MaskedCard</td>
-                                <td>@c.Expiry</td>
-                                <td>@c.CardHolder</td>
-                                <td>@c.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+            <div class="row g-3">
+                @foreach (var c in _cards)
+                {
+                    <div class="col-md-6 col-lg-4">
+                        <div class="border rounded p-3 h-100">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <strong>@(c.PaymentSystem ?? "Карта")</strong>
+                                <span class="small text-muted">@c.Expiry</span>
+                            </div>
+                            <div class="mt-3 fs-5">@c.MaskedCard</div>
+                            <div class="small text-muted mt-2">@c.CardHolder</div>
+                            <div class="small text-muted">@c.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
+                        </div>
+                    </div>
+                }
             </div>
         }
     }
+</div>
+
+<div class="dms-card mt-3">
+    <h2 class="dms-card-title">Учётная запись</h2>
+    <p class="small text-muted mb-2">Email отображается для справки. Пароль меняется отдельно.</p>
+    <div class="row g-3">
+        <div class="col-md-6">
+            <label class="form-label">Текущий email</label>
+            <input class="form-control" value="@_loginEmail" readonly />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Текущий пароль</label>
+            <input type="password" class="form-control" @bind="_currentPassword" autocomplete="current-password" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Новый пароль</label>
+            <input type="password" class="form-control" @bind="_newPassword" autocomplete="new-password" />
+        </div>
+        <div class="col-md-4 d-flex align-items-end">
+            <button type="button" class="btn btn-primary w-100" disabled="@_savingAccount" @onclick="SaveAccountAsync">
+                @(_savingAccount ? "Сохранение…" : "Сменить пароль")
+            </button>
+        </div>
+    </div>
 </div>
 
 @if (_showCardModal)
@@ -163,13 +184,14 @@
                 <div class="col-md-6">
                     <label class="form-label">Номер карты</label>
                     <input class="form-control" placeholder="0000 0000 0000 0000" value="@_cardNumber" @oninput="OnCardNumberInput" />
+                    <div class="small text-muted mt-1">Платёжная система: @_cardPaymentSystem</div>
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Срок</label>
                     <input class="form-control" placeholder="MM/YY" value="@_cardExpiryMonth" @oninput="OnCardExpiryInput" />
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label">CVV</label>
+                    <label class="form-label">@_cardSecurityCodeLabel</label>
                     <input type="password" maxlength="4" class="form-control" value="@_cardCvv" @oninput="OnCardCvvInput" />
                 </div>
                 <div class="col-md-12">
@@ -201,8 +223,10 @@
     private string _editDefaultAddress = string.Empty;
     private int _editPaymentMethodId;
     private bool _savingProfile;
-    private string? _success;
-    private bool _showEditProfile;
+    private string _avatarFallback = "/favicon.png";
+    private List<AddressSuggestItemDto> _addressSuggestions = new();
+    private CancellationTokenSource? _addressSuggestCts;
+    private string _addressSuggestCity = "Казань";
 
     private List<BoundCardListItemDto> _cards = new();
     private bool _showCardModal;
@@ -210,11 +234,22 @@
     private string _cardExpiryMonth = string.Empty; // YYYY-MM
     private string _cardHolder = string.Empty;
     private string _cardCvv = string.Empty;
+    private string _cardPaymentSystem = "Не определена";
+    private string _cardSecurityCodeLabel = "CVV";
     private bool _bindingCard;
+    private string _loginEmail = "";
+    private string _currentPassword = "";
+    private string _newPassword = "";
+    private bool _savingAccount;
+    private int _currentUserId;
 
     private string SelectedPaymentMethodName =>
         _paymentMethods.FirstOrDefault(x => x.ID_PaymentMethod == _profile?.Preferred_payment_method_id)?.Name
         ?? "Не выбран";
+
+    private string AvatarUrl => _profile?.User_id > 0
+        ? $"/api/Files/avatar/{_profile.User_id}?v={DateTimeOffset.UtcNow.ToUnixTimeSeconds()}"
+        : _avatarFallback;
 
     protected override async Task OnInitializedAsync()
     {
@@ -227,6 +262,7 @@
                 _error = "Не удалось определить текущего пользователя.";
                 return;
             }
+            _currentUserId = userId;
 
             _profile = await ClientsApi.GetByUserIdAsync(userId);
             if (_profile is null)
@@ -246,6 +282,11 @@
             _editDefaultAddress = _profile.Default_address ?? string.Empty;
             _editPaymentMethodId = _profile.Preferred_payment_method_id;
             _cards = await ClientsApi.GetBoundCardsAsync(_profile.ID_ClientProfile);
+
+            var st = await AuthStateProvider.GetAuthenticationStateAsync();
+            _loginEmail = st.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                          ?? st.User.FindFirst("email")?.Value
+                          ?? "";
         }
         catch (Exception ex)
         {
@@ -257,14 +298,44 @@
         }
     }
 
-    private void ToggleEditProfile() => _showEditProfile = !_showEditProfile;
-
-    private static string GetFullName(ClientProfileDto p)
+    private async Task SaveAccountAsync()
     {
-        var fn = p.User?.FName?.Trim() ?? string.Empty;
-        var ln = p.User?.Name?.Trim() ?? string.Empty;
-        var full = $"{fn} {ln}".Trim();
-        return string.IsNullOrWhiteSpace(full) ? "Не указано" : full;
+        var changePass = !string.IsNullOrWhiteSpace(_newPassword);
+        if (!changePass)
+        {
+            Notify.ShowWarning("Введите новый пароль.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_currentPassword))
+        {
+            Notify.ShowWarning("Введите текущий пароль.");
+            return;
+        }
+
+        _savingAccount = true;
+        try
+        {
+            var (ok, err) = await AccountApi.UpdateMyAccountAsync(new UpdateMyAccountRequestDto
+            {
+                NewEmail = null,
+                NewPassword = changePass ? _newPassword : null,
+                CurrentPassword = _currentPassword
+            });
+            if (!ok)
+            {
+                Notify.ShowError(err ?? "Не удалось сменить пароль.");
+                return;
+            }
+
+            Notify.ShowSuccess("Пароль обновлён.");
+            _currentPassword = "";
+            _newPassword = "";
+        }
+        finally
+        {
+            _savingAccount = false;
+        }
     }
 
     private async Task SaveProfileAsync()
@@ -274,7 +345,6 @@
 
         _savingProfile = true;
         _error = null;
-        _success = null;
         try
         {
             var ok = await ClientsApi.UpdateProfileAsync(_profile.ID_ClientProfile, new UpdateClientProfileDto
@@ -292,7 +362,7 @@
             }
 
             _profile = await ClientsApi.GetProfileAsync(_profile.ID_ClientProfile);
-            _success = "Профиль обновлен.";
+            Notify.ShowSuccess("Профиль обновлён.");
         }
         catch (Exception ex)
         {
@@ -310,6 +380,8 @@
         _cardExpiryMonth = string.Empty;
         _cardHolder = string.Empty;
         _cardCvv = string.Empty;
+        _cardPaymentSystem = "Не определена";
+        _cardSecurityCodeLabel = "CVV";
         _showCardModal = true;
     }
 
@@ -320,21 +392,44 @@
 
     private void OnCardNumberInput(ChangeEventArgs e)
     {
-        var raw = new string((e.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(19).ToArray());
+        var raw = new string((e.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(16).ToArray());
         _cardNumber = string.Join(" ", Enumerable.Range(0, (raw.Length + 3) / 4).Select(i => raw.Substring(i * 4, Math.Min(4, raw.Length - i * 4))));
+        _cardPaymentSystem = DetectPaymentSystem(raw);
+        _cardSecurityCodeLabel = GetSecurityCodeLabel(_cardPaymentSystem);
     }
 
     private void OnCardCvvInput(ChangeEventArgs e)
     {
-        _cardCvv = new string((e.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(4).ToArray());
+        _cardCvv = new string((e.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(3).ToArray());
     }
 
     private void OnCardExpiryInput(ChangeEventArgs e)
     {
         var raw = new string((e.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(4).ToArray());
-        if (raw.Length <= 2)
+        if (raw.Length == 0)
         {
+            _cardExpiryMonth = string.Empty;
+            return;
+        }
+        if (raw.Length == 1)
+        {
+            var d = raw[0] - '0';
+            if (d >= 2)
+            {
+                _cardExpiryMonth = $"0{d}/";
+                return;
+            }
             _cardExpiryMonth = raw;
+            return;
+        }
+        if (raw.Length == 2)
+        {
+            var monthInt = int.Parse(raw);
+            if (monthInt == 0)
+                monthInt = 1;
+            if (monthInt > 12)
+                monthInt = 12;
+            _cardExpiryMonth = $"{monthInt:00}/";
             return;
         }
         _cardExpiryMonth = $"{raw[..2]}/{raw[2..]}";
@@ -346,23 +441,22 @@
             return;
         if (string.IsNullOrWhiteSpace(_cardNumber) || string.IsNullOrWhiteSpace(_cardExpiryMonth) || string.IsNullOrWhiteSpace(_cardHolder) || string.IsNullOrWhiteSpace(_cardCvv))
         {
-            _error = "Заполните номер карты, срок, владельца и CVV.";
+            Notify.ShowWarning("Заполните номер карты, срок, владельца и код безопасности.");
             return;
         }
 
         var expiry = ConvertMonthToCardExpiry(_cardExpiryMonth);
         if (string.IsNullOrWhiteSpace(expiry))
         {
-            _error = "Некорректный формат даты карты.";
+            Notify.ShowWarning("Некорректный формат срока карты.");
             return;
         }
 
         _bindingCard = true;
         _error = null;
-        _success = null;
         try
         {
-            var ok = await ClientsApi.BindCardAsync(_profile.ID_ClientProfile, new BindCardRequestDto
+            var (ok, err) = await ClientsApi.BindCardAsync(_profile.ID_ClientProfile, new BindCardRequestDto
             {
                 CardNumber = _cardNumber,
                 Expiry = expiry,
@@ -371,17 +465,17 @@
             });
             if (!ok)
             {
-                _error = "Не удалось привязать карту.";
+                Notify.ShowError(err ?? "Не удалось привязать карту.");
                 return;
             }
 
             _cards = await ClientsApi.GetBoundCardsAsync(_profile.ID_ClientProfile);
             _showCardModal = false;
-            _success = "Карта привязана.";
+            Notify.ShowSuccess("Карта привязана.");
         }
         catch (Exception ex)
         {
-            _error = ex.Message;
+            Notify.ShowError(ex.Message);
         }
         finally
         {
@@ -404,4 +498,76 @@
             return null;
         return $"{month}/{yearTwoDigits}";
     }
+
+    private void OnAvatarError()
+    {
+        _avatarFallback = "/favicon.png";
+    }
+
+    private async Task OnAvatarSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null || _currentUserId <= 0)
+            return;
+        var (ok, error) = await ClientsApi.UploadAvatarAsync(_currentUserId, file);
+        if (!ok)
+        {
+            Notify.ShowError(error ?? "Не удалось загрузить аватар.");
+            return;
+        }
+        Notify.ShowSuccess("Аватар обновлен.");
+        StateHasChanged();
+    }
+
+    private async Task OnProfileAddressInput(ChangeEventArgs e)
+    {
+        _editDefaultAddress = e.Value?.ToString() ?? string.Empty;
+        _addressSuggestCts?.Cancel();
+        _addressSuggestCts = new CancellationTokenSource();
+        var token = _addressSuggestCts.Token;
+        try
+        {
+            await Task.Delay(220, token);
+            if (string.IsNullOrWhiteSpace(_editDefaultAddress) || _editDefaultAddress.Trim().Length < 3)
+            {
+                _addressSuggestions.Clear();
+                return;
+            }
+            _addressSuggestions = await AddressSuggestApi.SuggestAsync(_editDefaultAddress, 7, _addressSuggestCity);
+            StateHasChanged();
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    private void PickAddressSuggestion(AddressSuggestItemDto item)
+    {
+        _editDefaultAddress = item.DisplayName ?? item.PrimaryLine ?? string.Empty;
+        _addressSuggestions.Clear();
+    }
+
+    private static string DetectPaymentSystem(string digits)
+    {
+        if (string.IsNullOrWhiteSpace(digits))
+            return "Не определена";
+        if (digits.StartsWith("4"))
+            return "Visa";
+        if (digits.StartsWith("22"))
+            return "Мир";
+        if (digits.StartsWith("5"))
+            return "Mastercard";
+        if (digits.StartsWith("6"))
+            return "UnionPay";
+        return "Не определена";
+    }
+
+    private static string GetSecurityCodeLabel(string paymentSystem) => paymentSystem switch
+    {
+        "Mastercard" => "CVC",
+        "Visa" => "CVV",
+        "Мир" => "CVP",
+        "UnionPay" => "CVN",
+        _ => "CVV"
+    };
 }

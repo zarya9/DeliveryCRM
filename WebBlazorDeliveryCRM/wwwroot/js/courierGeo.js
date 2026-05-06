@@ -10,7 +10,9 @@ window.courierGeo = {
                     resolve([p.coords.latitude, p.coords.longitude]);
                 },
                 function (e) {
-                    reject(e && e.message ? new Error(e.message) : new Error("Нет доступа к геолокации."));
+                    var code = e && typeof e.code === "number" ? e.code : 0;
+                    var msg = e && e.message ? e.message : "";
+                    reject(new Error("GEO_" + code + ":" + msg));
                 },
                 { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
             );

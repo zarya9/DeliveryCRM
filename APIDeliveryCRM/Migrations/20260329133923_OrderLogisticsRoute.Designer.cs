@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20260329133923_OrderLogisticsRoute")]
     partial class OrderLogisticsRoute
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

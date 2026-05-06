@@ -16,8 +16,7 @@ public class ChatApiService
 
     public async Task<List<ChatMessageDto>> GetMessagesAsync(int roomId, int skip = 0, int take = 100)
     {
-        using var stream = await _http.GetStreamAsync($"/api/Chat/rooms/{roomId}/messages?skip={skip}&take={take}");
-        var list = await JsonSerializer.DeserializeAsync<List<ChatMessageDto>>(stream, JsonOptions);
+        var list = await GetSafeAsync<List<ChatMessageDto>>($"/api/Chat/rooms/{roomId}/messages?skip={skip}&take={take}");
         if (list is null)
             return new List<ChatMessageDto>();
 
@@ -29,8 +28,7 @@ public class ChatApiService
 
     public async Task<List<ChatRoomListItemDto>> GetRoomsListAsync()
     {
-        using var stream = await _http.GetStreamAsync("/api/Chat/rooms/list");
-        var list = await JsonSerializer.DeserializeAsync<List<ChatRoomListItemDto>>(stream, JsonOptions);
+        var list = await GetSafeAsync<List<ChatRoomListItemDto>>("/api/Chat/rooms/list");
         return list ?? new List<ChatRoomListItemDto>();
     }
 
@@ -118,8 +116,7 @@ public class ChatApiService
 
     public async Task<int> GetUnreadCountAsync(int roomId)
     {
-        using var stream = await _http.GetStreamAsync($"/api/Chat/rooms/{roomId}/unread");
-        var payload = await JsonSerializer.DeserializeAsync<UnreadCountResponse>(stream, JsonOptions);
+        var payload = await GetSafeAsync<UnreadCountResponse>($"/api/Chat/rooms/{roomId}/unread");
         return payload?.UnreadCount ?? 0;
     }
 
@@ -135,9 +132,17 @@ public class ChatApiService
         if (!string.IsNullOrWhiteSpace(category)) q.Add($"category={Uri.EscapeDataString(category)}");
         if (!string.IsNullOrWhiteSpace(search)) q.Add($"search={Uri.EscapeDataString(search)}");
         var qs = q.Count > 0 ? "?" + string.Join("&", q) : string.Empty;
-        using var stream = await _http.GetStreamAsync($"/api/Chat/quick-replies{qs}");
-        var list = await JsonSerializer.DeserializeAsync<List<QuickReplyTemplateDto>>(stream, JsonOptions);
+        var list = await GetSafeAsync<List<QuickReplyTemplateDto>>($"/api/Chat/quick-replies{qs}");
         return list ?? new List<QuickReplyTemplateDto>();
+    }
+
+    private async Task<T?> GetSafeAsync<T>(string url)
+    {
+        var resp = await _http.GetAsync(url);
+        if (!resp.IsSuccessStatusCode)
+            return default;
+        await using var stream = await resp.Content.ReadAsStreamAsync();
+        return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions);
     }
 
     public async Task<bool> UpsertQuickReplyAsync(QuickReplyUpsertRequest request)

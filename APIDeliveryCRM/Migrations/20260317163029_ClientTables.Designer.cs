@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20260317163029_ClientTables")]
     partial class ClientTables
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

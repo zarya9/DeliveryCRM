@@ -6,10 +6,8 @@ using System;
 
 namespace APIDeliveryCRM.Migrations
 {
-    /// <inheritdoc />
     public partial class AvatarAndReports : Migration
     {
-        /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             // Сначала создаем таблицу ReportStatuses
@@ -81,7 +79,6 @@ namespace APIDeliveryCRM.Migrations
                 column: "Status_id");
         }
 
-        /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(

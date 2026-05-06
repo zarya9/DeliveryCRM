@@ -6,10 +6,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 namespace APIDeliveryCRM.Migrations
 {
-    /// <inheritdoc />
     public partial class AddCompanyAndTenantId : Migration
     {
-        /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             // Сначала создаем таблицу Companies
@@ -334,7 +332,6 @@ namespace APIDeliveryCRM.Migrations
                 onDelete: ReferentialAction.Restrict);
         }
 
-        /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropForeignKey(

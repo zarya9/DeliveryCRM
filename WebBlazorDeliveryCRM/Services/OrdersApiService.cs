@@ -34,18 +34,17 @@ public class OrdersApiService
         if (toUtc.HasValue)
             qs.Add($"to={Uri.EscapeDataString(toUtc.Value.ToUniversalTime().ToString("o"))}");
         var url = qs.Count > 0 ? $"/api/Orders?{string.Join("&", qs)}" : "/api/Orders";
-        var list = await _http.GetFromJsonAsync<List<OrderDto>>(url);
-        return list ?? new List<OrderDto>();
+        return await GetSafeAsync<List<OrderDto>>(url) ?? new List<OrderDto>();
     }
 
     public async Task<OrderDto?> GetByIdAsync(int id)
     {
-        return await _http.GetFromJsonAsync<OrderDto>($"/api/Orders/{id}");
+        return await GetSafeAsync<OrderDto>($"/api/Orders/{id}");
     }
 
     public async Task<List<OrderDto>?> GetByClientAsync(int clientId)
     {
-        return await _http.GetFromJsonAsync<List<OrderDto>>($"/api/Orders/client/{clientId}");
+        return await GetSafeAsync<List<OrderDto>>($"/api/Orders/client/{clientId}") ?? new List<OrderDto>();
     }
 
     public async Task<bool> AssignCourierAsync(int orderId, int courierId)
@@ -79,13 +78,12 @@ public class OrdersApiService
 
     public async Task<List<OrderTimelineEventDto>> GetTimelineAsync(int orderId)
     {
-        var list = await _http.GetFromJsonAsync<List<OrderTimelineEventDto>>($"/api/Orders/{orderId}/timeline");
-        return list ?? new List<OrderTimelineEventDto>();
+        return await GetSafeAsync<List<OrderTimelineEventDto>>($"/api/Orders/{orderId}/timeline") ?? new List<OrderTimelineEventDto>();
     }
 
     public async Task<OrderEtaDto?> GetEtaAsync(int orderId)
     {
-        return await _http.GetFromJsonAsync<OrderEtaDto>($"/api/Orders/{orderId}/eta");
+        return await GetSafeAsync<OrderEtaDto>($"/api/Orders/{orderId}/eta");
     }
 
     public async Task<(OrderDto? order, string? error)> CreateMineAsync(CreateCustomerOrderRequestDto request, CancellationToken cancellationToken = default)
@@ -98,5 +96,35 @@ public class OrdersApiService
         }
         var dto = await resp.Content.ReadFromJsonAsync<OrderDto>(cancellationToken: cancellationToken);
         return (dto, null);
+    }
+
+    public async Task<(bool ok, string? error)> PayOrderAsync(int orderId)
+    {
+        var resp = await _http.PostAsync($"/api/Orders/{orderId}/pay", null);
+        if (resp.IsSuccessStatusCode)
+            return (true, null);
+        try
+        {
+            await using var stream = await resp.Content.ReadAsStreamAsync();
+            using var doc = await JsonDocument.ParseAsync(stream);
+            if (doc.RootElement.TryGetProperty("message", out var m))
+                return (false, m.GetString());
+        }
+        catch
+        {
+            /* ignore */
+        }
+
+        return (false, $"Ошибка {(int)resp.StatusCode}");
+    }
+
+    private async Task<T?> GetSafeAsync<T>(string url)
+    {
+        var resp = await _http.GetAsync(url);
+        if (!resp.IsSuccessStatusCode)
+            return default;
+
+        await using var stream = await resp.Content.ReadAsStreamAsync();
+        return await JsonSerializer.DeserializeAsync<T>(stream, JsonOpts);
     }
 }

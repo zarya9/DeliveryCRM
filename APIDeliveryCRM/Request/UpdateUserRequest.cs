@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace APIDeliveryCRM.Request
 {
@@ -12,6 +12,16 @@ namespace APIDeliveryCRM.Request
 
         [MaxLength(100)]
         public string? Patronumic { get; set; }
+
+        [MaxLength(256)]
+        [EmailAddress]
+        public string? NewEmail { get; set; }
+
+        [MaxLength(128)]
+        public string? NewPassword { get; set; }
+
+        [MaxLength(128)]
+        public string? CurrentPassword { get; set; }
     }
 }
 

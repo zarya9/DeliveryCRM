@@ -699,6 +699,19 @@ namespace APIDeliveryCRM.Services
                 return new NotFoundObjectResult(new { message = "Пользователь не найден" });
             }
 
+            var login = await _context.Logins.FirstOrDefaultAsync(l => l.ID_User == userId);
+            if (login == null)
+                return new NotFoundObjectResult(new { message = "Учётная запись входа не найдена." });
+
+            var needCredCheck = !string.IsNullOrWhiteSpace(request.NewEmail) || !string.IsNullOrWhiteSpace(request.NewPassword);
+            if (needCredCheck)
+            {
+                if (string.IsNullOrWhiteSpace(request.CurrentPassword))
+                    return new BadRequestObjectResult(new { message = "Для смены email или пароля укажите текущий пароль." });
+                if (!await VerifyPasswordAsync(login, request.CurrentPassword))
+                    return new BadRequestObjectResult(new { message = "Неверный текущий пароль." });
+            }
+
             if (!string.IsNullOrEmpty(request.FName))
             {
                 user.FName = request.FName;
@@ -712,6 +725,22 @@ namespace APIDeliveryCRM.Services
             if (request.Patronumic != null)
             {
                 user.Patronumic = request.Patronumic;
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.NewEmail))
+            {
+                var email = request.NewEmail.Trim();
+                var taken = await _context.Logins.AnyAsync(l => l.Email == email && l.ID_User != userId);
+                if (taken)
+                    return new BadRequestObjectResult(new { message = "Этот email уже занят." });
+                login.Email = email;
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.NewPassword))
+            {
+                if (request.NewPassword.Length < 6)
+                    return new BadRequestObjectResult(new { message = "Пароль не короче 6 символов." });
+                login.Password = HashPassword(login, request.NewPassword);
             }
 
             await _context.SaveChangesAsync();

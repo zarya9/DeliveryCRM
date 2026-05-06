@@ -20,6 +20,7 @@ public sealed class LiveMapMarkerDto
     public int Id { get; set; }
     public double Lat { get; set; }
     public double Lon { get; set; }
+    public bool Online { get; set; }
     public string? Title { get; set; }
 }
 

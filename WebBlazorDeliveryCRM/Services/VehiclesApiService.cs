@@ -1,4 +1,4 @@
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using WebBlazorDeliveryCRM.Models;
@@ -33,7 +33,6 @@ public class VehiclesApiService
         return list ?? new List<IdNameDto>();
     }
 
-    /// <param name="brandId">Если null или ≤ 0 — все модели с полями марки; иначе только эта марка.</param>
     public async Task<List<VehicleCatalogModelDto>> GetCatalogModelsAsync(int? brandId = null)
     {
         var url = brandId is > 0
@@ -60,6 +59,30 @@ public class VehiclesApiService
         }
 
         var err = await resp.Content.ReadAsStringAsync();
+        if (!string.IsNullOrWhiteSpace(err))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(err);
+                if (doc.RootElement.TryGetProperty("message", out var m))
+                    return (false, m.GetString(), null);
+                if (doc.RootElement.TryGetProperty("title", out var t) && !string.IsNullOrWhiteSpace(t.GetString()))
+                    return (false, t.GetString(), null);
+                if (doc.RootElement.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Object)
+                {
+                    var first = errors.EnumerateObject()
+                        .SelectMany(p => p.Value.ValueKind == JsonValueKind.Array
+                            ? p.Value.EnumerateArray().Select(v => v.GetString())
+                            : new[] { p.Value.GetString() })
+                        .FirstOrDefault(s => !string.IsNullOrWhiteSpace(s));
+                    if (!string.IsNullOrWhiteSpace(first))
+                        return (false, first, null);
+                }
+            }
+            catch
+            {
+            }
+        }
         return (false, string.IsNullOrWhiteSpace(err) ? $"HTTP {(int)resp.StatusCode}" : err, null);
     }
 

@@ -104,7 +104,6 @@ namespace APIDeliveryCRM.Migrations
                 column: "ManagerUser_id");
         }
 
-        /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(

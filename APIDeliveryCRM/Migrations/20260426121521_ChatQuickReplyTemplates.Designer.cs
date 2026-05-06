@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20260426121521_ChatQuickReplyTemplates")]
     partial class ChatQuickReplyTemplates
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

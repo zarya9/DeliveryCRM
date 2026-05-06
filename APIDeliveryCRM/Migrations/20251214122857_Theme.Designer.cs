@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20251214122857_Theme")]
     partial class Theme
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

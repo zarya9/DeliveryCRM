@@ -4,6 +4,9 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ClientsApiService ClientsApi
 @inject OrdersApiService OrdersApi
+@inject AppNotificationService Notify
+@inject IJSRuntime JS
+@inject IConfiguration Configuration
 
 <PageTitle>Отслеживание заказа — Клиент</PageTitle>
 
@@ -61,6 +64,25 @@
     }
 </div>
 
+@if (_selectedOrder is not null)
+{
+    <div class="dms-card mb-3">
+        <h2 class="dms-card-title">Оплата</h2>
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            @if (_selectedOrder.Is_paid)
+            {
+                <span class="badge rounded-pill bg-success">Оплачен</span>
+            }
+            else
+            {
+                <span class="badge rounded-pill bg-warning text-dark">Не оплачен</span>
+                <button type="button" class="btn btn-sm btn-primary" disabled="@_paying" @onclick="PaySelectedAsync">Оплатить</button>
+                <span class="small text-muted">К оплате: @FormatMoneyRub(_selectedOrder.Final_cost > 0 ? _selectedOrder.Final_cost : _selectedOrder.Estimated_cost)</span>
+            }
+        </div>
+    </div>
+}
+
 @if (_timeline.Count > 0)
 {
     <div class="dms-card">
@@ -73,11 +95,19 @@
                     <span class="text-muted"> · @e.Created_at.ToString("dd.MM.yyyy HH:mm")</span>
                     @if (!string.IsNullOrWhiteSpace(e.Message))
                     {
-                        <div class="small text-muted">@e.Message</div>
+                        <div class="small text-muted">@FormatTimelineMessage(e.Message)</div>
                     }
                 </li>
             }
         </ul>
+    </div>
+}
+
+@if (_selectedOrder is not null)
+{
+    <div class="dms-card mt-3">
+        <h2 class="dms-card-title">Карта заказа</h2>
+        <div id="customer-order-tracking-map" style="height: 360px; width: 100%; border-radius: 8px;"></div>
     </div>
 }
 
@@ -87,6 +117,9 @@
     private List<OrderDto> _orders = new();
     private List<OrderTimelineEventDto> _timeline = new();
     private int _selectedOrderId;
+    private OrderDto? _selectedOrder;
+    private bool _paying;
+    private bool _mapReady;
 
     protected override async Task OnInitializedAsync()
     {
@@ -122,7 +155,106 @@
     private async Task LoadTimeline(int orderId)
     {
         _selectedOrderId = orderId;
+        _selectedOrder = _orders.FirstOrDefault(o => o.ID_Order == orderId);
         _timeline = await OrdersApi.GetTimelineAsync(orderId);
         StateHasChanged();
+        await Task.Delay(1);
+        await RefreshTrackingMapAsync();
+    }
+
+    private static string FormatMoneyRub(decimal v) => $"{v:N2} ₽";
+
+    private static string FormatTimelineMessage(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return "";
+        if (message.Contains("Предварительная стоимость", StringComparison.Ordinal) &&
+            !message.Contains('\u20bd') && message.IndexOf("руб", StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            var t = message.TrimEnd();
+            if (t.EndsWith('.'))
+                t = t[..^1];
+            return t + " ₽.";
+        }
+        return message;
+    }
+
+    private async Task PaySelectedAsync()
+    {
+        if (_selectedOrder is null)
+            return;
+        _paying = true;
+        try
+        {
+            var (ok, err) = await OrdersApi.PayOrderAsync(_selectedOrder.ID_Order);
+            if (!ok)
+            {
+                Notify.ShowError(err ?? "Не удалось оплатить.");
+                return;
+            }
+
+            Notify.ShowSuccess("Оплата прошла успешно.");
+            var state = await AuthStateProvider.GetAuthenticationStateAsync();
+            var userIdRaw = state.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(userIdRaw, out var userId))
+            {
+                var profile = await ClientsApi.GetByUserIdAsync(userId);
+                if (profile is not null)
+                    _orders = await OrdersApi.GetByClientAsync(profile.ID_ClientProfile) ?? new();
+                _selectedOrder = _orders.FirstOrDefault(o => o.ID_Order == _selectedOrderId);
+                _timeline = await OrdersApi.GetTimelineAsync(_selectedOrderId);
+                StateHasChanged();
+                await Task.Delay(1);
+                await RefreshTrackingMapAsync();
+            }
+        }
+        finally
+        {
+            _paying = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshTrackingMapAsync()
+    {
+        if (_selectedOrder is null)
+            return;
+        if (!_mapReady)
+        {
+            var osrmUrl = Configuration["Osrm:RouterBaseUrl"];
+            await JS.InvokeVoidAsync("leafletMap.init", "customer-order-tracking-map", 55.7558, 37.6173, 11, null, osrmUrl, false, "ru");
+            _mapReady = true;
+        }
+
+        var markers = new List<object>();
+        var points = new List<object>();
+        if (_selectedOrder.PickupAddress?.Latitude is { } pLat && _selectedOrder.PickupAddress.Longitude is { } pLon)
+        {
+            markers.Add(new { lat = (double)pLat, lon = (double)pLon, title = "Точка A: Забор", kind = "hub" });
+            points.Add(new { lat = (double)pLat, lon = (double)pLon, title = "Точка A" });
+        }
+        if (_selectedOrder.DeliveryAddress?.Latitude is { } dLat && _selectedOrder.DeliveryAddress.Longitude is { } dLon)
+        {
+            markers.Add(new { lat = (double)dLat, lon = (double)dLon, title = "Точка Б: Доставка", kind = "hub" });
+            points.Add(new { lat = (double)dLat, lon = (double)dLon, title = "Точка Б" });
+        }
+        if (_selectedOrder.CourierProfile is not null &&
+            (_selectedOrder.CourierProfile.Current_lat != 0 || _selectedOrder.CourierProfile.Current_lon != 0))
+        {
+            markers.Add(new
+            {
+                lat = (double)_selectedOrder.CourierProfile.Current_lat,
+                lon = (double)_selectedOrder.CourierProfile.Current_lon,
+                title = "Курьер",
+                kind = "courier"
+            });
+        }
+
+        await JS.InvokeVoidAsync("leafletMap.clearMarkers");
+        await JS.InvokeVoidAsync("leafletMap.clearRoute");
+        if (markers.Count > 0)
+            await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
+        if (points.Count >= 2)
+            await JS.InvokeVoidAsync("leafletMap.setRouteWaypoints", points);
     }
 }

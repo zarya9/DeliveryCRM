@@ -1,0 +1,14 @@
+@page "/courier/notifications"
+@layout CourierLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Курьер")]
+
+<PageTitle>Уведомления — Курьер</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Уведомления</h1>
+    <p class="subtitle">
+        События компании: сообщения в чатах, смены статусов заказов и напоминания. Список обновляется вручную и при push через SignalR.
+    </p>
+</div>
+
+<NotificationsInbox />

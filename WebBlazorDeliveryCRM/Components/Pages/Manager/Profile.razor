@@ -1,0 +1,5 @@
+@page "/manager/profile"
+@layout ManagerLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Менеджер,Администратор,Админ")]
+
+<UserProfileEditor Title="Профиль менеджера" />

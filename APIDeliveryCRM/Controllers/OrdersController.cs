@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
@@ -25,7 +25,6 @@ namespace APIDeliveryCRM.Controllers
             _context = context;
         }
 
-        /// <summary>Справочник статусов заказа (для шаблонов и форм).</summary>
         [HttpGet("statuses")]
         public async Task<IActionResult> GetOrderStatuses()
         {
@@ -55,6 +54,10 @@ namespace APIDeliveryCRM.Controllers
             {
                 return new NotFoundResult();
             }
+            var companyId = ResolveCompanyId(null, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!companyId.HasValue) return Unauthorized();
+            if (order.Company_id != companyId.Value) return Forbid();
 
             return new OkObjectResult(order);
         }
@@ -76,6 +79,11 @@ namespace APIDeliveryCRM.Controllers
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreateOrderRequest request)
         {
+            var companyId = ResolveCompanyId(null, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!companyId.HasValue) return Unauthorized();
+            if (!await HasActiveSubscriptionAsync(companyId.Value))
+                return StatusCode(402, new { message = "РўР°СЂРёС„ РєРѕРјРїР°РЅРёРё РЅРµР°РєС‚РёРІРµРЅ. РћС„РѕСЂРјРёС‚Рµ РёР»Рё РїСЂРѕРґР»РёС‚Рµ РїРѕРґРїРёСЃРєСѓ." });
             try
             {
                 var created = await _orderService.CreateAsync(request);
@@ -98,7 +106,9 @@ namespace APIDeliveryCRM.Controllers
                 .AsNoTracking()
                 .FirstOrDefaultAsync(c => c.User_id == userId.Value);
             if (client == null)
-                return BadRequest(new { message = "Профиль клиента не найден для текущего пользователя." });
+                return BadRequest(new { message = "РџСЂРѕС„РёР»СЊ РєР»РёРµРЅС‚Р° РЅРµ РЅР°Р№РґРµРЅ РґР»СЏ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ." });
+            if (!await HasActiveSubscriptionAsync(client.Company_id))
+                return StatusCode(402, new { message = "РўР°СЂРёС„ РєРѕРјРїР°РЅРёРё РЅРµР°РєС‚РёРІРµРЅ. РЎРѕР·РґР°РЅРёРµ Р·Р°РєР°Р·РѕРІ РІСЂРµРјРµРЅРЅРѕ РЅРµРґРѕСЃС‚СѓРїРЅРѕ." });
 
             var orderTypeId = await _context.OrderTypes
                 .AsNoTracking()
@@ -118,9 +128,9 @@ namespace APIDeliveryCRM.Controllers
                 .FirstOrDefaultAsync();
 
             if (orderTypeId == 0 || statusId == 0 || packageTypeId == 0)
-                return BadRequest(new { message = "Не настроены справочники заказа (типы/статусы/пакеты)." });
+                return BadRequest(new { message = "РќРµ РЅР°СЃС‚СЂРѕРµРЅС‹ СЃРїСЂР°РІРѕС‡РЅРёРєРё Р·Р°РєР°Р·Р° (С‚РёРїС‹/СЃС‚Р°С‚СѓСЃС‹/РїР°РєРµС‚С‹)." });
             if (client.Preferred_payment_method_id <= 0 && fallbackPaymentMethodId == 0)
-                return BadRequest(new { message = "Не настроены способы оплаты для компании." });
+                return BadRequest(new { message = "РќРµ РЅР°СЃС‚СЂРѕРµРЅС‹ СЃРїРѕСЃРѕР±С‹ РѕРїР»Р°С‚С‹ РґР»СЏ РєРѕРјРїР°РЅРёРё." });
 
             var pickupAddress = new Address
             {
@@ -186,6 +196,13 @@ namespace APIDeliveryCRM.Controllers
             {
                 return new BadRequestResult();
             }
+            var companyId = ResolveCompanyId(null, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!companyId.HasValue) return Unauthorized();
+            var existing = await _orderService.GetByIdAsync(id);
+            if (existing == null) return NotFound();
+            if (existing.Company_id != companyId.Value) return Forbid();
+            order.Company_id = existing.Company_id;
 
             var updated = await _orderService.UpdateAsync(order);
             return new OkObjectResult(updated);
@@ -194,6 +211,12 @@ namespace APIDeliveryCRM.Controllers
         [HttpPost("{id:int}/status")]
         public async Task<IActionResult> ChangeStatus(int id, [FromQuery] int statusId)
         {
+            var companyId = ResolveCompanyId(null, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!companyId.HasValue) return Unauthorized();
+            var order = await _orderService.GetByIdAsync(id);
+            if (order == null) return NotFound();
+            if (order.Company_id != companyId.Value) return Forbid();
             var result = await _orderService.ChangeStatusAsync(id, statusId);
             if (!result)
             {
@@ -206,6 +229,12 @@ namespace APIDeliveryCRM.Controllers
         [HttpPost("{id:int}/assign")]
         public async Task<IActionResult> AssignCourier(int id, [FromQuery] int courierId)
         {
+            var companyId = ResolveCompanyId(null, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!companyId.HasValue) return Unauthorized();
+            var order = await _orderService.GetByIdAsync(id);
+            if (order == null) return NotFound();
+            if (order.Company_id != companyId.Value) return Forbid();
             var result = await _orderService.AssignCourierAsync(id, courierId);
             if (!result)
             {
@@ -218,6 +247,12 @@ namespace APIDeliveryCRM.Controllers
         [HttpPost("{id:int}/assign/override")]
         public async Task<IActionResult> ManualOverrideAssign(int id, [FromQuery] int courierId, [FromQuery] string? reason)
         {
+            var companyId = ResolveCompanyId(null, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!companyId.HasValue) return Unauthorized();
+            var order = await _orderService.GetByIdAsync(id);
+            if (order == null) return NotFound();
+            if (order.Company_id != companyId.Value) return Forbid();
             var actorUserId = GetCurrentUserId();
             var result = await _orderService.ManualOverrideCourierAsync(id, courierId, reason, actorUserId);
             if (!result)
@@ -229,9 +264,15 @@ namespace APIDeliveryCRM.Controllers
         [HttpPost("{id:int}/auto-dispatch")]
         public async Task<IActionResult> AutoDispatch(int id)
         {
+            var companyId = ResolveCompanyId(null, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!companyId.HasValue) return Unauthorized();
+            var order = await _orderService.GetByIdAsync(id);
+            if (order == null) return NotFound();
+            if (order.Company_id != companyId.Value) return Forbid();
             var result = await _orderService.AutoDispatchAsync(id);
             if (result == null)
-                return NotFound(new { message = "Заказ не найден или нет доступных онлайн-курьеров." });
+                return NotFound(new { message = "Р—Р°РєР°Р· РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РЅРµС‚ РґРѕСЃС‚СѓРїРЅС‹С… РѕРЅР»Р°Р№РЅ-РєСѓСЂСЊРµСЂРѕРІ." });
 
             return Ok(result);
         }
@@ -241,6 +282,21 @@ namespace APIDeliveryCRM.Controllers
         {
             var timeline = await _orderService.GetTimelineAsync(id);
             return Ok(timeline);
+        }
+
+        [HttpPost("{id:int}/pay")]
+        [Authorize(Roles = "РљР»РёРµРЅС‚")]
+        public async Task<IActionResult> PayOrder(int id)
+        {
+            var userId = GetCurrentUserId();
+            if (!userId.HasValue)
+                return Unauthorized();
+
+            var (ok, err) = await _orderService.ClientCompleteOrderPaymentAsync(id, userId.Value);
+            if (!ok)
+                return BadRequest(new { message = err });
+
+            return Ok(new { paid = true });
         }
 
         [HttpGet("{id:int}/eta")]
@@ -272,6 +328,16 @@ namespace APIDeliveryCRM.Controllers
             }
 
             return claimCompanyId;
+        }
+
+        private async Task<bool> HasActiveSubscriptionAsync(int companyId)
+        {
+            var company = await _context.Companies
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.ID_Company == companyId);
+            if (company == null || !company.Is_Active)
+                return false;
+            return company.SubscriptionExpiresAt == default || company.SubscriptionExpiresAt >= DateTime.UtcNow;
         }
     }
 }

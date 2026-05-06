@@ -1,0 +1,5 @@
+@page "/logistician/profile"
+@layout LogisticianLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Логист,Администратор,Админ")]
+
+<UserProfileEditor Title="Профиль логиста" />

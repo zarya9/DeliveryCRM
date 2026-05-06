@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APIDeliveryCRM.Model
@@ -21,7 +21,6 @@ namespace APIDeliveryCRM.Model
         [MaxLength(20)]
         public string Frequency { get; set; } = "Daily"; // Daily, Weekly, Monthly
 
-        /// <summary>Время запуска в UTC: HH:mm.</summary>
         [Required]
         [MaxLength(5)]
         public string TimeUtc { get; set; } = "06:00";

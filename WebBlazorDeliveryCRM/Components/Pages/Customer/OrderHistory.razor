@@ -1,10 +1,12 @@
 @page "/customer/orders/history"
 @layout CustomerLayout
+@using System.Security.Claims
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
-@using System.Security.Claims
 @inject ClientsApiService ClientsApi
 @inject AuthenticationStateProvider AuthState
+@inject OrdersApiService OrdersApi
+@inject AppNotificationService Notify
 
 <PageTitle>История заказов — Клиент</PageTitle>
 
@@ -28,6 +30,7 @@
                         <th>Создан</th>
                         <th>Статус</th>
                         <th>Оплата</th>
+                        <th class="text-nowrap">Действие</th>
                         <th>Сумма</th>
                         <th>Приоритет</th>
                         <th>Окно доставки</th>
@@ -50,10 +53,16 @@
                                 }
                                 else
                                 {
-                                    <span class="badge text-bg-secondary">Не оплачен</span>
+                                    <span class="badge rounded-pill bg-warning text-dark">Не оплачен</span>
                                 }
                             </td>
-                            <td>@(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost) ₽</td>
+                            <td>
+                                @if (!o.Is_paid)
+                                {
+                                    <button type="button" class="btn btn-sm btn-primary" disabled="@IsPaying(o.ID_Order)" @onclick="() => PayAsync(o)">Оплатить</button>
+                                }
+                            </td>
+                            <td>@FormatMoneyRub(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost)</td>
                             <td>@PriorityLabel(o.Priority)</td>
                             <td>@FormatDeliveryWindow(o)</td>
                             <td>@FormatRouteKind(o.DeliveryRouteKind)</td>
@@ -77,6 +86,7 @@
 @code {
     private List<OrderDto>? _orders;
     private bool _loaded;
+    private readonly HashSet<int> _payingIds = new();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -100,6 +110,39 @@
         _loaded = true;
         StateHasChanged();
     }
+
+    private bool IsPaying(int id) => _payingIds.Contains(id);
+
+    private async Task PayAsync(OrderDto o)
+    {
+        _payingIds.Add(o.ID_Order);
+        try
+        {
+            var (ok, err) = await OrdersApi.PayOrderAsync(o.ID_Order);
+            if (!ok)
+            {
+                Notify.ShowError(err ?? "Не удалось оплатить.");
+                return;
+            }
+
+            Notify.ShowSuccess("Оплата прошла успешно.");
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var userIdStr = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(userIdStr, out var userId))
+            {
+                var client = await ClientsApi.GetByUserIdAsync(userId);
+                if (client != null)
+                    _orders = await ClientsApi.GetOrdersAsync(client.ID_ClientProfile) ?? new List<OrderDto>();
+            }
+        }
+        finally
+        {
+            _payingIds.Remove(o.ID_Order);
+            StateHasChanged();
+        }
+    }
+
+    private static string FormatMoneyRub(decimal v) => $"{v:N2} ₽";
 
     private static string PriorityLabel(byte p) => p switch
     {

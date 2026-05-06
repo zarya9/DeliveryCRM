@@ -47,7 +47,7 @@
                             <td>@o.Order_Number</td>
                             <td>@o.Name</td>
                             <td>@(o.OrderStatus?.Name ?? "—")</td>
-                            <td>@(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost) ₽</td>
+                            <td>@($"{(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost):N2} ₽")</td>
                             <td>@FormatDeliveryWindow(o)</td>
                             <td>@o.Created_at.ToString("dd.MM.yyyy")</td>
                         </tr>
@@ -72,15 +72,17 @@
 @if (_showCreateModal)
 {
     <div class="employee-modal-backdrop" @onclick="CloseCreateModal">
-        <div class="employee-modal" style="max-width: 720px;" @onclick:stopPropagation="true">
-            <div class="d-flex justify-content-between align-items-start mb-3">
-                <h2 class="h5 mb-0">Новый заказ</h2>
+        <div class="employee-modal employee-modal--order-wizard" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-center flex-shrink-0 mb-2">
+                <h2 class="h6 mb-0">Новый заказ</h2>
                 <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseCreateModal"></button>
             </div>
-            <CustomerCreateOrderForm @key="_formMountKey"
-                                     ShowCancel="true"
-                                     OnSuccess="AfterOrderCreatedAsync"
-                                     OnCancel="CloseCreateModal" />
+            <div class="order-wizard-fill">
+                <CustomerCreateOrderForm @key="_formMountKey"
+                                         ShowCancel="true"
+                                         OnSuccess="AfterOrderCreatedAsync"
+                                         OnCancel="CloseCreateModal" />
+            </div>
         </div>
     </div>
 }

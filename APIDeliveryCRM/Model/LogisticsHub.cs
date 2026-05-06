@@ -1,9 +1,8 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APIDeliveryCRM.Model;
 
-/// <summary>Склад / сортировочный пункт компании (хаб маршрута).</summary>
 public class LogisticsHub
 {
     [Key]

@@ -1,13 +1,9 @@
 @page "/manager/notifications"
 @layout ManagerLayout
-@implements IDisposable
 @using Microsoft.AspNetCore.SignalR.Client
-@using WebBlazorDeliveryCRM.Models
-@using WebBlazorDeliveryCRM.Services
 @using WebBlazorDeliveryCRM.Components.Shared
-@inject NotificationsApiService NotificationsApi
+@using WebBlazorDeliveryCRM.Services
 @inject ChatHubClientService ChatHub
-@inject AppNotificationService Notify
 
 <PageTitle>Уведомления</PageTitle>
 
@@ -21,174 +17,24 @@
                  Tone="@(_hubConnected ? "success" : "warning")" />
 </div>
 
-<div class="dms-card">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2 class="dms-card-title mb-0">Входящие</h2>
-        <div class="d-flex gap-2">
-            <label class="d-flex align-items-center gap-1 small"><input type="checkbox" @bind="_onlyUnread" /> Непрочитанные</label>
-            <label class="d-flex align-items-center gap-1 small"><input type="checkbox" @bind="_onlyCritical" /> Критичные</label>
-            <label class="d-flex align-items-center gap-1 small"><input type="checkbox" @bind="_onlyAckRequired" /> Требуют подтверждения</label>
-            <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_loading" @onclick="@(async () => await Reload())">
-                @(_loading ? "…" : "Обновить")
-            </button>
-        </div>
-    </div>
-
-    @if (_loading && _items is null)
-    {
-        <p class="text-muted">Загрузка…</p>
-    }
-    else if (_items is null || _items.Count == 0)
-    {
-        <p class="text-muted mb-0">Пока нет уведомлений. Они появятся при новых сообщениях в чатах и других событиях.</p>
-    }
-    else
-    {
-        <div class="list-group">
-            @foreach (var n in _items.OrderByDescending(x => x.SentAt))
-            {
-                <div class="list-group-item list-group-item-action d-flex flex-column flex-md-row gap-2 @(n.IsRead ? "" : "list-group-item-primary bg-opacity-10")">
-                    <div class="flex-grow-1">
-                        <div class="d-flex flex-wrap gap-2 align-items-baseline">
-                            <strong>@n.Title</strong>
-                            @if (!string.IsNullOrEmpty(n.TypeName))
-                            {
-                                <StatusBadge Text="@n.TypeName" Tone="neutral" />
-                            }
-                            @if (!n.IsRead)
-                            {
-                                <StatusBadge Text="Новое" Tone="primary" />
-                            }
-                            @if (n.IsCritical)
-                            {
-                                <StatusBadge Text="Критичное" Tone="danger" />
-                            }
-                            @if (n.RequiresAck && !n.AcknowledgedAt.HasValue)
-                            {
-                                <StatusBadge Text="Нужно подтвердить" Tone="warning" />
-                            }
-                        </div>
-                        <p class="mb-1 mt-1 small">@n.Message</p>
-                        <div class="text-muted small">
-                            @n.SentAt.ToString("dd.MM.yyyy")
-                            @if (n.OrderId.HasValue)
-                            {
-                                <span> · Заказ #@n.OrderId</span>
-                            }
-                        </div>
-                    </div>
-                    @if (!n.IsRead)
-                    {
-                        <div>
-                            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_marking" @onclick="() => MarkRead(n)">
-                                Прочитано
-                            </button>
-                            @if (n.RequiresAck && !n.AcknowledgedAt.HasValue)
-                            {
-                                <button type="button" class="btn btn-sm btn-outline-danger ms-1" disabled="@_marking" @onclick="() => Ack(n)">
-                                    Подтвердить
-                                </button>
-                            }
-                        </div>
-                    }
-                </div>
-            }
-        </div>
-    }
-</div>
+<NotificationsInbox />
 
 @code {
-    private List<NotificationItemDto>? _items;
-    private bool _loading = true;
-    private bool _marking;
-    private IDisposable? _hubSub;
-    private bool _onlyUnread;
-    private bool _onlyCritical;
-    private bool _onlyAckRequired;
     private bool _hubConnected;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-
-        await Reload();
-
         try
         {
             var conn = await ChatHub.GetConnectionAsync();
             await ChatHub.StartAsync();
             _hubConnected = conn.State == HubConnectionState.Connected;
-            _hubSub = conn.On<NotificationReceivedSignalDto>("NotificationReceived", _ =>
-            {
-                Notify.ShowInfo("Новое уведомление");
-                return Reload(showSpinner: false);
-            });
         }
         catch
         {
             _hubConnected = false;
         }
-    }
-
-    private async Task Reload(bool showSpinner = true)
-    {
-        if (showSpinner)
-        {
-            _loading = true;
-            StateHasChanged();
-        }
-        try
-        {
-            _items = await NotificationsApi.GetMineAsync(
-                onlyCritical: _onlyCritical,
-                onlyUnread: _onlyUnread,
-                onlyRequiresAck: _onlyAckRequired) ?? new();
-        }
-        finally
-        {
-            if (showSpinner)
-                _loading = false;
-            StateHasChanged();
-        }
-    }
-
-    private async Task MarkRead(NotificationItemDto n)
-    {
-        _marking = true;
-        try
-        {
-            if (await NotificationsApi.MarkAsReadAsync(n.Id))
-            {
-                n.IsRead = true;
-                StateHasChanged();
-            }
-        }
-        finally
-        {
-            _marking = false;
-        }
-    }
-
-    private async Task Ack(NotificationItemDto n)
-    {
-        _marking = true;
-        try
-        {
-            if (await NotificationsApi.AcknowledgeAsync(n.Id))
-            {
-                n.AcknowledgedAt = DateTime.UtcNow;
-                n.IsRead = true;
-                StateHasChanged();
-            }
-        }
-        finally
-        {
-            _marking = false;
-        }
-    }
-
-    public void Dispose()
-    {
-        _hubSub?.Dispose();
+        StateHasChanged();
     }
 }

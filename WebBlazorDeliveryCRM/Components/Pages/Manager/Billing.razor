@@ -5,6 +5,7 @@
 @inject BillingApiService BillingApi
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
+@inject AppNotificationService Notify
 @implements IDisposable
 
 <PageTitle>Оплата и тариф</PageTitle>
@@ -25,6 +26,13 @@
              Value="@((Subscription?.CurrentPeriodEndAt).HasValue ? Subscription!.CurrentPeriodEndAt.ToString("dd.MM.yyyy") : "—")"
              Meta="UTC" />
 </div>
+@if (Subscription?.PendingPlanEffectiveAt.HasValue == true)
+{
+    <div class="alert alert-info">
+        Понижение до тарифа <strong>@Subscription.PendingPlanName</strong> запланировано на
+        <strong>@Subscription.PendingPlanEffectiveAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</strong>.
+    </div>
+}
 
 <div class="dms-card mb-4">
     <h2 class="dms-card-title">Тарифы</h2>
@@ -52,13 +60,18 @@
                 <tbody>
                     @foreach (var p in Plans)
                     {
+                        var actionInfo = GetPlanActionInfo(p);
                         <tr>
                             <td><strong>@p.Name</strong> <span class="text-muted">(@p.Code)</span></td>
                             <td>@p.MonthlyPrice @("RUB")</td>
                             <td>@p.MaxUsers</td>
                             <td>@p.MaxOrdersPerMonth</td>
                             <td class="text-end">
-                                <button class="btn btn-sm btn-primary" @onclick="() => StartCheckout(p.Code)">Оплатить</button>
+                                <button class="btn btn-sm btn-primary"
+                                        disabled="@(_checkoutInProgress || actionInfo.Disabled)"
+                                        @onclick="() => StartCheckout(p.Code)">
+                                    @(actionInfo.ButtonText)
+                                </button>
                             </td>
                         </tr>
                     }
@@ -131,6 +144,7 @@
     private List<BillingInvoiceDto> Invoices = new();
     private string StatusFilter = string.Empty;
     private bool AutoRefresh;
+    private bool _checkoutInProgress;
     private PeriodicTimer? _timer;
     private CancellationTokenSource? _refreshCts;
     private string PlanMeta => $"Код: {Subscription?.PlanCode ?? "—"}";
@@ -176,16 +190,71 @@
 
     private async Task StartCheckout(string planCode)
     {
-        var checkout = await BillingApi.CreateCheckoutAsync(new CreateCheckoutSessionRequestDto
-        {
-            PlanCode = planCode,
-            PeriodMonths = 1
-        });
-        if (checkout is null || string.IsNullOrWhiteSpace(checkout.CheckoutUrl))
+        if (_checkoutInProgress)
             return;
 
-        await JS.InvokeVoidAsync("open", checkout.CheckoutUrl, "_blank");
-        await Reload();
+        _checkoutInProgress = true;
+        StateHasChanged();
+        try
+        {
+            var result = await BillingApi.CreateCheckoutAsync(new CreateCheckoutSessionRequestDto
+            {
+                PlanCode = planCode,
+                PeriodMonths = 1
+            });
+            if (!result.Ok || result.Session is null)
+            {
+                Notify.ShowError(result.Error ?? "Не удалось начать оплату.");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(result.Session.Message))
+                Notify.ShowInfo(result.Session.Message);
+
+            if (string.Equals(result.Session.Action, "scheduled_downgrade", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(result.Session.Action, "upgraded", StringComparison.OrdinalIgnoreCase))
+            {
+                await Reload();
+                return;
+            }
+
+            if (!Uri.TryCreate(result.Session.CheckoutUrl, UriKind.Absolute, out var uri)
+                || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+            {
+                Notify.ShowError("Платежная ссылка некорректна.");
+                return;
+            }
+
+            try
+            {
+                await JS.InvokeVoidAsync("open", result.Session.CheckoutUrl, "_blank", "noopener,noreferrer");
+            }
+            catch
+            {
+                Navigation.NavigateTo(result.Session.CheckoutUrl, forceLoad: true);
+            }
+
+            await Reload();
+        }
+        finally
+        {
+            _checkoutInProgress = false;
+            StateHasChanged();
+        }
+    }
+
+    private (string ButtonText, bool Disabled) GetPlanActionInfo(SubscriptionPlanDto plan)
+    {
+        if (Subscription is null)
+            return ("Оплатить", false);
+        if (string.Equals(Subscription.PlanCode, plan.Code, StringComparison.OrdinalIgnoreCase))
+            return ("Текущий тариф", true);
+        var current = Plans.FirstOrDefault(p => string.Equals(p.Code, Subscription.PlanCode, StringComparison.OrdinalIgnoreCase));
+        if (current is null)
+            return ("Оплатить", false);
+        return plan.MonthlyPrice > current.MonthlyPrice
+            ? ("Повысить тариф", false)
+            : ("Понизить с след. месяца", false);
     }
 
     private string GetInvoiceStatusTone(string? status)
@@ -194,6 +263,9 @@
         {
             "paid" => "success",
             "pending" => "warning",
+            "pending_upgrade" => "warning",
+            "scheduled_downgrade" => "neutral",
+            "applied" => "success",
             "failed" => "danger",
             "canceled" => "neutral",
             _ => "neutral"

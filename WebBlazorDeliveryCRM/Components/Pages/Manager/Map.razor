@@ -5,6 +5,7 @@
 @inject CouriersApiService CouriersApi
 @inject OrdersApiService OrdersApi
 @inject CompanySettingsApiService CompanySettingsApi
+@inject LogisticsHubsApiService HubsApi
 @inject IJSRuntime JS
 @inject IConfiguration Configuration
 
@@ -140,6 +141,7 @@
     private DateTime _periodFrom;
     private DateTime _periodTo;
     private List<HotZoneRow> _hotZones = new();
+    private List<LogisticsHubListItemDto> _hubs = new();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -244,6 +246,7 @@
     private async Task ReloadAsync()
     {
         _couriers = await CouriersApi.GetAllAsync(null);
+        _hubs = await HubsApi.GetMineAsync();
         var from = DateTime.SpecifyKind(_periodFrom.Date, DateTimeKind.Utc);
         var to = DateTime.SpecifyKind(_periodTo.Date, DateTimeKind.Utc).AddDays(1).AddTicks(-1);
         _orders = await OrdersApi.GetAllAsync(null, from, to);
@@ -255,6 +258,14 @@
         var markers = (_couriers ?? new List<CourierProfileDto>())
             .Where(c => c.Current_lat != 0 || c.Current_lon != 0)
             .Select(c => new { lat = (double)c.Current_lat, lon = (double)c.Current_lon, title = $"{c.User?.FName} {c.User?.Name} — {c.CourierStatus?.Name}" })
+            .Concat(_hubs
+                .Where(h => h.Latitude.HasValue && h.Longitude.HasValue)
+                .Select(h => new
+                {
+                    lat = (double)h.Latitude!.Value,
+                    lon = (double)h.Longitude!.Value,
+                    title = $"Склад: {(string.IsNullOrWhiteSpace(h.Name) ? "Склад" : h.Name)}"
+                }))
             .ToList();
 
         await JS.InvokeVoidAsync("leafletMap.clearMarkers");

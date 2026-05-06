@@ -18,6 +18,9 @@ public class CompanySubscriptionDto
     public string PlanName { get; set; } = string.Empty;
     public DateTime CurrentPeriodEndAt { get; set; }
     public bool AutoRenew { get; set; }
+    public string? PendingPlanCode { get; set; }
+    public string? PendingPlanName { get; set; }
+    public DateTime? PendingPlanEffectiveAt { get; set; }
 }
 
 public class CreateCheckoutSessionRequestDto
@@ -34,6 +37,8 @@ public class CheckoutSessionResponseDto
     public string CheckoutUrl { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "RUB";
+    public string Action { get; set; } = "checkout";
+    public string Message { get; set; } = string.Empty;
 }
 
 public class BillingInvoiceDto
@@ -49,4 +54,12 @@ public class BillingInvoiceDto
     public DateTime DueAt { get; set; }
     public DateTime? PaidAt { get; set; }
     public int PeriodMonths { get; set; }
+    public string? Description { get; set; }
+}
+
+public sealed class BillingCheckoutResultDto
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public CheckoutSessionResponseDto? Session { get; set; }
 }

@@ -1,4 +1,4 @@
-namespace WebBlazorDeliveryCRM.Models;
+﻿namespace WebBlazorDeliveryCRM.Models;
 
 public class CourierProfileDto
 {
@@ -15,10 +15,8 @@ public class CourierProfileDto
     public string? Passport_data { get; set; }
     public UserDto? User { get; set; }
     public CourierStatusDto? CourierStatus { get; set; }
-    /// <summary>Устаревшее плоское поле; приоритет — <see cref="VehicleCategory"/>.</summary>
     public string? VehicleCategoryName { get; set; }
     public VehicleCategoryNavDto? VehicleCategory { get; set; }
-    /// <summary>Устаревшее плоское поле; приоритет — <see cref="ScheduleType"/>.</summary>
     public string? ScheduleName { get; set; }
     public ScheduleTypeNavDto? ScheduleType { get; set; }
 }

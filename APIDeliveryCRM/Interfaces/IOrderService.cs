@@ -20,6 +20,7 @@ namespace APIDeliveryCRM.Interfaces
         Task<bool> ManualOverrideCourierAsync(int orderId, int courierProfileId, string? reason, int? actorUserId = null);
         Task<IReadOnlyList<OrderTimelineEvent>> GetTimelineAsync(int orderId);
         Task<OrderEtaDto?> GetEtaAsync(int orderId);
+        Task<(bool ok, string? error)> ClientCompleteOrderPaymentAsync(int orderId, int userId);
     }
 }
 

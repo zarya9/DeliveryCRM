@@ -9,6 +9,7 @@ namespace APIDeliveryCRM.Interfaces
         Task<IActionResult> GetByCompanyAsync(int companyId);
         Task<IActionResult> CreateAsync(CreateEmployeeRequest request, int companyId);
         Task<IActionResult> FireAsync(int employeeId, int companyId, int actorUserId);
+        Task<IActionResult> ChangeRoleAsync(int employeeId, int companyId, int actorUserId, int roleId);
     }
 }
 

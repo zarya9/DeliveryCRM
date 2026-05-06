@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20251209102823_VehicleInfo")]
     partial class VehicleInfo
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

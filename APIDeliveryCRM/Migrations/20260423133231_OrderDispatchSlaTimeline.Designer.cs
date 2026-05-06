@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20260423133231_OrderDispatchSlaTimeline")]
     partial class OrderDispatchSlaTimeline
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

@@ -51,6 +51,9 @@
         </button>
         @if (_isAuthenticated)
         {
+            <a href="@ProfileHref" class="dms-btn-outline dms-icon-btn" title="Профиль" aria-label="Профиль">
+                <HugeIcon Name="user-03" CssClass="dms-icon" />
+            </a>
             <a href="@NotificationsHref" class="dms-btn-outline dms-icon-btn" title="Уведомления" aria-label="Уведомления">
                 <HugeIcon Name="notification-01" CssClass="dms-icon" />
             </a>
@@ -77,8 +80,21 @@
     private string ThemeIconName => _theme == "dark" ? "sun-03" : "moon-02";
     private string DisplayTitle =>
         ResolveDisplayTitle(_companyName, _role);
-    private string NotificationsHref =>
-        string.Equals(_role, "Клиент", StringComparison.Ordinal) ? "/customer/notifications" : "/manager/notifications";
+    private string NotificationsHref => _role switch
+    {
+        "Клиент" => "/customer/notifications",
+        "Курьер" => "/courier/notifications",
+        _ => "/manager/notifications"
+    };
+    private string ProfileHref => _role switch
+    {
+        "Клиент" => "/customer/profile",
+        "Курьер" => "/courier/profile",
+        "Логист" => "/logistician/profile",
+        "Менеджер" => "/manager/profile",
+        "Админ" or "Администратор" => "/manager/profile",
+        _ => "/customer/profile"
+    };
     private bool _showUiSettings;
     private string _uiAccent = "#008b8b";
     private string _uiBackground = "plain";
@@ -190,7 +206,7 @@
         catch { /* ignore */ }
 
         await AuthState.MarkUserAsLoggedOutAsync();
-        Navigation.NavigateTo("/", forceLoad: true);
+        Navigation.NavigateTo("/login", forceLoad: true, replace: true);
     }
 
     private void AttachChatHandlers()
@@ -212,6 +228,16 @@
                 }
 
                 await ChatUnreadState.RefreshAsync();
+            });
+        });
+
+        ChatHub.Connection.On<IncomingNotificationSignal>("NotificationReceived", payload =>
+        {
+            return InvokeAsync(() =>
+            {
+                var title = string.IsNullOrWhiteSpace(payload.title) ? "Уведомление" : payload.title!;
+                var body = string.IsNullOrWhiteSpace(payload.message) ? "Новое событие в системе." : payload.message!;
+                Notify.ShowInfo($"{title}: {body}", pushWhenHidden: true);
             });
         });
 
@@ -239,6 +265,13 @@
         public int chatRoomId { get; set; }
         public int senderId { get; set; }
         public string? senderName { get; set; }
+    }
+
+    private sealed class IncomingNotificationSignal
+    {
+        public int id { get; set; }
+        public string? title { get; set; }
+        public string? message { get; set; }
     }
 
     private static string ResolveDisplayTitle(string? companyName, string? role)

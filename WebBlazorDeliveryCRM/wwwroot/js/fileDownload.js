@@ -46,5 +46,11 @@ window.fileDownload = {
             a.download = fileName || "download";
             a.click();
         }
+    },
+    scrollToBottom: function (elementId) {
+        if (!elementId) return;
+        const el = document.getElementById(elementId);
+        if (!el) return;
+        el.scrollTop = el.scrollHeight;
     }
 };

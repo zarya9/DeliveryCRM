@@ -1,717 +1,602 @@
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
+using APIDeliveryCRM.Hubs;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
-using APIDeliveryCRM.Responses;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
-namespace APIDeliveryCRM.Services
+namespace APIDeliveryCRM.Services;
+
+public class ChatService : IChatService
 {
-    public class ChatService : IChatService
+    private readonly ContextDB _context;
+    private readonly IHubContext<ChatHub> _hubContext;
+    private readonly IChatMessageCryptoService _crypto;
+
+    public ChatService(ContextDB context, IHubContext<ChatHub> hubContext, IChatMessageCryptoService crypto)
     {
-        private readonly ContextDB _context;
-        private readonly IHubContext<Hubs.ChatHub> _hubContext;
-        private readonly INotificationService _notificationService;
-        private readonly IChatMessageCryptoService _chatCrypto;
-        private readonly ILogger<ChatService> _logger;
+        _context = context;
+        _hubContext = hubContext;
+        _crypto = crypto;
+    }
 
-        public ChatService(ContextDB context, IHubContext<Hubs.ChatHub> hubContext, 
-            INotificationService notificationService, IChatMessageCryptoService chatCrypto, ILogger<ChatService> logger)
+    public async Task<IActionResult> SendMessageAsync(int chatRoomId, int senderId, string? messageText, string? attachmentUrl = null)
+    {
+        var room = await _context.ChatRooms
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.ID_ChatRoom == chatRoomId);
+        if (room == null)
+            return new NotFoundObjectResult(new { message = "Чат не найден." });
+
+        var isParticipant = await _context.ChatParticipants
+            .AsNoTracking()
+            .AnyAsync(p => p.ChatRoom_id == chatRoomId && p.User_id == senderId && p.Is_active);
+        if (!isParticipant)
+            return new ForbidResult();
+
+        if (string.IsNullOrWhiteSpace(messageText) && string.IsNullOrWhiteSpace(attachmentUrl))
+            return new BadRequestObjectResult(new { message = "Пустое сообщение." });
+
+        var plainText = (messageText ?? string.Empty).Trim();
+        var storedText = string.IsNullOrWhiteSpace(plainText) ? string.Empty : _crypto.Encrypt(plainText);
+
+        var msg = new ChatMessage
         {
-            _context = context;
-            _hubContext = hubContext;
-            _notificationService = notificationService;
-            _chatCrypto = chatCrypto;
-            _logger = logger;
-        }
+            ChatRoom_id = chatRoomId,
+            Sender_id = senderId,
+            MessageText = storedText,
+            AttachmentUrl = string.IsNullOrWhiteSpace(attachmentUrl) ? null : attachmentUrl.Trim(),
+            Sent_at = DateTime.UtcNow,
+            Is_deleted = false
+        };
+        _context.ChatMessages.Add(msg);
 
-        public async Task<IActionResult> SendMessageAsync(int chatRoomId, int senderId, string? messageText, string? attachmentUrl = null)
+        var editableRoom = await _context.ChatRooms.FirstOrDefaultAsync(r => r.ID_ChatRoom == chatRoomId);
+        if (editableRoom != null)
+            editableRoom.LastMessage_at = msg.Sent_at;
+
+        await _context.SaveChangesAsync();
+
+        var senderName = await _context.Users.AsNoTracking()
+            .Where(u => u.ID_User == senderId)
+            .Select(u => ((u.FName ?? "") + " " + (u.Name ?? "")).Trim())
+            .FirstOrDefaultAsync();
+
+        var payload = new
         {
-            var normalizedText = messageText?.Trim() ?? string.Empty;
-            var normalizedAttachmentUrl = string.IsNullOrWhiteSpace(attachmentUrl) ? null : attachmentUrl.Trim();
-            if (string.IsNullOrWhiteSpace(normalizedText) && string.IsNullOrWhiteSpace(normalizedAttachmentUrl))
+            id = msg.ID_ChatMessage,
+            chatRoomId = msg.ChatRoom_id,
+            senderId = msg.Sender_id,
+            senderName = string.IsNullOrWhiteSpace(senderName) ? $"Пользователь #{senderId}" : senderName,
+            messageText = plainText,
+            attachmentUrl = msg.AttachmentUrl,
+            sentAt = msg.Sent_at,
+            editedAt = msg.Edited_at,
+            isDeleted = msg.Is_deleted
+        };
+        await BroadcastToRoomParticipantsAsync(chatRoomId, "ReceiveMessage", payload);
+        return new OkObjectResult(payload);
+    }
+
+    public async Task<IActionResult> GetMessagesAsync(int chatRoomId, int skip = 0, int take = 50)
+    {
+        if (take <= 0) take = 50;
+        if (take > 200) take = 200;
+        if (skip < 0) skip = 0;
+
+        var rows = await _context.ChatMessages
+            .AsNoTracking()
+            .Where(m => m.ChatRoom_id == chatRoomId)
+            .Include(m => m.Sender)
+            .OrderByDescending(m => m.Sent_at)
+            .Skip(skip)
+            .Take(take)
+            .ToListAsync();
+
+        var list = rows
+            .Select(m => new
             {
-                return new BadRequestObjectResult(new { message = "Сообщение должно содержать текст, файл или текст с файлом." });
-            }
-
-            var chatRoom = await _context.ChatRooms.FindAsync(chatRoomId);
-            if (chatRoom == null)
-            {
-                return new NotFoundObjectResult(new { message = "Чат-комната не найдена" });
-            }
-
-            var sender = await _context.Users.FindAsync(senderId);
-            if (sender == null)
-            {
-                return new NotFoundObjectResult(new { message = "Отправитель не найден" });
-            }
-
-            var message = new ChatMessage
-            {
-                ChatRoom_id = chatRoomId,
-                Sender_id = senderId,
-                MessageText = _chatCrypto.Encrypt(normalizedText),
-                AttachmentUrl = normalizedAttachmentUrl,
-                Sent_at = DateTime.UtcNow,
-                Is_deleted = false
-            };
-
-            await _context.ChatMessages.AddAsync(message);
-            
-            chatRoom.LastMessage_at = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
-
-            // Отправляем сообщение через SignalR
-            await _hubContext.Clients.Group($"ChatRoom_{chatRoomId}").SendAsync("ReceiveMessage", new
-            {
-                id = message.ID_ChatMessage,
-                chatRoomId = chatRoomId,
-                senderId = senderId,
-                senderName = $"{sender.FName} {sender.Name}",
-                messageText = normalizedText,
-                attachmentUrl = normalizedAttachmentUrl,
-                sentAt = message.Sent_at
-            });
-
-            // Отправляем уведомления участникам, которые не в сети
-            await SendNotificationsToParticipantsAsync(chatRoomId, senderId, sender, normalizedText, chatRoom);
-
-            return new OkObjectResult(new { message = "Сообщение отправлено", messageId = message.ID_ChatMessage });
-        }
-
-        public async Task<IActionResult> GetMessagesAsync(int chatRoomId, int skip = 0, int take = 50)
-        {
-            var messages = await _context.ChatMessages
-                .Where(m => m.ChatRoom_id == chatRoomId && !m.Is_deleted)
-                .Include(m => m.Sender)
-                .OrderByDescending(m => m.Sent_at)
-                .Skip(skip)
-                .Take(take)
-                .ToListAsync();
-
-            var response = messages
-                .OrderBy(m => m.Sent_at)
-                .Select(m => new
-                {
-                    m.ID_ChatMessage,
-                    m.ChatRoom_id,
-                    m.Sender_id,
-                    SenderName = $"{m.Sender.FName} {m.Sender.Name}".Trim(),
-                    MessageText = _chatCrypto.Decrypt(m.MessageText),
-                    m.AttachmentUrl,
-                    m.Sent_at,
-                    m.Edited_at,
-                    m.Is_deleted
-                })
-                .ToList();
-
-            return new OkObjectResult(response);
-        }
-
-        public async Task<IActionResult> GetChatRoomsForUserAsync(int userId)
-        {
-            var chatRooms = await _context.ChatParticipants
-                .Where(cp => cp.User_id == userId && cp.Is_active)
-                .Include(cp => cp.ChatRoom)
-                    .ThenInclude(cr => cr.Order)
-                .Include(cp => cp.ChatRoom)
-                    .ThenInclude(cr => cr.ChatRoomType)
-                .Select(cp => cp.ChatRoom)
-                .ToListAsync();
-
-            return new OkObjectResult(chatRooms);
-        }
-
-        public async Task<IActionResult> CreateChatRoomAsync(int orderId, List<int> participantIds)
-        {
-            var order = await _context.Orders.FindAsync(orderId);
-            if (order == null)
-            {
-                return new NotFoundObjectResult(new { message = "Заказ не найден" });
-            }
-
-            // Получаем тип чата для заказа (предполагаем, что есть тип "Order")
-            var orderChatType = await _context.ChatRoomTypes.FirstOrDefaultAsync(ct => ct.Name == "Заказ");
-            if (orderChatType == null)
-            {
-                // Создаем тип чата, если его нет
-                orderChatType = new ChatRoomType
-                {
-                    Name = "Заказ",
-                    Description = "Чат для обсуждения заказа"
-                };
-                await _context.ChatRoomTypes.AddAsync(orderChatType);
-                await _context.SaveChangesAsync();
-            }
-
-            var chatRoom = new ChatRoom
-            {
-                Name = $"Чат по заказу #{order.Order_Number}",
-                ChatRoomType_id = orderChatType.ID_ChatRoomType,
-                Order_id = orderId,
-                Created_at = DateTime.UtcNow
-            };
-
-            await _context.ChatRooms.AddAsync(chatRoom);
-            await _context.SaveChangesAsync();
-
-            // Добавляем участников
-            foreach (var participantId in participantIds)
-            {
-                var participant = new ChatParticipant
-                {
-                    ChatRoom_id = chatRoom.ID_ChatRoom,
-                    User_id = participantId,
-                    Joined_at = DateTime.UtcNow,
-                    Is_active = true
-                };
-                await _context.ChatParticipants.AddAsync(participant);
-            }
-
-            await _context.SaveChangesAsync();
-
-            return new OkObjectResult(new { message = "Чат-комната создана", chatRoomId = chatRoom.ID_ChatRoom });
-        }
-
-        public async Task<IActionResult> JoinChatRoomAsync(int chatRoomId, int userId)
-        {
-            var chatRoom = await _context.ChatRooms.FindAsync(chatRoomId);
-            if (chatRoom == null)
-            {
-                return new NotFoundObjectResult(new { message = "Чат-комната не найдена" });
-            }
-
-            var existingParticipant = await _context.ChatParticipants
-                .FirstOrDefaultAsync(cp => cp.ChatRoom_id == chatRoomId && cp.User_id == userId);
-
-            if (existingParticipant != null)
-            {
-                existingParticipant.Is_active = true;
-                existingParticipant.Left_at = null;
-                existingParticipant.Joined_at = DateTime.UtcNow;
-            }
-            else
-            {
-                var participant = new ChatParticipant
-                {
-                    ChatRoom_id = chatRoomId,
-                    User_id = userId,
-                    Joined_at = DateTime.UtcNow,
-                    Is_active = true
-                };
-                await _context.ChatParticipants.AddAsync(participant);
-            }
-
-            await _context.SaveChangesAsync();
-            return new OkObjectResult(new { message = "Пользователь присоединился к чату" });
-        }
-
-        public async Task<IActionResult> LeaveChatRoomAsync(int chatRoomId, int userId)
-        {
-            var participant = await _context.ChatParticipants
-                .FirstOrDefaultAsync(cp => cp.ChatRoom_id == chatRoomId && cp.User_id == userId);
-
-            if (participant == null)
-            {
-                return new NotFoundObjectResult(new { message = "Участник не найден" });
-            }
-
-            participant.Is_active = false;
-            participant.Left_at = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
-
-            return new OkObjectResult(new { message = "Пользователь покинул чат" });
-        }
-
-        public async Task<IActionResult> MarkMessageAsReadAsync(int messageId, int userId)
-        {
-            var message = await _context.ChatMessages.FindAsync(messageId);
-            if (message == null)
-            {
-                return new NotFoundObjectResult(new { message = "Сообщение не найдено" });
-            }
-
-            var participant = await _context.ChatParticipants
-                .FirstOrDefaultAsync(cp => cp.ChatRoom_id == message.ChatRoom_id && cp.User_id == userId);
-
-            if (participant != null)
-            {
-                participant.LastRead_at = DateTime.UtcNow;
-                await _context.SaveChangesAsync();
-            }
-
-            return new OkObjectResult(new { message = "Сообщение отмечено как прочитанное" });
-        }
-
-        public async Task<IActionResult> EditMessageAsync(int messageId, int userId, string newText)
-        {
-            var message = await _context.ChatMessages.FindAsync(messageId);
-            if (message == null)
-            {
-                return new NotFoundObjectResult(new { message = "Сообщение не найдено" });
-            }
-
-            if (message.Sender_id != userId)
-            {
-                return new UnauthorizedObjectResult(new { message = "Вы можете редактировать только свои сообщения" });
-            }
-
-            message.MessageText = _chatCrypto.Encrypt(newText);
-            message.Edited_at = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
-
-            // Отправляем обновление через SignalR
-            await _hubContext.Clients.Group($"ChatRoom_{message.ChatRoom_id}").SendAsync("MessageEdited", new
-            {
-                messageId = messageId,
-                newText = newText,
-                editedAt = message.Edited_at
-            });
-
-            return new OkObjectResult(new { message = "Сообщение отредактировано" });
-        }
-
-        public async Task<IActionResult> DeleteMessageAsync(int messageId, int userId)
-        {
-            var message = await _context.ChatMessages.FindAsync(messageId);
-            if (message == null)
-            {
-                return new NotFoundObjectResult(new { message = "Сообщение не найдено" });
-            }
-
-            if (message.Sender_id != userId)
-            {
-                return new UnauthorizedObjectResult(new { message = "Вы можете удалять только свои сообщения" });
-            }
-
-            message.Is_deleted = true;
-            await _context.SaveChangesAsync();
-
-            // Отправляем уведомление через SignalR
-            await _hubContext.Clients.Group($"ChatRoom_{message.ChatRoom_id}").SendAsync("MessageDeleted", new
-            {
-                messageId = messageId
-            });
-
-            return new OkObjectResult(new { message = "Сообщение удалено" });
-        }
-
-        public async Task<IActionResult> GetUnreadMessagesCountAsync(int userId, int chatRoomId)
-        {
-            var participant = await _context.ChatParticipants
-                .FirstOrDefaultAsync(cp => cp.ChatRoom_id == chatRoomId && cp.User_id == userId);
-
-            if (participant == null)
-            {
-                return new NotFoundObjectResult(new { message = "Участник не найден" });
-            }
-
-            var lastReadTime = participant.LastRead_at ?? participant.Joined_at;
-            var unreadCount = await _context.ChatMessages
-                .CountAsync(m => m.ChatRoom_id == chatRoomId 
-                    && m.Sender_id != userId 
-                    && !m.Is_deleted 
-                    && m.Sent_at > lastReadTime);
-
-            return new OkObjectResult(new { unreadCount = unreadCount });
-        }
-
-        public async Task<IActionResult> MarkAllMessagesAsReadAsync(int chatRoomId, int userId)
-        {
-            var participant = await _context.ChatParticipants
-                .FirstOrDefaultAsync(cp => cp.ChatRoom_id == chatRoomId && cp.User_id == userId);
-
-            if (participant == null)
-            {
-                return new NotFoundObjectResult(new { message = "Участник не найден" });
-            }
-
-            // Обновляем время последнего прочтения на текущее время
-            participant.LastRead_at = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
-
-            // Отправляем уведомление через SignalR
-            await _hubContext.Clients.Group($"ChatRoom_{chatRoomId}").SendAsync("AllMessagesRead", new
-            {
-                chatRoomId = chatRoomId,
-                userId = userId,
-                readAt = participant.LastRead_at
-            });
-
-            return new OkObjectResult(new { message = "Все сообщения отмечены как прочитанные" });
-        }
-
-        public async Task<IActionResult> GetChatRoomsListAsync(int companyId, int userId)
-        {
-            var rooms = await _context.ChatParticipants
-                .Where(cp => cp.User_id == userId && cp.Is_active && cp.ChatRoom.Company_id == companyId)
-                .Select(cp => cp.ChatRoom)
-                .Distinct()
-                .ToListAsync();
-
-            var roomIds = rooms.Select(r => r.ID_ChatRoom).ToList();
-
-            var roomTypeIds = rooms
-                .Select(r => r.ChatRoomType_id)
-                .Distinct()
-                .ToList();
-
-            var roomTypes = await _context.ChatRoomTypes
-                .Where(t => roomTypeIds.Contains(t.ID_ChatRoomType))
-                .ToDictionaryAsync(t => t.ID_ChatRoomType, t => t.Name);
-
-            var participants = await _context.ChatParticipants
-                .Where(cp => roomIds.Contains(cp.ChatRoom_id) && cp.Is_active)
-                .Include(cp => cp.User)
-                .ToListAsync();
-
-            var lastMessages = await _context.ChatMessages
-                .Where(m => roomIds.Contains(m.ChatRoom_id) && !m.Is_deleted)
-                .GroupBy(m => m.ChatRoom_id)
-                .Select(g => g.OrderByDescending(x => x.Sent_at).First())
-                .ToListAsync();
-
-            var myReadMarkers = await _context.ChatParticipants.AsNoTracking()
-                .Where(cp => cp.User_id == userId && roomIds.Contains(cp.ChatRoom_id))
-                .Select(cp => new { cp.ChatRoom_id, ReadAt = cp.LastRead_at ?? cp.Joined_at })
-                .ToListAsync();
-            var lastReadByRoom = myReadMarkers.ToDictionary(x => x.ChatRoom_id, x => x.ReadAt);
-
-            var inboundMessageTimes = await _context.ChatMessages.AsNoTracking()
-                .Where(m => roomIds.Contains(m.ChatRoom_id) && !m.Is_deleted && m.Sender_id != userId)
-                .Select(m => new { m.ChatRoom_id, m.Sent_at })
-                .ToListAsync();
-
-            var unreadByRoom = roomIds.ToDictionary(
-                id => id,
-                id =>
-                {
-                    var lr = lastReadByRoom.TryGetValue(id, out var t) ? t : System.DateTime.MinValue;
-                    return inboundMessageTimes.Count(m => m.ChatRoom_id == id && m.Sent_at > lr);
-                });
-
-            var list = rooms.Select(r =>
-            {
-                var roomParticipants = participants.Where(p => p.ChatRoom_id == r.ID_ChatRoom).ToList();
-
-                var peer = roomParticipants.FirstOrDefault(p => p.User_id != userId)?.User;
-                roomTypes.TryGetValue(r.ChatRoomType_id, out var roomTypeName);
-
-                var normalizedType = (roomTypeName ?? string.Empty).Trim();
-
-                var isDirectRoom = string.Equals(normalizedType, "Личный", StringComparison.OrdinalIgnoreCase);
-
-                var kind = isDirectRoom ? "direct" : "company";
-
-                var name = kind == "direct"
-                    ? $"{peer?.FName} {peer?.Name}".Trim()
-                    : (string.IsNullOrWhiteSpace(r.Name) ? "Чат компании" : r.Name!);
-
-                var lm = lastMessages.FirstOrDefault(m => m.ChatRoom_id == r.ID_ChatRoom);
-
-                var decryptedText = lm == null ? null : _chatCrypto.Decrypt(lm.MessageText);
-
-                var hasAttachmentOnly = lm != null
-                    && !string.IsNullOrWhiteSpace(lm.AttachmentUrl)
-                    && string.IsNullOrWhiteSpace(decryptedText);
-
-                var lastMessageText = hasAttachmentOnly
-                    ? "📎 Вложение"
-                    : decryptedText;
-                return new ChatRoomListItemDto
-                {
-                    ChatRoomId = r.ID_ChatRoom,
-                    Name = string.IsNullOrWhiteSpace(name) ? $"Чат #{r.ID_ChatRoom}" : name,
-                    RoomKind = kind,
-                    PeerUserId = peer?.ID_User,
-                    LastMessageText = lastMessageText,
-                    LastMessageAt = lm?.Sent_at,
-                    UnreadCount = unreadByRoom.GetValueOrDefault(r.ID_ChatRoom)
-                };
+                ID_ChatMessage = m.ID_ChatMessage,
+                ChatRoom_id = m.ChatRoom_id,
+                Sender_id = m.Sender_id,
+                MessageText = m.Is_deleted ? "[deleted]" : DecryptSafe(m.MessageText),
+                SenderName = ((m.Sender?.FName ?? "") + " " + (m.Sender?.Name ?? "")).Trim(),
+                AttachmentUrl = m.AttachmentUrl,
+                Sent_at = m.Sent_at,
+                Edited_at = m.Edited_at,
+                Is_deleted = m.Is_deleted
             })
-            .OrderByDescending(x => x.LastMessageAt ?? DateTime.MinValue)
-            .ThenBy(x => x.Name)
+            .OrderBy(m => m.Sent_at)
             .ToList();
 
-            return new OkObjectResult(list);
+        return new OkObjectResult(list);
+    }
+
+    public async Task<IActionResult> GetChatRoomsForUserAsync(int userId)
+    {
+        var roomIds = await _context.ChatParticipants.AsNoTracking()
+            .Where(p => p.User_id == userId && p.Is_active)
+            .Select(p => p.ChatRoom_id)
+            .Distinct()
+            .ToListAsync();
+
+        var rooms = await _context.ChatRooms.AsNoTracking()
+            .Where(r => roomIds.Contains(r.ID_ChatRoom))
+            .OrderByDescending(r => r.LastMessage_at ?? r.Created_at)
+            .ToListAsync();
+        return new OkObjectResult(rooms);
+    }
+
+    public async Task<IActionResult> CreateChatRoomAsync(int orderId, List<int> participantIds)
+    {
+        participantIds ??= new List<int>();
+        participantIds = participantIds.Where(x => x > 0).Distinct().ToList();
+        if (participantIds.Count == 0)
+            return new BadRequestObjectResult(new { message = "Добавьте участников." });
+
+        var order = await _context.Orders.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.ID_Order == orderId);
+        if (order == null)
+            return new NotFoundObjectResult(new { message = "Заказ не найден." });
+
+        var roomTypeId = await ResolveRoomTypeIdAsync("order", "Комната по заказу");
+        var room = new ChatRoom
+        {
+            Company_id = order.Company_id,
+            ChatRoomType_id = roomTypeId,
+            Order_id = orderId,
+            Name = $"Заказ #{order.Order_Number}",
+            Created_at = DateTime.UtcNow
+        };
+        _context.ChatRooms.Add(room);
+        await _context.SaveChangesAsync();
+
+        foreach (var uid in participantIds)
+        {
+            _context.ChatParticipants.Add(new ChatParticipant
+            {
+                ChatRoom_id = room.ID_ChatRoom,
+                User_id = uid,
+                Joined_at = DateTime.UtcNow,
+                Is_active = true
+            });
+        }
+        await _context.SaveChangesAsync();
+        return new OkObjectResult(new { roomId = room.ID_ChatRoom, roomName = room.Name });
+    }
+
+    public async Task<IActionResult> JoinChatRoomAsync(int chatRoomId, int userId)
+    {
+        var roomExists = await _context.ChatRooms.AsNoTracking().AnyAsync(r => r.ID_ChatRoom == chatRoomId);
+        if (!roomExists)
+            return new NotFoundResult();
+
+        var participant = await _context.ChatParticipants
+            .FirstOrDefaultAsync(p => p.ChatRoom_id == chatRoomId && p.User_id == userId);
+        if (participant == null)
+        {
+            participant = new ChatParticipant
+            {
+                ChatRoom_id = chatRoomId,
+                User_id = userId,
+                Joined_at = DateTime.UtcNow,
+                Is_active = true
+            };
+            _context.ChatParticipants.Add(participant);
+        }
+        else
+        {
+            participant.Is_active = true;
+            participant.Left_at = null;
         }
 
-        public async Task<IActionResult> GetOrCreateCompanyRoomAsync(int companyId, int userId)
+        await _context.SaveChangesAsync();
+        return new OkResult();
+    }
+
+    public async Task<IActionResult> LeaveChatRoomAsync(int chatRoomId, int userId)
+    {
+        var participant = await _context.ChatParticipants
+            .FirstOrDefaultAsync(p => p.ChatRoom_id == chatRoomId && p.User_id == userId && p.Is_active);
+        if (participant == null)
+            return new NotFoundResult();
+
+        participant.Is_active = false;
+        participant.Left_at = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return new OkResult();
+    }
+
+    public async Task<IActionResult> MarkMessageAsReadAsync(int messageId, int userId)
+    {
+        var msg = await _context.ChatMessages.AsNoTracking().FirstOrDefaultAsync(m => m.ID_ChatMessage == messageId);
+        if (msg == null)
+            return new NotFoundResult();
+
+        var participant = await _context.ChatParticipants
+            .FirstOrDefaultAsync(p => p.ChatRoom_id == msg.ChatRoom_id && p.User_id == userId);
+        if (participant == null)
+            return new ForbidResult();
+
+        participant.LastRead_at = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        await _hubContext.Clients.Group($"ChatRoom_{msg.ChatRoom_id}")
+            .SendAsync("MessageRead", new { chatRoomId = msg.ChatRoom_id, userId, messageId, readAt = participant.LastRead_at });
+        return new OkResult();
+    }
+
+    public async Task<IActionResult> EditMessageAsync(int messageId, int userId, string newText)
+    {
+        var msg = await _context.ChatMessages.FirstOrDefaultAsync(m => m.ID_ChatMessage == messageId);
+        if (msg == null)
+            return new NotFoundResult();
+        if (msg.Sender_id != userId)
+            return new ForbidResult();
+
+        var clean = (newText ?? string.Empty).Trim();
+        if (clean.Length == 0)
+            return new BadRequestObjectResult(new { message = "Пустой текст." });
+
+        msg.MessageText = _crypto.Encrypt(clean);
+        msg.Edited_at = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        await BroadcastToRoomParticipantsAsync(msg.ChatRoom_id, "MessageEdited",
+            new { messageId, chatRoomId = msg.ChatRoom_id, messageText = clean, editedAt = msg.Edited_at });
+        return new OkResult();
+    }
+
+    public async Task<IActionResult> DeleteMessageAsync(int messageId, int userId)
+    {
+        var msg = await _context.ChatMessages.FirstOrDefaultAsync(m => m.ID_ChatMessage == messageId);
+        if (msg == null)
+            return new NotFoundResult();
+        if (msg.Sender_id != userId)
+            return new ForbidResult();
+
+        msg.Is_deleted = true;
+        msg.MessageText = string.Empty;
+        msg.AttachmentUrl = null;
+        msg.Edited_at = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        await BroadcastToRoomParticipantsAsync(msg.ChatRoom_id, "MessageDeleted",
+            new { messageId, chatRoomId = msg.ChatRoom_id });
+        return new OkResult();
+    }
+
+    public async Task<IActionResult> GetUnreadMessagesCountAsync(int userId, int chatRoomId)
+    {
+        var participant = await _context.ChatParticipants.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.User_id == userId && p.ChatRoom_id == chatRoomId && p.Is_active);
+        if (participant == null)
+            return new OkObjectResult(new { unreadCount = 0 });
+
+        var count = await _context.ChatMessages.AsNoTracking()
+            .Where(m => m.ChatRoom_id == chatRoomId &&
+                        !m.Is_deleted &&
+                        m.Sender_id != userId &&
+                        (!participant.LastRead_at.HasValue || m.Sent_at > participant.LastRead_at.Value))
+            .CountAsync();
+
+        return new OkObjectResult(new { unreadCount = count });
+    }
+
+    public async Task<IActionResult> MarkAllMessagesAsReadAsync(int chatRoomId, int userId)
+    {
+        var participant = await _context.ChatParticipants
+            .FirstOrDefaultAsync(p => p.ChatRoom_id == chatRoomId && p.User_id == userId && p.Is_active);
+        if (participant == null)
+            return new NotFoundResult();
+
+        participant.LastRead_at = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return new OkResult();
+    }
+
+    public async Task<IActionResult> GetChatRoomsListAsync(int companyId, int userId)
+    {
+        var myParticipants = await _context.ChatParticipants.AsNoTracking()
+            .Where(p => p.User_id == userId && p.Is_active)
+            .Select(p => new { p.ChatRoom_id, p.LastRead_at })
+            .ToListAsync();
+
+        var roomIds = myParticipants.Select(x => x.ChatRoom_id).ToArray();
+        if (roomIds.Length == 0)
+            return new OkObjectResult(new List<object>());
+
+        var rooms = await _context.ChatRooms.AsNoTracking()
+            .Include(r => r.ChatRoomType)
+            .Include(r => r.Participants)
+            .Where(r => r.Company_id == companyId && roomIds.Contains(r.ID_ChatRoom))
+            .ToListAsync();
+
+        var messages = await _context.ChatMessages.AsNoTracking()
+            .Where(m => roomIds.Contains(m.ChatRoom_id))
+            .OrderByDescending(m => m.Sent_at)
+            .ToListAsync();
+
+        var users = await _context.Users.AsNoTracking()
+            .Where(u => u.Company_id == companyId)
+            .Select(u => new { u.ID_User, u.Name, u.FName })
+            .ToListAsync();
+
+        var list = new List<object>();
+        foreach (var room in rooms.OrderByDescending(r => r.LastMessage_at ?? r.Created_at))
         {
-            var room = await _context.ChatRooms
-                .Include(r => r.Participants)
-                .FirstOrDefaultAsync(r => r.Company_id == companyId && r.Name == "Чат компании");
-
-            if (room == null)
+            var mine = myParticipants.First(x => x.ChatRoom_id == room.ID_ChatRoom);
+            var roomMsgs = messages.Where(m => m.ChatRoom_id == room.ID_ChatRoom).ToList();
+            var last = roomMsgs.FirstOrDefault();
+            var unread = roomMsgs.Count(m => !m.Is_deleted && m.Sender_id != userId && (!mine.LastRead_at.HasValue || m.Sent_at > mine.LastRead_at.Value));
+            var roomKind = NormalizeRoomKind(room.ChatRoomType?.Name);
+            int? peerUserId = null;
+            if (roomKind == "direct")
             {
-                var type = await EnsureChatRoomTypeAsync("Компания", "Общий чат компании");
-                room = new ChatRoom
-                {
-                    Company_id = companyId,
-                    Name = "Чат компании",
-                    ChatRoomType_id = type.ID_ChatRoomType,
-                    Created_at = DateTime.UtcNow
-                };
-                await _context.ChatRooms.AddAsync(room);
-                await _context.SaveChangesAsync();
-
-                var companyUserIds = await _context.Users
-                    .Where(u => u.Company_id == companyId && u.Is_Active)
-                    .Select(u => u.ID_User)
-                    .ToListAsync();
-                foreach (var uid in companyUserIds)
-                {
-                    await _context.ChatParticipants.AddAsync(new ChatParticipant
-                    {
-                        ChatRoom_id = room.ID_ChatRoom,
-                        User_id = uid,
-                        Joined_at = DateTime.UtcNow,
-                        Is_active = true
-                    });
-                }
-                await _context.SaveChangesAsync();
+                peerUserId = room.Participants.FirstOrDefault(p => p.Is_active && p.User_id != userId)?.User_id;
+            }
+            var name = room.Name;
+            if (roomKind == "direct")
+            {
+                name = null;
+            }
+            else if (roomKind == "company")
+            {
+                name = "Чат компании";
             }
 
-            var current = await _context.ChatParticipants
-                .FirstOrDefaultAsync(cp => cp.ChatRoom_id == room.ID_ChatRoom && cp.User_id == userId);
-            if (current == null)
+            if (string.IsNullOrWhiteSpace(name) && peerUserId.HasValue)
             {
-                await _context.ChatParticipants.AddAsync(new ChatParticipant
-                {
-                    ChatRoom_id = room.ID_ChatRoom,
-                    User_id = userId,
-                    Joined_at = DateTime.UtcNow,
-                    Is_active = true
-                });
-                await _context.SaveChangesAsync();
-            }
-            else if (!current.Is_active)
-            {
-                current.Is_active = true;
-                current.Left_at = null;
-                await _context.SaveChangesAsync();
+                var peer = users.FirstOrDefault(u => u.ID_User == peerUserId.Value);
+                if (peer != null)
+                    name = $"{peer.FName} {peer.Name}".Trim();
             }
 
-            return new OkObjectResult(new { roomId = room.ID_ChatRoom, roomName = room.Name });
+            list.Add(new
+            {
+                chatRoomId = room.ID_ChatRoom,
+                name = name ?? $"Чат #{room.ID_ChatRoom}",
+                roomKind,
+                peerUserId,
+                lastMessageText = last == null ? null : (last.Is_deleted ? "[deleted]" : DecryptSafe(last.MessageText)),
+                lastMessageAt = room.LastMessage_at ?? last?.Sent_at ?? room.Created_at,
+                unreadCount = unread
+            });
         }
 
-        public async Task<IActionResult> CreateOrGetDirectRoomAsync(int companyId, int userId, int peerUserId)
+        return new OkObjectResult(list);
+    }
+
+    public async Task<IActionResult> GetOrCreateCompanyRoomAsync(int companyId, int userId)
+    {
+        var typeId = await ResolveRoomTypeIdAsync("company", "Чат компании");
+        var room = await _context.ChatRooms
+            .Include(r => r.ChatRoomType)
+            .Where(r => r.Company_id == companyId && r.Order_id == null)
+            .OrderBy(r => r.ID_ChatRoom)
+            .FirstOrDefaultAsync(r =>
+                r.ChatRoomType_id == typeId ||
+                NormalizeRoomKind(r.ChatRoomType!.Name) == "company" ||
+                (r.Name != null && (r.Name.Contains("чат компании", StringComparison.OrdinalIgnoreCase) || r.Name.Contains("общий чат", StringComparison.OrdinalIgnoreCase))));
+        if (room == null)
         {
-            if (peerUserId == userId)
-                return new BadRequestObjectResult(new { message = "Нельзя создать чат с самим собой." });
-
-            var peer = await _context.Users.FirstOrDefaultAsync(u => u.ID_User == peerUserId && u.Company_id == companyId);
-            if (peer == null)
-                return new NotFoundObjectResult(new { message = "Собеседник не найден в компании." });
-
-            var myRoomIds = await _context.ChatParticipants
-                .Where(cp => cp.User_id == userId && cp.Is_active)
-                .Select(cp => cp.ChatRoom_id)
-                .ToListAsync();
-
-            var existing = await _context.ChatParticipants
-                .Where(cp => myRoomIds.Contains(cp.ChatRoom_id) && cp.User_id == peerUserId && cp.Is_active)
-                .Select(cp => cp.ChatRoom)
-                .FirstOrDefaultAsync(r => r.Company_id == companyId && r.Name != "Чат компании");
-
-            if (existing != null)
-                return new OkObjectResult(new { roomId = existing.ID_ChatRoom, roomName = existing.Name });
-
-            var type = await EnsureChatRoomTypeAsync("Личный", "Личный чат между пользователями");
-            var room = new ChatRoom
+            room = new ChatRoom
             {
                 Company_id = companyId,
-                Name = $"ЛС: {userId}-{peerUserId}",
-                ChatRoomType_id = type.ID_ChatRoomType,
+                ChatRoomType_id = typeId,
+                Name = "Чат компании",
                 Created_at = DateTime.UtcNow
             };
-            await _context.ChatRooms.AddAsync(room);
+            _context.ChatRooms.Add(room);
             await _context.SaveChangesAsync();
-
-            await _context.ChatParticipants.AddRangeAsync(
-                new ChatParticipant
-                {
-                    ChatRoom_id = room.ID_ChatRoom,
-                    User_id = userId,
-                    Joined_at = DateTime.UtcNow,
-                    Is_active = true
-                },
-                new ChatParticipant
-                {
-                    ChatRoom_id = room.ID_ChatRoom,
-                    User_id = peerUserId,
-                    Joined_at = DateTime.UtcNow,
-                    Is_active = true
-                });
+        }
+        else if (!string.Equals(room.Name, "Чат компании", StringComparison.Ordinal))
+        {
+            room.Name = "Чат компании";
             await _context.SaveChangesAsync();
-
-            return new OkObjectResult(new { roomId = room.ID_ChatRoom, roomName = $"{peer.FName} {peer.Name}".Trim() });
         }
 
-        public async Task<IActionResult> GetQuickReplyTemplatesAsync(int companyId, int userId, string? category = null, string? search = null)
+        await EnsureParticipantAsync(room.ID_ChatRoom, userId);
+        return new OkObjectResult(new { roomId = room.ID_ChatRoom, roomName = room.Name });
+    }
+
+    public async Task<IActionResult> CreateOrGetDirectRoomAsync(int companyId, int userId, int peerUserId)
+    {
+        if (peerUserId <= 0 || peerUserId == userId)
+            return new BadRequestObjectResult(new { message = "Некорректный собеседник." });
+
+        var typeId = await ResolveRoomTypeIdAsync("direct", "Личный чат между двумя пользователями");
+
+        var myRoomIds = await _context.ChatParticipants.AsNoTracking()
+            .Where(p => p.User_id == userId && p.Is_active)
+            .Select(p => p.ChatRoom_id)
+            .ToListAsync();
+        var existing = await _context.ChatParticipants.AsNoTracking()
+            .Where(p => p.User_id == peerUserId && p.Is_active && myRoomIds.Contains(p.ChatRoom_id))
+            .Join(_context.ChatRooms.AsNoTracking().Where(r => r.Company_id == companyId && r.ChatRoomType_id == typeId),
+                p => p.ChatRoom_id, r => r.ID_ChatRoom, (p, r) => r)
+            .FirstOrDefaultAsync();
+
+        ChatRoom room;
+        if (existing != null)
         {
-            var query = _context.ChatQuickReplyTemplates
-                .AsNoTracking()
-                .Where(t => t.Company_id == companyId && t.User_id == userId && t.Is_active);
-
-            if (!string.IsNullOrWhiteSpace(category))
-                query = query.Where(t => t.Category.ToLower() == category.Trim().ToLower());
-            if (!string.IsNullOrWhiteSpace(search))
-                query = query.Where(t => t.Title.Contains(search) || t.Content.Contains(search));
-
-            var list = await query
-                .OrderBy(t => t.Category)
-                .ThenBy(t => t.Title)
-                .Select(t => new ChatQuickReplyTemplateDto
-                {
-                    Id = t.ID_ChatQuickReplyTemplate,
-                    UserId = t.User_id,
-                    Category = t.Category,
-                    Title = t.Title,
-                    Content = t.Content,
-                    IsActive = t.Is_active,
-                    CreatedAt = t.Created_at
-                })
-                .ToListAsync();
-
-            return new OkObjectResult(list);
+            room = existing;
         }
-
-        public async Task<IActionResult> UpsertQuickReplyTemplateAsync(int companyId, int userId, UpsertChatQuickReplyTemplateRequest request)
+        else
         {
-            if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.Content))
-                return new BadRequestObjectResult(new { message = "Title and content are required." });
-
-            ChatQuickReplyTemplate entity;
-            if (request.TemplateId.HasValue)
+            room = new ChatRoom
             {
-                var existing = await _context.ChatQuickReplyTemplates
-                    .FirstOrDefaultAsync(t => t.ID_ChatQuickReplyTemplate == request.TemplateId.Value
-                                           && t.Company_id == companyId
-                                           && t.User_id == userId);
-                if (existing is null)
-                    return new NotFoundObjectResult(new { message = "Template not found." });
-                entity = existing;
-            }
-            else
-            {
-                entity = new ChatQuickReplyTemplate
-                {
-                    Company_id = companyId,
-                    User_id = userId,
-                    Created_at = DateTime.UtcNow
-                };
-                await _context.ChatQuickReplyTemplates.AddAsync(entity);
-            }
-
-            entity.Category = request.Category.Trim().ToLowerInvariant();
-            entity.Title = request.Title.Trim();
-            entity.Content = request.Content.Trim();
-            entity.Is_active = request.IsActive;
-
+                Company_id = companyId,
+                ChatRoomType_id = typeId,
+                Name = null,
+                Created_at = DateTime.UtcNow
+            };
+            _context.ChatRooms.Add(room);
             await _context.SaveChangesAsync();
-            return new OkObjectResult(new { id = entity.ID_ChatQuickReplyTemplate });
         }
 
-        public async Task<IActionResult> DeleteQuickReplyTemplateAsync(int companyId, int userId, int templateId)
-        {
-            var entity = await _context.ChatQuickReplyTemplates
-                .FirstOrDefaultAsync(t => t.ID_ChatQuickReplyTemplate == templateId
-                                       && t.Company_id == companyId
-                                       && t.User_id == userId);
-            if (entity is null)
-                return new NotFoundObjectResult(new { message = "Template not found." });
+        await EnsureParticipantAsync(room.ID_ChatRoom, userId);
+        await EnsureParticipantAsync(room.ID_ChatRoom, peerUserId);
+        return new OkObjectResult(new { roomId = room.ID_ChatRoom, roomName = room.Name });
+    }
 
-            _context.ChatQuickReplyTemplates.Remove(entity);
-            await _context.SaveChangesAsync();
-            return new OkObjectResult(new { message = "Template deleted." });
+    public async Task<IActionResult> GetQuickReplyTemplatesAsync(int companyId, int userId, string? category = null, string? search = null)
+    {
+        var query = _context.ChatQuickReplyTemplates.AsNoTracking()
+            .Where(t => t.Company_id == companyId && (t.User_id == userId || t.User_id == 0) && t.Is_active);
+        if (!string.IsNullOrWhiteSpace(category))
+            query = query.Where(t => t.Category == category.Trim());
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim().ToLower();
+            query = query.Where(t => t.Title.ToLower().Contains(s) || t.Content.ToLower().Contains(s));
         }
 
-        /// <summary>
-        /// Отправляет уведомления участникам чата о новом сообщении
-        /// </summary>
-        private async Task SendNotificationsToParticipantsAsync(int chatRoomId, int senderId, User sender, 
-            string messageText, ChatRoom chatRoom)
+        var list = await query
+            .OrderBy(t => t.Category)
+            .ThenByDescending(t => t.Created_at)
+            .Select(t => new
+            {
+                id = t.ID_ChatQuickReplyTemplate,
+                userId = t.User_id,
+                category = t.Category,
+                title = t.Title,
+                content = t.Content,
+                isActive = t.Is_active,
+                createdAt = t.Created_at
+            })
+            .ToListAsync();
+        return new OkObjectResult(list);
+    }
+
+    public async Task<IActionResult> UpsertQuickReplyTemplateAsync(int companyId, int userId, UpsertChatQuickReplyTemplateRequest request)
+    {
+        if (request == null)
+            return new BadRequestObjectResult(new { message = "Пустой запрос." });
+
+        var category = string.IsNullOrWhiteSpace(request.Category) ? "other" : request.Category.Trim();
+        var title = (request.Title ?? string.Empty).Trim();
+        var content = (request.Content ?? string.Empty).Trim();
+        if (title.Length == 0 || content.Length == 0)
+            return new BadRequestObjectResult(new { message = "Title/Content обязательны." });
+
+        ChatQuickReplyTemplate entity;
+        if (request.TemplateId.HasValue && request.TemplateId.Value > 0)
         {
-            try
+            entity = await _context.ChatQuickReplyTemplates
+                .FirstOrDefaultAsync(t => t.ID_ChatQuickReplyTemplate == request.TemplateId.Value && t.Company_id == companyId && t.User_id == userId);
+            if (entity == null)
+                return new NotFoundResult();
+        }
+        else
+        {
+            entity = new ChatQuickReplyTemplate
             {
-                // Получаем всех активных участников чата, кроме отправителя
-                var participants = await _context.ChatParticipants
-                    .Where(cp => cp.ChatRoom_id == chatRoomId 
-                        && cp.User_id != senderId 
-                        && cp.Is_active)
-                    .Include(cp => cp.User)
-                    .ToListAsync();
-
-                if (!participants.Any())
-                    return;
-
-                // Получаем или создаем тип уведомления для чата
-                var chatNotificationType = await _context.NotificationTypes
-                    .FirstOrDefaultAsync(nt => nt.Name == "Новое сообщение в чате" || nt.Name == "ChatMessage" || nt.Name.Contains("чат"));
-
-                if (chatNotificationType == null)
-                {
-                    // Создаем тип уведомления, если его нет
-                    chatNotificationType = new NotificationType
-                    {
-                        Name = "Новое сообщение в чате",
-                        Description = "Уведомление о новом сообщении в чате"
-                    };
-                    await _context.NotificationTypes.AddAsync(chatNotificationType);
-                    await _context.SaveChangesAsync();
-                }
-
-                // Обрезаем текст сообщения для уведомления (максимум 100 символов)
-                var notificationText = messageText.Length > 100 
-                    ? messageText.Substring(0, 100) + "..." 
-                    : messageText;
-
-                var senderName = $"{sender.FName} {sender.Name}";
-                var chatRoomName = chatRoom.Name ?? $"Чат #{chatRoomId}";
-
-                // Отправляем уведомления всем участникам
-                foreach (var participant in participants)
-                {
-                    try
-                    {
-                        await _notificationService.SendAsync(
-                            userId: participant.User_id,
-                            typeId: chatNotificationType.ID_NotificationType,
-                            title: $"Новое сообщение в {chatRoomName}",
-                            message: $"{senderName}: {notificationText}",
-                            orderId: chatRoom.Order_id
-                        );
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Ошибка при отправке уведомления пользователю {UserId}", participant.User_id);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Ошибка при отправке уведомлений о новом сообщении в чате {ChatRoomId}", chatRoomId);
-            }
+                Company_id = companyId,
+                User_id = userId,
+                Created_at = DateTime.UtcNow
+            };
+            _context.ChatQuickReplyTemplates.Add(entity);
         }
 
-        private async Task<ChatRoomType> EnsureChatRoomTypeAsync(string name, string? description = null)
-        {
-            var type = await _context.ChatRoomTypes.FirstOrDefaultAsync(x => x.Name == name);
-            if (type != null)
-                return type;
+        entity.Category = category;
+        entity.Title = title;
+        entity.Content = content;
+        entity.Is_active = request.IsActive;
+        await _context.SaveChangesAsync();
+        return new OkObjectResult(new { id = entity.ID_ChatQuickReplyTemplate });
+    }
 
-            type = new ChatRoomType { Name = name, Description = description };
-            await _context.ChatRoomTypes.AddAsync(type);
-            await _context.SaveChangesAsync();
-            return type;
+    public async Task<IActionResult> DeleteQuickReplyTemplateAsync(int companyId, int userId, int templateId)
+    {
+        var entity = await _context.ChatQuickReplyTemplates
+            .FirstOrDefaultAsync(t => t.ID_ChatQuickReplyTemplate == templateId && t.Company_id == companyId && t.User_id == userId);
+        if (entity == null)
+            return new NotFoundResult();
+        _context.ChatQuickReplyTemplates.Remove(entity);
+        await _context.SaveChangesAsync();
+        return new OkResult();
+    }
+
+    private async Task EnsureParticipantAsync(int chatRoomId, int userId)
+    {
+        var participant = await _context.ChatParticipants
+            .FirstOrDefaultAsync(p => p.ChatRoom_id == chatRoomId && p.User_id == userId);
+        if (participant == null)
+        {
+            _context.ChatParticipants.Add(new ChatParticipant
+            {
+                ChatRoom_id = chatRoomId,
+                User_id = userId,
+                Joined_at = DateTime.UtcNow,
+                Is_active = true
+            });
+        }
+        else if (!participant.Is_active)
+        {
+            participant.Is_active = true;
+            participant.Left_at = null;
+        }
+        await _context.SaveChangesAsync();
+    }
+
+    private async Task<int> ResolveRoomTypeIdAsync(string code, string description)
+    {
+        var existing = await _context.ChatRoomTypes
+            .FirstOrDefaultAsync(t =>
+                t.Name == code ||
+                t.Name.ToLower() == code.ToLower() ||
+                NormalizeRoomKind(t.Name) == NormalizeRoomKind(code));
+        if (existing != null)
+            return existing.ID_ChatRoomType;
+
+        var created = new ChatRoomType
+        {
+            Name = code,
+            Description = description
+        };
+        _context.ChatRoomTypes.Add(created);
+        await _context.SaveChangesAsync();
+        return created.ID_ChatRoomType;
+    }
+
+    private static string NormalizeRoomKind(string? roomTypeName)
+    {
+        if (string.IsNullOrWhiteSpace(roomTypeName))
+            return "company";
+        var v = roomTypeName.Trim().ToLowerInvariant();
+        if (v.Contains("direct")) return "direct";
+        if (v.Contains("order")) return "order";
+        if (v.Contains("company") || v.Contains("group") || v.Contains("общ")) return "company";
+        return v;
+    }
+
+    private string DecryptSafe(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return string.Empty;
+        try
+        {
+            return _crypto.Decrypt(payload);
+        }
+        catch
+        {
+            return payload;
         }
     }
-}
 
+    private async Task BroadcastToRoomParticipantsAsync(int chatRoomId, string method, object payload)
+    {
+        await _hubContext.Clients.Group($"ChatRoom_{chatRoomId}").SendAsync(method, payload);
+
+        var participantIds = await _context.ChatParticipants.AsNoTracking()
+            .Where(p => p.ChatRoom_id == chatRoomId && p.Is_active)
+            .Select(p => p.User_id)
+            .Distinct()
+            .ToListAsync();
+
+        foreach (var userId in participantIds)
+            await _hubContext.Clients.Group($"User_{userId}").SendAsync(method, payload);
+    }
+}

@@ -1,4 +1,4 @@
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using System.Text.Json;
 using WebBlazorDeliveryCRM.Models;
 
@@ -7,6 +7,7 @@ namespace WebBlazorDeliveryCRM.Services;
 public class CouriersApiService
 {
     private readonly HttpClient _http;
+    private static readonly JsonSerializerOptions RouteMapJson = new() { PropertyNameCaseInsensitive = true };
 
     public CouriersApiService(IHttpClientFactory factory)
     {
@@ -16,22 +17,31 @@ public class CouriersApiService
     public async Task<List<CourierProfileDto>?> GetAllAsync(int? companyId = null)
     {
         var url = companyId.HasValue ? $"/api/Couriers?companyId={companyId}" : "/api/Couriers";
-        return await _http.GetFromJsonAsync<List<CourierProfileDto>>(url);
+        return await GetSafeAsync<List<CourierProfileDto>>(url) ?? new List<CourierProfileDto>();
     }
 
     public async Task<CourierProfileDto?> GetByUserIdAsync(int userId)
     {
-        return await _http.GetFromJsonAsync<CourierProfileDto>($"/api/Couriers/by-user/{userId}");
+        return await GetSafeAsync<CourierProfileDto>($"/api/Couriers/by-user/{userId}");
     }
 
     public async Task<CourierProfileDto?> GetProfileAsync(int id)
     {
-        return await _http.GetFromJsonAsync<CourierProfileDto>($"/api/Couriers/{id}");
+        return await GetSafeAsync<CourierProfileDto>($"/api/Couriers/{id}");
     }
 
     public async Task<List<OrderDto>?> GetActiveOrdersAsync(int courierId)
     {
-        return await _http.GetFromJsonAsync<List<OrderDto>>($"/api/Couriers/{courierId}/orders");
+        return await GetSafeAsync<List<OrderDto>>($"/api/Couriers/{courierId}/orders") ?? new List<OrderDto>();
+    }
+
+    public async Task<CourierRouteMapDto?> GetRouteMapAsync(int courierId)
+    {
+        var resp = await _http.GetAsync($"/api/Couriers/{courierId}/route-map");
+        if (!resp.IsSuccessStatusCode)
+            return null;
+        await using var stream = await resp.Content.ReadAsStreamAsync();
+        return await JsonSerializer.DeserializeAsync<CourierRouteMapDto>(stream, RouteMapJson);
     }
 
     public async Task<List<VehicleDto>?> GetVehiclesByCompanyAsync(int companyId)
@@ -49,7 +59,6 @@ public class CouriersApiService
         }
     }
 
-    /// <summary>Назначить ТС курьеру (CurrentCourier_id на стороне API).</summary>
     public async Task<(bool ok, string? error)> AssignVehicleAsync(int courierProfileId, int vehicleId)
     {
         var resp = await _http.PostAsync($"/api/Couriers/{courierProfileId}/assign-vehicle?vehicleId={vehicleId}", null);
@@ -133,5 +142,14 @@ public class CouriersApiService
             return (true, null);
         var body = await resp.Content.ReadAsStringAsync();
         return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body);
+    }
+
+    private async Task<T?> GetSafeAsync<T>(string url)
+    {
+        var resp = await _http.GetAsync(url);
+        if (!resp.IsSuccessStatusCode)
+            return default;
+        await using var stream = await resp.Content.ReadAsStreamAsync();
+        return await JsonSerializer.DeserializeAsync<T>(stream, RouteMapJson);
     }
 }

@@ -1,10 +1,9 @@
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 
 namespace APIDeliveryCRM.Interfaces
 {
     public interface IAuditService
     {
-        /// <summary>Запись в журнал аудита (действия логиста и др.).</summary>
         Task LogAsync(
             int companyId,
             int? userId,

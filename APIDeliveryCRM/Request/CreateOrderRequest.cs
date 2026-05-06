@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.ComponentModel.DataAnnotations;
 
 namespace APIDeliveryCRM.Request
@@ -47,13 +47,10 @@ namespace APIDeliveryCRM.Request
         [Required]
         public int DeliveryAddress_id { get; set; }
 
-        /// <summary>1 — город, 2 — через хабы, 3 — прямой межгород.</summary>
         public byte DeliveryRouteKind { get; set; } = 1;
 
-        /// <summary>Желаемое время доставки (UTC), если задано клиентом/менеджером.</summary>
         public DateTime? RequestedDeliveryAtUtc { get; set; }
 
-        /// <summary>0 обычный, 1 срочный, 2 критический.</summary>
         [Range(0, 2)]
         public byte Priority { get; set; } = 0;
 

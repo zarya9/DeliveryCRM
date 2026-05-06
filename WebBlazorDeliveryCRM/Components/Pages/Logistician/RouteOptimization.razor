@@ -5,6 +5,7 @@
 @using System.Net.Http.Json
 @inject CouriersApiService CouriersApi
 @inject OrdersApiService OrdersApi
+@inject LogisticsHubsApiService HubsApi
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 @inject IConfiguration Configuration
@@ -15,7 +16,7 @@
 
 <div class="dms-page-header">
     <h1>Карта оптимизации маршрутов</h1>
-    <p class="subtitle">Курьеры на карте отмечены машиной.</p>
+    <p class="subtitle">Курьеры и склады на карте компании.</p>
 </div>
 
 <div class="dms-card mb-3">
@@ -28,7 +29,6 @@
 <div class="dms-card mb-3">
     <h2 class="dms-card-title">Маршрут по адресам (любое количество точек)</h2>
     <p class="text-muted">
-        Добавьте минимум две точки. Адреса геокодируются через Nominatim, затем маршрут строится по дорогам через OSRM.
     </p>
     @for (var i = 0; i < _routePoints.Count; i++)
     {
@@ -167,6 +167,7 @@
 
 @code {
     private List<CourierProfileDto>? _couriers;
+    private List<LogisticsHubListItemDto> _hubs = new();
     private readonly List<RoutePointInput> _routePoints = new()
     {
         new() { Address = "Москва, Красная площадь", Source = "manual" },
@@ -186,24 +187,40 @@
     {
         if (!firstRender) return;
         _couriers = await CouriersApi.GetAllAsync(null);
+        _hubs = await HubsApi.GetMineAsync();
         StateHasChanged();
         if (_couriers != null)
         {
-            var markers = _couriers
+            var courierMarkers = _couriers
                 .Where(c => c.Current_lat != 0 || c.Current_lon != 0)
                 .Select(c => new
                 {
                     lat = (double)c.Current_lat,
                     lon = (double)c.Current_lon,
-                    title = $"{c.User?.FName} {c.User?.Name} — {c.CourierStatus?.Name}"
+                    title = $"{c.User?.FName} {c.User?.Name} — {c.CourierStatus?.Name}",
+                    kind = "courier",
+                    online = c.Is_online
+                });
+            var hubMarkers = _hubs
+                .Where(h => h.Latitude.HasValue && h.Longitude.HasValue)
+                .Select(h => new
+                {
+                    lat = (double)h.Latitude!.Value,
+                    lon = (double)h.Longitude!.Value,
+                    title = $"Склад: {(string.IsNullOrWhiteSpace(h.Name) ? "Склад" : h.Name)}",
+                    kind = "hub",
+                    online = false
                 })
                 .ToList();
+            var markers = courierMarkers.Cast<object>().Concat(hubMarkers.Cast<object>()).ToList();
             try
             {
                 var osrmUrl = Configuration["Osrm:RouterBaseUrl"];
                 var routeLang = Configuration["Map:RouteLanguage"];
                 await JS.InvokeVoidAsync("leafletMap.init", "logistician-map", 55.7558, 37.6173, 10, null, osrmUrl, true, routeLang);
                 await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
+                if (_hubs.Count > 0 && !_hubs.Any(h => h.Latitude.HasValue && h.Longitude.HasValue))
+                    _routeMessage = "Склады найдены, но у них нет координат (latitude/longitude), поэтому точки не показываются на карте.";
             }
             catch { /* map may fail */ }
         }

@@ -61,5 +61,28 @@
     .desktop-main-inner {
         padding: 0.9rem 0.8rem 1.1rem;
         max-width: 100%;
+        padding-bottom: 5.6rem;
+    }
+}
+
+.dms-mobile-nav {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    .dms-mobile-nav {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 1200;
+        display: flex;
+        justify-content: space-around;
+        align-items: stretch;
+        gap: 0.15rem;
+        padding: 0.35rem 0.35rem calc(0.35rem + env(safe-area-inset-bottom, 0px));
+        border-top: 1px solid var(--dms-border, #e2e8f0);
+        background: var(--dms-card-bg, #ffffff);
+        box-shadow: 0 -6px 24px rgba(2, 6, 23, 0.08);
     }
 }

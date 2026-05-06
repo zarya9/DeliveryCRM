@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
@@ -23,8 +23,7 @@ public class VehiclesController : Controller
             _db = db;
         }
 
-        /// <summary>Марки из справочника VehicleBrands.</summary>
-        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+        [Authorize(Roles = "Р›РѕРіРёСЃС‚,РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ,РђРґРјРёРЅ,РњРµРЅРµРґР¶РµСЂ")]
         [HttpGet("catalog/brands")]
         public async Task<IActionResult> GetCatalogBrands()
         {
@@ -35,8 +34,7 @@ public class VehiclesController : Controller
             return Ok(list);
         }
 
-        /// <summary>Модели из справочника VehicleModels. Без brandId или brandId ≤ 0 — все модели (с маркой); иначе — только выбранная марка.</summary>
-        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+        [Authorize(Roles = "Р›РѕРіРёСЃС‚,РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ,РђРґРјРёРЅ,РњРµРЅРµРґР¶РµСЂ")]
         [HttpGet("catalog/models")]
         public async Task<IActionResult> GetCatalogModels([FromQuery] int? brandId)
         {
@@ -68,14 +66,13 @@ public class VehiclesController : Controller
             return Ok(list);
         }
 
-        /// <summary>Справочники для формы создания ТС: категория, кузов, топливо. Марка/модель — вручную.</summary>
-        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+        [Authorize(Roles = "Р›РѕРіРёСЃС‚,РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ,РђРґРјРёРЅ,РњРµРЅРµРґР¶РµСЂ")]
         [HttpGet("lookups")]
         public async Task<IActionResult> GetLookups()
         {
             var categories = await _db.VehicleCategories.AsNoTracking()
                 .OrderBy(c => c.Name)
-                .Select(c => new IdNameDto { Id = c.ID_Category, Name = c.Name })
+                .Select(c => new IdNameDto { Id = c.ID_Category, Name = c.Name, MaxWeight = c.Max_Weight })
                 .ToListAsync();
 
             var bodyTypes = await _db.VehicleBodyTypes.AsNoTracking()
@@ -96,14 +93,13 @@ public class VehiclesController : Controller
             });
         }
 
-        /// <summary>Создание ТС в автопарке компании (JWT companyId).</summary>
-        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+        [Authorize(Roles = "Р›РѕРіРёСЃС‚,РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ,РђРґРјРёРЅ,РњРµРЅРµРґР¶РµСЂ")]
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreateVehicleRequest dto)
         {
             var companyId = GetCompanyId();
             if (!companyId.HasValue)
-                return Unauthorized(new { message = "Не указана компания в токене." });
+                return Unauthorized(new { message = "РќРµ СѓРєР°Р·Р°РЅР° РєРѕРјРїР°РЅРёСЏ РІ С‚РѕРєРµРЅРµ." });
 
             var userId = GetUserId();
             var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
@@ -117,16 +113,19 @@ public class VehiclesController : Controller
             {
                 return BadRequest(new { message = ex.Message });
             }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = $"РћС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ РўРЎ: {ex.Message}" });
+            }
         }
 
-        /// <summary>ТС с истекающими документами в ближайшие N дней.</summary>
-        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+        [Authorize(Roles = "Р›РѕРіРёСЃС‚,РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ,РђРґРјРёРЅ,РњРµРЅРµРґР¶РµСЂ")]
         [HttpGet("expiring-docs")]
         public async Task<IActionResult> GetExpiringDocs([FromQuery] int days = 14)
         {
             var companyId = GetCompanyId();
             if (!companyId.HasValue)
-                return Unauthorized(new { message = "Не указана компания в токене." });
+                return Unauthorized(new { message = "РќРµ СѓРєР°Р·Р°РЅР° РєРѕРјРїР°РЅРёСЏ РІ С‚РѕРєРµРЅРµ." });
 
             if (days <= 0) days = 14;
             var now = DateTime.UtcNow;
@@ -177,6 +176,7 @@ public class VehiclesController : Controller
         {
             public int Id { get; set; }
             public string? Name { get; set; }
+            public decimal? MaxWeight { get; set; }
         }
 
         public class VehicleCatalogModelDto

@@ -1390,6 +1390,9 @@ namespace APIDeliveryCRM.Migrations
                     b.Property<decimal>("Final_cost")
                         .HasColumnType("numeric");
 
+                    b.Property<byte>("HandoffStage")
+                        .HasColumnType("smallint");
+
                     b.Property<decimal>("Height")
                         .HasColumnType("numeric");
 
@@ -1429,6 +1432,12 @@ namespace APIDeliveryCRM.Migrations
 
                     b.Property<DateTime?>("Pickup_started_at")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("Plan_locked_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("Plan_locked_shiftPlan_id")
+                        .HasColumnType("integer");
 
                     b.Property<byte>("Priority")
                         .HasColumnType("smallint");
@@ -1471,6 +1480,8 @@ namespace APIDeliveryCRM.Migrations
                     b.HasIndex("PaymentMethod_id");
 
                     b.HasIndex("PickupAddress_id");
+
+                    b.HasIndex("Plan_locked_shiftPlan_id");
 
                     b.HasIndex("Status_id");
 
@@ -1999,21 +2010,124 @@ namespace APIDeliveryCRM.Migrations
                     b.Property<int>("Company_id")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int?>("OrderRouteStop_id")
+                        .HasColumnType("integer");
+
                     b.Property<int>("Order_id")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("Planned_distance_km")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime?>("Planned_end_utc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("Planned_start_utc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ShiftPlan_id")
                         .HasColumnType("integer");
 
                     b.Property<int>("Shift_id")
                         .HasColumnType("integer");
 
+                    b.Property<byte>("Stage")
+                        .HasColumnType("smallint");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("smallint");
+
                     b.HasKey("ID_ShiftAssignment");
 
                     b.HasIndex("Company_id");
 
-                    b.HasIndex("Order_id");
+                    b.HasIndex("Order_id")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ShiftAssignments_ActiveOrder")
+                        .HasFilter("\"ShiftPlan_id\" IS NOT NULL AND \"Status\" IN (1,2)");
+
+                    b.HasIndex("ShiftPlan_id");
 
                     b.HasIndex("Shift_id");
 
+                    b.HasIndex("OrderRouteStop_id", "Status")
+                        .HasDatabaseName("IX_ShiftAssignments_RouteStop_Status");
+
                     b.ToTable("ShiftAssignments");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ShiftPlan", b =>
+                {
+                    b.Property<int>("ID_ShiftPlan")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_ShiftPlan"));
+
+                    b.Property<DateTime?>("Activated_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Company_id")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("Completed_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Courier_id")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("Created_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("Estimated_duration_minutes")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Last_recompute_reason")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal>("Peak_volume_m3")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("Peak_weight_kg")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime?>("Planned_end_utc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("Planned_start_utc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Shift_id")
+                        .HasColumnType("integer");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<decimal>("Total_distance_km")
+                        .HasColumnType("numeric");
+
+                    b.Property<int?>("Vehicle_id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("ID_ShiftPlan");
+
+                    b.HasIndex("Courier_id");
+
+                    b.HasIndex("Shift_id");
+
+                    b.HasIndex("Vehicle_id");
+
+                    b.HasIndex("Company_id", "Status");
+
+                    b.ToTable("ShiftPlans");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.ShiftStatus", b =>
@@ -3031,6 +3145,11 @@ namespace APIDeliveryCRM.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("APIDeliveryCRM.Model.ShiftPlan", "LockedShiftPlan")
+                        .WithMany()
+                        .HasForeignKey("Plan_locked_shiftPlan_id")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("APIDeliveryCRM.Model.OrderStatus", "OrderStatus")
                         .WithMany()
                         .HasForeignKey("Status_id")
@@ -3046,6 +3165,8 @@ namespace APIDeliveryCRM.Migrations
                     b.Navigation("DeliveryAddress");
 
                     b.Navigation("DestinationHub");
+
+                    b.Navigation("LockedShiftPlan");
 
                     b.Navigation("OrderStatus");
 
@@ -3226,11 +3347,21 @@ namespace APIDeliveryCRM.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("APIDeliveryCRM.Model.OrderRouteStop", "OrderRouteStop")
+                        .WithMany()
+                        .HasForeignKey("OrderRouteStop_id")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("APIDeliveryCRM.Model.Order", "Order")
                         .WithMany()
                         .HasForeignKey("Order_id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.ShiftPlan", "ShiftPlan")
+                        .WithMany("Assignments")
+                        .HasForeignKey("ShiftPlan_id")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("APIDeliveryCRM.Model.CourierShift", "Shift")
                         .WithMany()
@@ -3242,7 +3373,45 @@ namespace APIDeliveryCRM.Migrations
 
                     b.Navigation("Order");
 
+                    b.Navigation("OrderRouteStop");
+
                     b.Navigation("Shift");
+
+                    b.Navigation("ShiftPlan");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ShiftPlan", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("Company_id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.CourierProfile", "CourierProfile")
+                        .WithMany()
+                        .HasForeignKey("Courier_id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.CourierShift", "CourierShift")
+                        .WithMany()
+                        .HasForeignKey("Shift_id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.Vehicle", "Vehicle")
+                        .WithMany()
+                        .HasForeignKey("Vehicle_id")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Company");
+
+                    b.Navigation("CourierProfile");
+
+                    b.Navigation("CourierShift");
+
+                    b.Navigation("Vehicle");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.SupportTicket", b =>
@@ -3483,6 +3652,11 @@ namespace APIDeliveryCRM.Migrations
             modelBuilder.Entity("APIDeliveryCRM.Model.ServiceAreaZone", b =>
                 {
                     b.Navigation("Couriers");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ShiftPlan", b =>
+                {
+                    b.Navigation("Assignments");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.ShiftStatus", b =>

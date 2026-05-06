@@ -8,12 +8,14 @@
         var relative = Navigation.ToBaseRelativePath(Navigation.Uri);
         var path = "/" + relative.TrimStart('/');
         if (path.StartsWith("/login", StringComparison.OrdinalIgnoreCase))
-        {
-            Navigation.NavigateTo("/login", forceLoad: true);
             return;
+        try
+        {
+            Navigation.NavigateTo("/login", forceLoad: true, replace: true);
         }
-
-        var returnUrl = Uri.EscapeDataString(path);
-        Navigation.NavigateTo($"/login?ReturnUrl={returnUrl}", forceLoad: true);
+        catch (Microsoft.AspNetCore.Components.NavigationException)
+        {
+            // In some debug modes Blazor throws NavigationException to interrupt rendering on redirect.
+        }
     }
 }

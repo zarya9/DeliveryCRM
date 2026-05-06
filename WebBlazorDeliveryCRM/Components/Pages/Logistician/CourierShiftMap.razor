@@ -1,0 +1,129 @@
+@page "/logistician/couriers/{CourierId:int}/map"
+@layout LogisticianLayout
+@using System.Globalization
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject CouriersApiService CouriersApi
+@inject IJSRuntime JS
+@inject IConfiguration Configuration
+@inject NavigationManager Navigation
+
+<PageTitle>Карта смены курьера</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Карта смены</h1>
+    <p class="subtitle">@_subtitle</p>
+</div>
+
+<div class="dms-card mb-3">
+    <div class="d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ReloadAsync">
+            <HugeIcon Name="refresh" CssClass="telegram-action-icon" /> Обновить
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OpenOsmRoute" disabled="@(!_hasRouteEndpoints)">
+            <HugeIcon Name="maps-square-02" CssClass="telegram-action-icon" /> OSM
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OpenYandexRoute" disabled="@(!_hasRouteEndpoints)">
+            <HugeIcon Name="navigation-03" CssClass="telegram-action-icon" /> Яндекс
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OpenTwoGisRoute" disabled="@(!_hasRouteEndpoints)">
+            <HugeIcon Name="route-03" CssClass="telegram-action-icon" /> 2ГИС
+        </button>
+        <button type="button" class="btn btn-link btn-sm" @onclick="BackToCouriers">Назад к списку</button>
+    </div>
+</div>
+
+<div class="dms-card">
+    <div id="courier-shift-map" style="height: 560px; width: 100%; border-radius: 8px;"></div>
+</div>
+
+@code {
+    [Parameter] public int CourierId { get; set; }
+
+    private CourierRouteMapDto? _mapData;
+    private string _subtitle = "Загрузка данных по смене...";
+    private bool _mapReady;
+    private bool _hasRouteEndpoints;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+        await InitMapAsync();
+        await ReloadAsync();
+    }
+
+    private async Task InitMapAsync()
+    {
+        if (_mapReady)
+            return;
+        var osrmUrl = Configuration["Osrm:RouterBaseUrl"];
+        await JS.InvokeVoidAsync("leafletMap.init", "courier-shift-map", 55.7558, 37.6173, 11, null, osrmUrl, false, "ru");
+        _mapReady = true;
+    }
+
+    private async Task ReloadAsync()
+    {
+        _mapData = await CouriersApi.GetRouteMapAsync(CourierId);
+        _subtitle = _mapData is null
+            ? "Не удалось загрузить данные маршрута."
+            : $"{_mapData.CourierName}: точки заказов и склады компании";
+
+        if (!_mapReady || _mapData is null)
+            return;
+
+        var markers = _mapData.Markers
+            .Select(m => new { lat = m.Lat, lon = m.Lon, title = m.Title, kind = m.Kind })
+            .ToList<object>();
+        var waypoints = _mapData.Waypoints
+            .Select(w => new { lat = w.Lat, lon = w.Lon, title = w.Title })
+            .ToList<object>();
+
+        _hasRouteEndpoints = waypoints.Count >= 2;
+        await JS.InvokeVoidAsync("leafletMap.clearMarkers");
+        await JS.InvokeVoidAsync("leafletMap.clearRoute");
+        if (markers.Count > 0)
+            await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
+        if (waypoints.Count >= 2)
+            await JS.InvokeVoidAsync("leafletMap.setRouteWaypoints", waypoints);
+    }
+
+    private void OpenOsmRoute()
+    {
+        if (!TryGetRouteEndpoints(out var start, out var end))
+            return;
+        var url = $"https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route={start.lat.ToString(CultureInfo.InvariantCulture)}%2C{start.lon.ToString(CultureInfo.InvariantCulture)}%3B{end.lat.ToString(CultureInfo.InvariantCulture)}%2C{end.lon.ToString(CultureInfo.InvariantCulture)}";
+        Navigation.NavigateTo(url, forceLoad: true);
+    }
+
+    private void OpenYandexRoute()
+    {
+        if (!TryGetRouteEndpoints(out var start, out var end))
+            return;
+        var url = $"https://yandex.ru/maps/?rtext={start.lat.ToString(CultureInfo.InvariantCulture)}%2C{start.lon.ToString(CultureInfo.InvariantCulture)}~{end.lat.ToString(CultureInfo.InvariantCulture)}%2C{end.lon.ToString(CultureInfo.InvariantCulture)}&rtt=auto";
+        Navigation.NavigateTo(url, forceLoad: true);
+    }
+
+    private void OpenTwoGisRoute()
+    {
+        if (!TryGetRouteEndpoints(out var start, out var end))
+            return;
+        var url = $"https://2gis.ru/routeSearch/rsType/car/to/{end.lon.ToString(CultureInfo.InvariantCulture)},{end.lat.ToString(CultureInfo.InvariantCulture)}/from/{start.lon.ToString(CultureInfo.InvariantCulture)},{start.lat.ToString(CultureInfo.InvariantCulture)}";
+        Navigation.NavigateTo(url, forceLoad: true);
+    }
+
+    private bool TryGetRouteEndpoints(out (double lat, double lon) start, out (double lat, double lon) end)
+    {
+        start = default;
+        end = default;
+        if (_mapData?.Waypoints is null || _mapData.Waypoints.Count < 2)
+            return false;
+        var ordered = _mapData.Waypoints;
+        start = (ordered[0].Lat, ordered[0].Lon);
+        var last = ordered[^1];
+        end = (last.Lat, last.Lon);
+        return true;
+    }
+
+    private void BackToCouriers() => Navigation.NavigateTo("/logistician/couriers");
+}

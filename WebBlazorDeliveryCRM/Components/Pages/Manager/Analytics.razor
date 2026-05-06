@@ -137,7 +137,7 @@ else if (_data.LatePercent >= 10)
                 <ApexPointSeries TItem="DailyChartItem"
                                  Name="Заказы"
                                  Items="_dailyChartItems"
-                                 SeriesType="SeriesType.Line"
+                                 SeriesType="SeriesType.Bar"
                                  XValue="x => x.Day"
                                  YValue="x => (decimal)x.Count" />
             </ApexChart>
@@ -392,7 +392,7 @@ else if (_data.LatePercent >= 10)
             .OrderBy(x => x.Date)
             .Select(x => new DailyChartItem
             {
-                Day = x.Date.ToString("dd.MM"),
+                Day = x.Date.ToString("dd.MM.yyyy"),
                 Revenue = (double)x.Revenue,
                 Count = x.Count
             })

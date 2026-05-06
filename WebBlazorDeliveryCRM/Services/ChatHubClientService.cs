@@ -6,12 +6,20 @@ namespace WebBlazorDeliveryCRM.Services;
 public class ChatHubClientService : IAsyncDisposable
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly CircuitAuthPrincipalHolder _circuitHolder;
+    private readonly AuthTokenCache _tokenCache;
     private readonly IConfiguration _configuration;
     private HubConnection? _hubConnection;
 
-    public ChatHubClientService(IHttpContextAccessor httpContextAccessor, IConfiguration configuration)
+    public ChatHubClientService(
+        IHttpContextAccessor httpContextAccessor,
+        CircuitAuthPrincipalHolder circuitHolder,
+        AuthTokenCache tokenCache,
+        IConfiguration configuration)
     {
         _httpContextAccessor = httpContextAccessor;
+        _circuitHolder = circuitHolder;
+        _tokenCache = tokenCache;
         _configuration = configuration;
     }
 
@@ -32,7 +40,13 @@ public class ChatHubClientService : IAsyncDisposable
             {
                 options.AccessTokenProvider = () =>
                 {
-                    var token = _httpContextAccessor.HttpContext?.Request.Cookies[AuthCookieConstants.CookieName];
+                    var token = _httpContextAccessor.HttpContext?.Request.Cookies[AuthCookieConstants.CookieName]
+                                ?? _circuitHolder.JwtToken
+                                ?? _tokenCache.GetToken();
+                    if (string.IsNullOrWhiteSpace(token))
+                        return Task.FromResult<string?>(null);
+                    if (AuthTokenParser.TryCreatePrincipal(token)?.Identity?.IsAuthenticated != true)
+                        return Task.FromResult<string?>(null);
                     return Task.FromResult<string?>(token);
                 };
             })

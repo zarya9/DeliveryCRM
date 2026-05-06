@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<ContextDB>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")), ServiceLifetime.Scoped);
 builder.Services.AddHttpClient();
+builder.Services.AddMemoryCache();
 
 builder.Services.AddScoped<IUserLoginService, UserLoginService>();
 builder.Services.AddScoped<IClientService, ClientService>();
@@ -19,6 +20,7 @@ builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<ILogisticsHubService, LogisticsHubService>();
 builder.Services.AddScoped<IShiftService, ShiftService>();
+builder.Services.AddScoped<IShiftPlannerService, ShiftPlannerService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IReviewService, ReviewService>();
 builder.Services.AddScoped<IThemeService, ThemeService>();
@@ -38,8 +40,10 @@ builder.Services.AddScoped<IReportService, ReportService>();
 builder.Services.AddScoped<IScheduledReportService, ScheduledReportService>();
 builder.Services.AddScoped<ICompanySettingsService, CompanySettingsService>();
 builder.Services.AddScoped<IGeoAnalyticsService, GeoAnalyticsService>();
+builder.Services.AddScoped<IFuelPriceService, FuelPriceService>();
 builder.Services.AddSingleton<IUserPresenceService, UserPresenceService>();
 builder.Services.AddHostedService<ScheduledReportWorker>();
+builder.Services.AddHostedService<ShiftPlannerWorker>();
 
 // SignalR
 builder.Services.AddSignalR();

@@ -1,0 +1,5 @@
+@page "/courier/profile"
+@layout CourierLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Курьер")]
+
+<UserProfileEditor Title="Профиль курьера" />

@@ -1,3 +1,4 @@
+﻿using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
 using APIDeliveryCRM.Interfaces;
@@ -23,7 +24,6 @@ namespace APIDeliveryCRM.Controllers
             _context = context;
         }
 
-        /// <summary>Список id пользователей компании, у которых есть активное SignalR-подключение (чат).</summary>
         [HttpGet("online")]
         [Authorize]
         public async Task<IActionResult> GetOnlineUsers([FromQuery] int? companyId = null)
@@ -125,10 +125,23 @@ namespace APIDeliveryCRM.Controllers
             return await _userService.GetAllCourierAsync();
         }
 
+        [HttpPut("me")]
+        [Authorize]
+        public async Task<IActionResult> UpdateMe([FromBody] UpdateUserRequest request)
+        {
+            var idStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!int.TryParse(idStr, out var id))
+                return Unauthorized();
+            return await _userService.UpdateUserAsync(id, request);
+        }
+
         [HttpPut("{id:int}")]
         [Authorize]
         public async Task<IActionResult> UpdateUser(int id, [FromBody] UpdateUserRequest request)
         {
+            var idStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!int.TryParse(idStr, out var currentId) || currentId != id)
+                return Forbid();
             return await _userService.UpdateUserAsync(id, request);
         }
 

@@ -1,0 +1,203 @@
+@page "/courier/orders"
+@layout CourierLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Курьер")]
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject AuthenticationStateProvider AuthState
+@inject CouriersApiService CouriersApi
+@inject OrdersApiService OrdersApi
+@inject AppNotificationService Notify
+
+<PageTitle>Мои заказы — Курьер</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Мои заказы</h1>
+    <p class="subtitle">
+        Активные назначения на вас. Можно сменить статус доставки (как в панели компании). Координаты точек — для навигации в картографических сервисах.
+    </p>
+</div>
+
+@if (_loading)
+{
+    <p class="text-muted">Загрузка…</p>
+}
+else if (_profileId is null)
+{
+    <div class="alert alert-warning">Профиль курьера не найден. Обратитесь к администратору компании.</div>
+}
+else
+{
+    <div class="dms-card mb-3">
+        <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-2">
+            <h2 class="dms-card-title mb-0">Назначенные заказы</h2>
+            <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_reloadBusy" @onclick="ReloadAsync">
+                @(_reloadBusy ? "…" : "Обновить")
+            </button>
+        </div>
+        @if (_orders.Count == 0)
+        {
+            <p class="text-muted mb-0">Заказов нет — дождитесь назначения от логиста.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                    <tr>
+                        <th>№</th>
+                        <th>Статус</th>
+                        <th>Маршрут</th>
+                        <th>Создан</th>
+                        <th>Сменить статус</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var o in _orders.OrderByDescending(x => x.Created_at))
+                    {
+                        var sel = _pendingStatus.GetValueOrDefault(o.ID_Order, o.Status_id);
+                        <tr>
+                            <td><strong>#@o.Order_Number</strong></td>
+                            <td>@(o.OrderStatus?.Name ?? "—")</td>
+                            <td>
+                                <div class="small">@FormatRouteKind(o.DeliveryRouteKind)</div>
+                                <div class="small text-muted">@AddressLine(o)</div>
+                            </td>
+                            <td class="small">@o.Created_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                            <td>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <select class="form-select form-select-sm" style="min-width: 10rem;"
+                                            value="@sel"
+                                            @onchange="e => OnStatusSelect(o.ID_Order, e.Value?.ToString())">
+                                        @foreach (var s in _statuses)
+                                        {
+                                            <option value="@s.Id">@(s.Name ?? $"#{s.Id}")</option>
+                                        }
+                                    </select>
+                                    <button type="button" class="btn btn-sm btn-primary dms-btn-primary"
+                                            disabled="@(_statusBusyId == o.ID_Order || sel == o.Status_id)"
+                                            @onclick="() => ApplyStatusAsync(o.ID_Order, sel)">
+                                        OK
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private int? _profileId;
+    private readonly List<OrderDto> _orders = new();
+    private List<OrderStatusOptionDto> _statuses = new();
+    private readonly Dictionary<int, int> _pendingStatus = new();
+    private bool _loading = true;
+    private bool _reloadBusy;
+    private int? _statusBusyId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        var state = await AuthState.GetAuthenticationStateAsync();
+        var uidStr = state.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(uidStr, out var uid))
+        {
+            _loading = false;
+            StateHasChanged();
+            return;
+        }
+
+        var profile = await CouriersApi.GetByUserIdAsync(uid);
+        _profileId = profile?.ID_CourierProfile;
+        _statuses = await OrdersApi.GetOrderStatusesAsync();
+        if (_profileId.HasValue)
+            await ReloadAsync();
+
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (!_profileId.HasValue) return;
+        _reloadBusy = true;
+        try
+        {
+            await ReloadCoreAsync();
+        }
+        finally
+        {
+            _reloadBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ReloadCoreAsync()
+    {
+        if (!_profileId.HasValue) return;
+        var list = await CouriersApi.GetActiveOrdersAsync(_profileId.Value) ?? new List<OrderDto>();
+        _orders.Clear();
+        _orders.AddRange(list);
+        var ids = _orders.Select(o => o.ID_Order).ToHashSet();
+        foreach (var key in _pendingStatus.Keys.Where(k => !ids.Contains(k)).ToList())
+            _pendingStatus.Remove(key);
+        foreach (var o in _orders)
+            _pendingStatus[o.ID_Order] = o.Status_id;
+        await Task.CompletedTask;
+    }
+
+    private void OnStatusSelect(int orderId, string? value)
+    {
+        if (int.TryParse(value, out var statusId) && statusId > 0)
+            _pendingStatus[orderId] = statusId;
+    }
+
+    private async Task ApplyStatusAsync(int orderId, int statusId)
+    {
+        _statusBusyId = orderId;
+        try
+        {
+            var ok = await OrdersApi.ChangeStatusAsync(orderId, statusId);
+            if (!ok)
+            {
+                Notify.ShowError("Не удалось сменить статус. Проверьте права и этап заказа.");
+                return;
+            }
+
+            Notify.ShowSuccess("Статус обновлён.");
+            await ReloadCoreAsync();
+        }
+        finally
+        {
+            _statusBusyId = null;
+            StateHasChanged();
+        }
+    }
+
+    private static string FormatRouteKind(string? k) => k switch
+    {
+        "LocalUrban" => "Город",
+        "ViaHub" => "Через хаб",
+        "DirectIntercity" => "Межгород",
+        _ => string.IsNullOrWhiteSpace(k) ? "Маршрут" : k
+    };
+
+    private static string AddressLine(OrderDto o)
+    {
+        var d = o.DeliveryAddress;
+        var p = o.PickupAddress;
+        if (HasCoords(d))
+            return $"Доставка: {d!.Latitude:0.####}, {d.Longitude:0.####}";
+        if (HasCoords(p))
+            return $"Забор: {p!.Latitude:0.####}, {p.Longitude:0.####}";
+        return "Координаты не указаны";
+    }
+
+    private static bool HasCoords(AddressShortDto? a)
+        => a?.Latitude is { } lat && a.Longitude is { } lon && (lat != 0 || lon != 0);
+}

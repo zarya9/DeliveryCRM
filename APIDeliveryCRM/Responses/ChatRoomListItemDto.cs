@@ -1,4 +1,4 @@
-namespace APIDeliveryCRM.Responses;
+﻿namespace APIDeliveryCRM.Responses;
 
 public class ChatRoomListItemDto
 {
@@ -9,6 +9,5 @@ public class ChatRoomListItemDto
     public string? LastMessageText { get; set; }
     public DateTime? LastMessageAt { get; set; }
 
-    /// <summary>Число непрочитанных входящих сообщений для текущего пользователя.</summary>
     public int UnreadCount { get; set; }
 }

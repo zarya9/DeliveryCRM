@@ -1,5 +1,6 @@
 @page "/logistician"
 @layout LogisticianLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Логист,Администратор,Админ")]
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
 @using WebBlazorDeliveryCRM.Components.Shared

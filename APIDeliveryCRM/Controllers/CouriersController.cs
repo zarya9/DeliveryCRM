@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using APIDeliveryCRM.ContextDb;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -19,11 +22,13 @@ namespace APIDeliveryCRM.Controllers
 
         private readonly ICourierService _courierService;
         private readonly IShiftService _shiftService;
+        private readonly ContextDB _context;
 
-        public CouriersController(ICourierService courierService, IShiftService shiftService)
+        public CouriersController(ICourierService courierService, IShiftService shiftService, ContextDB context)
         {
             _courierService = courierService;
             _shiftService = shiftService;
+            _context = context;
         }
 
         [HttpGet]
@@ -76,6 +81,101 @@ namespace APIDeliveryCRM.Controllers
 
             var orders = await _courierService.GetActiveOrdersAsync(id);
             return new OkObjectResult(orders);
+        }
+
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+        [HttpGet("{id:int}/route-map")]
+        public async Task<IActionResult> GetRouteMap(int id)
+        {
+            var err = await AuthorizeCourierSelfOrStaffAsync(id);
+            if (err != null)
+                return err;
+
+            var profile = await _courierService.GetProfileAsync(id);
+            var orders = await _courierService.GetActiveOrdersAsync(id);
+            var hubs = await _context.LogisticsHubs
+                .AsNoTracking()
+                .Include(h => h.Address)
+                .Where(h => h.Company_id == profile.Company_id)
+                .ToListAsync();
+
+            var markers = new List<object>();
+            if (profile.Current_lat != 0 || profile.Current_lon != 0)
+            {
+                markers.Add(new
+                {
+                    kind = "courier",
+                    id = profile.ID_CourierProfile,
+                    lat = (double)profile.Current_lat,
+                    lon = (double)profile.Current_lon,
+                    title = $"Курьер: {profile.User?.FName} {profile.User?.Name}".Trim()
+                });
+            }
+
+            foreach (var hub in hubs)
+            {
+                if (hub.Address?.Latitude is null || hub.Address.Longitude is null)
+                    continue;
+                markers.Add(new
+                {
+                    kind = "hub",
+                    id = hub.ID_LogisticsHub,
+                    lat = (double)hub.Address.Latitude.Value,
+                    lon = (double)hub.Address.Longitude.Value,
+                    title = $"Склад: {hub.Name}"
+                });
+            }
+
+            var waypoints = new List<object>();
+            foreach (var order in orders.OrderBy(o => o.Created_at))
+            {
+                if (order.RouteStops?.Count > 0)
+                {
+                    foreach (var stop in order.RouteStops.OrderBy(s => s.SortOrder))
+                    {
+                        decimal? lat = stop.Address?.Latitude ?? stop.LogisticsHub?.Address?.Latitude;
+                        decimal? lon = stop.Address?.Longitude ?? stop.LogisticsHub?.Address?.Longitude;
+                        if (!lat.HasValue || !lon.HasValue) continue;
+                        waypoints.Add(new
+                        {
+                            orderId = order.ID_Order,
+                            title = $"Заказ #{order.Order_Number}: {(string.IsNullOrWhiteSpace(stop.Title) ? stop.Kind.ToString() : stop.Title)}",
+                            lat = (double)lat.Value,
+                            lon = (double)lon.Value
+                        });
+                    }
+                    continue;
+                }
+
+                if (order.PickupAddress?.Latitude is { } pLat && order.PickupAddress.Longitude is { } pLon)
+                {
+                    waypoints.Add(new
+                    {
+                        orderId = order.ID_Order,
+                        title = $"Заказ #{order.Order_Number}: забор",
+                        lat = (double)pLat,
+                        lon = (double)pLon
+                    });
+                }
+                if (order.DeliveryAddress?.Latitude is { } dLat && order.DeliveryAddress.Longitude is { } dLon)
+                {
+                    waypoints.Add(new
+                    {
+                        orderId = order.ID_Order,
+                        title = $"Заказ #{order.Order_Number}: доставка",
+                        lat = (double)dLat,
+                        lon = (double)dLon
+                    });
+                }
+            }
+
+            return Ok(new
+            {
+                courierId = profile.ID_CourierProfile,
+                courierName = $"{profile.User?.FName} {profile.User?.Name}".Trim(),
+                markers,
+                waypoints
+            });
         }
 
         [HttpGet("vehicles")]

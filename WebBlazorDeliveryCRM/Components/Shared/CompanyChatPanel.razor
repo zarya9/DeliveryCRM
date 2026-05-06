@@ -10,6 +10,7 @@
 @inject AppNotificationService Notify
 @inject ChatUnreadStateService ChatUnreadState
 @inject IJSRuntime JS
+@inject NavigationManager Navigation
 
 <div class="dms-card telegram-chat-shell">
     <aside class="telegram-chat-list">
@@ -36,10 +37,10 @@
             {
                 <button type="button" class="telegram-chat-item @(room.ChatRoomId == _activeRoomId ? "active" : "")"
                         @onclick="() => OpenRoomAsync(room.ChatRoomId)">
-                    <span class="telegram-chat-avatar">@GetInitials(room.Name)</span>
+                    <span class="chat-avatar">@GetInitials(GetRoomDisplayName(room))</span>
                     <span class="telegram-chat-item-content">
                         <span class="telegram-chat-item-top">
-                            <span class="telegram-chat-item-name">@room.Name</span>
+                            <span class="telegram-chat-item-name">@GetRoomDisplayName(room)</span>
                             <span class="telegram-chat-item-time">@FormatRoomTime(room.LastMessageAt)</span>
                         </span>
                         <span class="telegram-chat-item-preview">@GetRoomPreview(room.LastMessageText)</span>
@@ -54,7 +55,7 @@
     </aside>
 
     <section class="telegram-chat-main">
-        <div class="company-chat-messages flex-grow-1 overflow-auto mb-2 telegram-chat-messages">
+        <div id="company-chat-messages" class="company-chat-messages flex-grow-1 overflow-auto mb-2 telegram-chat-messages">
             @if (FilteredMessages.Count == 0)
             {
                 <div class="telegram-empty-chat">
@@ -87,7 +88,6 @@
                             {
                                 <div class="mt-2 p-2 border rounded bg-body-tertiary">
                                     <div class="small d-flex align-items-center gap-2">
-                                        <span>@GetFileIcon(m.AttachmentFileName)</span>
                                         <a href="@m.AttachmentUrl" @onclick:preventDefault="true" @onclick="(() => DownloadAttachmentAsync(m))">@m.AttachmentFileName</a>
                                     </div>
                                     @if (m.IsImageAttachment)
@@ -143,7 +143,7 @@
         @if (!string.IsNullOrWhiteSpace(_attachmentName))
         {
             <div class="small text-muted mt-1 d-flex align-items-center gap-2">
-                <span>@GetFileIcon(_attachmentName) @_attachmentName</span>
+                <span>@_attachmentName</span>
                 <button type="button" class="btn btn-sm btn-link p-0 text-danger" @onclick="ClearAttachment">Убрать</button>
                 @if (_uploadingAttachment)
                 {
@@ -201,7 +201,6 @@
         string.IsNullOrWhiteSpace(_chatSearch)
             ? new List<EmployeesApiService.EmployeeDto>()
             : _employees
-                .Where(e => e.Id != _currentUserId)
                 .Where(e => e.FullName.Contains(_chatSearch, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(e => e.FullName)
                 .Take(8)
@@ -219,82 +218,93 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var state = await AuthStateProvider.GetAuthenticationStateAsync();
-        var user = state.User;
-        if (!int.TryParse(user.FindFirst(ClaimTypes.NameIdentifier)?.Value, out _currentUserId))
-            return;
-        _ = int.TryParse(user.FindFirst("companyId")?.Value, out _companyId);
-
-        _employees.AddRange(await EmployeesApi.GetByCompanyAsync(_companyId));
-        foreach (var employee in _employees)
+        try
         {
-            _employeeNames[employee.Id] = employee.FullName;
-        }
+            var state = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = state.User;
+            if (!int.TryParse(user.FindFirst(ClaimTypes.NameIdentifier)?.Value, out _currentUserId))
+                return;
+            _ = int.TryParse(user.FindFirst("companyId")?.Value, out _companyId);
 
-        var ensure = await ChatApi.EnsureCompanyRoomAsync();
-        if (ensure.ok)
-            _activeRoomId = ensure.roomId;
-
-        await ReloadRoomsAsync();
-        await LoadTemplatesAsync();
-
-        var connection = await ChatHubClient.GetConnectionAsync();
-        connection.On<IncomingMessage>("ReceiveMessage", msg =>
-        {
-            return InvokeAsync(async () =>
+            _employees.AddRange(await EmployeesApi.GetByCompanyAsync(_companyId));
+            foreach (var employee in _employees)
             {
-                if (msg.chatRoomId != _activeRoomId)
+                _employeeNames[employee.Id] = employee.FullName;
+            }
+
+            var ensure = await ChatApi.EnsureCompanyRoomAsync();
+            if (ensure.ok)
+                _activeRoomId = ensure.roomId;
+
+            await ReloadRoomsAsync();
+            await LoadTemplatesAsync();
+
+            var connection = await ChatHubClient.GetConnectionAsync();
+            connection.On<IncomingMessage>("ReceiveMessage", msg =>
+            {
+                return InvokeAsync(async () =>
                 {
-                    await ReloadRoomsAsync();
-                    await ChatUnreadState.RefreshAsync();
-                    if (msg.senderId != _currentUserId && IsDirectRoom(msg.chatRoomId))
+                    if (msg.chatRoomId != _activeRoomId)
                     {
-                        var senderName = string.IsNullOrWhiteSpace(msg.senderName) ? "Сотрудник" : msg.senderName!;
-                        Notify.ShowInfo($"Новое личное сообщение от {senderName}.", pushWhenHidden: true);
+                        await ReloadRoomsAsync();
+                        await ChatUnreadState.RefreshAsync();
+                        if (msg.senderId != _currentUserId && IsDirectRoom(msg.chatRoomId))
+                        {
+                            var senderName = string.IsNullOrWhiteSpace(msg.senderName) ? "Сотрудник" : msg.senderName!;
+                            Notify.ShowInfo($"Новое личное сообщение от {senderName}.", pushWhenHidden: true);
+                        }
+                        return;
                     }
-                    return;
-                }
 
-                if (_messages.Any(x => x.Id == msg.id)) return;
-                _messages.Add(ChatMessageVm.FromIncoming(msg, _currentUserId));
-                await MarkActiveRoomAsReadAsync();
-                StateHasChanged();
+                    if (_messages.Any(x => x.Id == msg.id)) return;
+                    _messages.Add(ChatMessageVm.FromIncoming(msg, _currentUserId));
+                    await MarkActiveRoomAsReadAsync();
+                    StateHasChanged();
+                    await ScrollMessagesToBottomAsync();
+                });
             });
-        });
-        connection.On<MessageEditedSignal>("MessageEdited", msg =>
-        {
-            var existing = _messages.FirstOrDefault(x => x.Id == msg.messageId);
-            if (existing is null) return;
-            existing.Text = msg.newText ?? existing.Text;
-            existing.EditedAt = msg.editedAt;
-            InvokeAsync(StateHasChanged);
-        });
-        connection.On<MessageDeletedSignal>("MessageDeleted", msg =>
-        {
-            _messages.RemoveAll(x => x.Id == msg.messageId);
-            InvokeAsync(StateHasChanged);
-        });
+            connection.On<MessageEditedSignal>("MessageEdited", msg =>
+            {
+                var existing = _messages.FirstOrDefault(x => x.Id == msg.messageId);
+                if (existing is null) return;
+                existing.Text = msg.newText ?? existing.Text;
+                existing.EditedAt = msg.editedAt;
+                InvokeAsync(StateHasChanged);
+            });
+            connection.On<MessageDeletedSignal>("MessageDeleted", msg =>
+            {
+                _messages.RemoveAll(x => x.Id == msg.messageId);
+                InvokeAsync(StateHasChanged);
+            });
 
-        await ChatHubClient.StartAsync();
-        if (_activeRoomId > 0)
-        {
-            await connection.SendAsync("JoinRoom", _activeRoomId);
-            await LoadHistoryAsync(_activeRoomId);
-            await MarkActiveRoomAsReadAsync();
+            await ChatHubClient.StartAsync();
+            if (_activeRoomId > 0)
+            {
+                await connection.SendAsync("JoinRoom", _activeRoomId);
+                await LoadHistoryAsync(_activeRoomId);
+                await MarkActiveRoomAsReadAsync();
+            }
+
+            if (TargetUserId.HasValue && TargetUserId.Value > 0)
+            {
+                await OpenDirectChatWithUserAsync(TargetUserId.Value);
+                _lastHandledTargetUserId = TargetUserId.Value;
+            }
+
+            _initialized = true;
         }
-
-        if (TargetUserId.HasValue && TargetUserId.Value > 0 && TargetUserId.Value != _currentUserId)
+        catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
         {
-            await OpenDirectChatWithUserAsync(TargetUserId.Value);
-            _lastHandledTargetUserId = TargetUserId.Value;
+            Notify.ShowWarning("Сессия истекла. Войдите заново.");
+            if (AuthStateProvider is CustomAuthenticationStateProvider customAuth)
+                await customAuth.MarkUserAsLoggedOutAsync();
+            Navigation.NavigateTo("/login", forceLoad: true, replace: true);
         }
-
-        _initialized = true;
     }
 
     protected override async Task OnParametersSetAsync()
     {
-        if (!_initialized || !TargetUserId.HasValue || TargetUserId.Value <= 0 || TargetUserId.Value == _currentUserId)
+        if (!_initialized || !TargetUserId.HasValue || TargetUserId.Value <= 0)
             return;
         if (_lastHandledTargetUserId == TargetUserId.Value)
             return;
@@ -353,11 +363,12 @@
             .OrderBy(x => x.Sent_at)
             .Select(x => ChatMessageVm.FromDto(x, _currentUserId)));
         StateHasChanged();
+        await ScrollMessagesToBottomAsync();
     }
 
     private async Task OpenDirectChatWithUserAsync(int userId)
     {
-        if (userId <= 0 || userId == _currentUserId)
+        if (userId <= 0)
             return;
         var created = await ChatApi.CreateOrGetDirectRoomAsync(userId);
         if (!created.ok || created.roomId <= 0)
@@ -388,8 +399,10 @@
         _attachmentUrl = null;
         _attachmentName = null;
         await ReloadRoomsAsync();
+        await LoadHistoryAsync(_activeRoomId);
         await MarkActiveRoomAsReadAsync();
         await ChatUnreadState.RefreshAsync();
+        await ScrollMessagesToBottomAsync();
     }
 
     private async Task OnKeyDown(KeyboardEventArgs e)
@@ -520,20 +533,6 @@
         return ext is ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp";
     }
 
-    private static string GetFileIcon(string? fileName)
-    {
-        var ext = Path.GetExtension(fileName ?? string.Empty).ToLowerInvariant();
-        return ext switch
-        {
-            ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp" => "🖼️",
-            ".pdf" => "📕",
-            ".doc" or ".docx" => "📄",
-            ".xls" or ".xlsx" or ".csv" => "📊",
-            ".zip" => "🗜️",
-            _ => "📎"
-        };
-    }
-
     private static string ExtractFileName(string? urlOrPath)
     {
         if (string.IsNullOrWhiteSpace(urlOrPath))
@@ -574,6 +573,22 @@
     private bool IsDirectRoom(int roomId)
         => string.Equals(_roomKinds.GetValueOrDefault(roomId, "company"), "direct", StringComparison.OrdinalIgnoreCase);
 
+    private string GetRoomDisplayName(ChatRoomListItemDto room)
+    {
+        if (string.Equals(room.RoomKind, "direct", StringComparison.OrdinalIgnoreCase) && room.PeerUserId.HasValue)
+        {
+            if (_employeeNames.TryGetValue(room.PeerUserId.Value, out var fio) && !string.IsNullOrWhiteSpace(fio))
+                return fio;
+        }
+
+        var fallback = room.Name?.Trim();
+        if (!string.IsNullOrWhiteSpace(fallback) &&
+            (fallback.StartsWith("ЛС", StringComparison.OrdinalIgnoreCase) || fallback.StartsWith("DM", StringComparison.OrdinalIgnoreCase)))
+            return "Личный чат";
+
+        return string.IsNullOrWhiteSpace(fallback) ? "Чат" : fallback;
+    }
+
     private bool ShouldShowSenderName(ChatMessageVm message)
         => !message.IsMine && !string.Equals(_activeRoomKind, "direct", StringComparison.OrdinalIgnoreCase);
 
@@ -591,6 +606,17 @@
         if (_activeRoomId <= 0)
             return;
         await ChatApi.MarkAllAsReadAsync(_activeRoomId);
+    }
+
+    private async Task ScrollMessagesToBottomAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("fileDownload.scrollToBottom", "company-chat-messages");
+        }
+        catch
+        {
+        }
     }
 
     public async ValueTask DisposeAsync()

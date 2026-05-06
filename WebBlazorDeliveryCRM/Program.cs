@@ -3,6 +3,7 @@ using ApexCharts;
 using Fluxor;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Server.Circuits;
 using MudBlazor.Services;
 using WebBlazorDeliveryCRM.Components;
 using WebBlazorDeliveryCRM.Models;
@@ -25,6 +26,9 @@ builder.Services
 builder.Services.AddAuthorization();
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<CircuitAuthPrincipalHolder>();
+builder.Services.AddSingleton<AuthTokenCache>();
+builder.Services.AddScoped<CircuitHandler, AuthCircuitHandler>();
 builder.Services.AddBlazoredToast();
 builder.Services.AddMudServices();
 builder.Services.AddApexCharts();
@@ -41,6 +45,7 @@ builder.Services.AddScoped<LogisticsHubsApiService>();
 builder.Services.AddScoped<ClientsApiService>();
 builder.Services.AddScoped<ClientsDetailsApiService>();
 builder.Services.AddScoped<CouriersApiService>();
+builder.Services.AddScoped<ShiftPlannerApiService>();
 builder.Services.AddScoped<VehiclesApiService>();
 builder.Services.AddScoped<AuditApiService>();
 builder.Services.AddScoped<AppNotificationService>();
@@ -52,6 +57,7 @@ builder.Services.AddScoped<MonitoringApiService>();
 builder.Services.AddScoped<ReportsApiService>();
 builder.Services.AddScoped<CompanySettingsApiService>();
 builder.Services.AddScoped<AddressSuggestApiService>();
+builder.Services.AddScoped<AccountApiService>();
 builder.Services.AddScoped<UserPresenceApiService>();
 builder.Services.AddScoped<NotificationsApiService>();
 builder.Services.AddScoped<SupportTicketsApiService>();
@@ -66,13 +72,15 @@ var apiBase = (builder.Configuration["ApiBaseUrl"] ?? "http://localhost:5220").T
 builder.Services.AddHttpClient("UnauthorizedClient", client =>
 {
     client.BaseAddress = new Uri(apiBase);
-    client.Timeout = TimeSpan.FromSeconds(5);
+    // Логин и быстрые GET — короткий таймаут.
+    client.Timeout = TimeSpan.FromSeconds(30);
 });
 
 builder.Services.AddHttpClient("AuthorizedClient", client =>
 {
     client.BaseAddress = new Uri(apiBase);
-    client.Timeout = TimeSpan.FromSeconds(5);
+    // Создание заказа, отчёты и т.п. могут занимать >5 с (гео, маршрут, БД) — иначе TaskCanceledException на клиенте.
+    client.Timeout = TimeSpan.FromSeconds(120);
 }).AddHttpMessageHandler<AuthorizationMessageHandler>();
 
 builder.Services.AddTransient<AuthorizationMessageHandler>();
@@ -99,10 +107,24 @@ if (!app.Environment.IsDevelopment())
 
 app.UseStaticFiles();
 app.UseCors("AllowAll");
+app.UseStatusCodePagesWithReExecute("/404");
 app.UseAuthentication();
+// JWT лежит в своей HttpOnly-cookie, не в ASP.NET Cookie Auth — без этого при полной перезагрузке
+// страницы с [Authorize] middleware не видит пользователя и редиректит на /login?ReturnUrl=...
+app.Use(async (context, next) =>
+{
+    if (context.User?.Identity?.IsAuthenticated != true)
+    {
+        var token = context.Request.Cookies[AuthCookieConstants.CookieName];
+        var principal = AuthTokenParser.TryCreatePrincipal(token);
+        if (principal?.Identity?.IsAuthenticated == true)
+            context.User = principal;
+    }
+
+    await next();
+});
 app.UseAuthorization();
 app.UseAntiforgery();
-app.UseStatusCodePagesWithReExecute("/404");
 
 // HttpOnly-cookie с JWT: выставляется ответом на same-origin POST из браузера (после логина к API).
 app.MapPost("/api/auth/session", (HttpContext http, SessionRequest req) =>

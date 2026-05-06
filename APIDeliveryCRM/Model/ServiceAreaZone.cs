@@ -1,9 +1,8 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APIDeliveryCRM.Model
 {
-    /// <summary>Геозона обслуживания компании (упрощенно: круг с центром и радиусом).</summary>
     public class ServiceAreaZone
     {
         [Key]

@@ -5,10 +5,12 @@
 @using WebBlazorDeliveryCRM.Components.Shared
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using System.Globalization
 @inject GeoAnalyticsApiService GeoApi
 @inject AppNotificationService Notify
 @inject IJSRuntime JS
 @inject IConfiguration Configuration
+@inject NavigationManager Navigation
 
 <PageTitle>Геоаналитика — Менеджер</PageTitle>
 
@@ -58,6 +60,17 @@
 <div class="dms-card mb-3">
     <h2 class="dms-card-title">Карта геоаналитики</h2>
     <div id="geo-analytics-map" style="height: 520px; width: 100%; border-radius: 8px;"></div>
+    @if (_data.HeatPoints.Count >= 2)
+    {
+        <p class="small text-muted mt-2 mb-2">
+            Сравнение маршрутов (OSM / Яндекс / 2ГИС) по двум первым ячейкам тепловой сетки периода — ориентир, не фактический маршрут курьера.
+        </p>
+        <div class="d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenHeatRouteOsm">OSM</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenHeatRouteYandex">Яндекс</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenHeatRouteTwoGis">2ГИС</button>
+        </div>
+    }
 </div>
 
 <div class="row g-3">
@@ -259,4 +272,39 @@
         if (latePercent >= 10) return "warning";
         return "success";
     }
-}
+
+    private bool TryGetHeatRouteEndpoints(out (double lat, double lon) start, out (double lat, double lon) end)
+    {
+        start = default;
+        end = default;
+        if (_data.HeatPoints.Count < 2)
+            return false;
+        start = (_data.HeatPoints[0].Lat, _data.HeatPoints[0].Lon);
+        end = (_data.HeatPoints[1].Lat, _data.HeatPoints[1].Lon);
+        return true;
+    }
+
+    private void OpenHeatRouteOsm()
+    {
+        if (!TryGetHeatRouteEndpoints(out var s, out var e))
+            return;
+        var url = $"https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route={s.lat.ToString(CultureInfo.InvariantCulture)}%2C{s.lon.ToString(CultureInfo.InvariantCulture)}%3B{e.lat.ToString(CultureInfo.InvariantCulture)}%2C{e.lon.ToString(CultureInfo.InvariantCulture)}";
+        Navigation.NavigateTo(url, forceLoad: true);
+    }
+
+    private void OpenHeatRouteYandex()
+    {
+        if (!TryGetHeatRouteEndpoints(out var s, out var e))
+            return;
+        var url = $"https://yandex.ru/maps/?rtext={s.lat.ToString(CultureInfo.InvariantCulture)}%2C{s.lon.ToString(CultureInfo.InvariantCulture)}~{e.lat.ToString(CultureInfo.InvariantCulture)}%2C{e.lon.ToString(CultureInfo.InvariantCulture)}&rtt=auto";
+        Navigation.NavigateTo(url, forceLoad: true);
+    }
+
+    private void OpenHeatRouteTwoGis()
+    {
+        if (!TryGetHeatRouteEndpoints(out var s, out var e))
+            return;
+        var url = $"https://2gis.ru/routeSearch/rsType/car/to/{e.lon.ToString(CultureInfo.InvariantCulture)},{e.lat.ToString(CultureInfo.InvariantCulture)}/from/{s.lon.ToString(CultureInfo.InvariantCulture)},{s.lat.ToString(CultureInfo.InvariantCulture)}";
+        Navigation.NavigateTo(url, forceLoad: true);
+    }
+    }

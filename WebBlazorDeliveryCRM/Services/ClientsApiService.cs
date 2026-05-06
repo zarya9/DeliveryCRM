@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Components.Forms;
 using WebBlazorDeliveryCRM.Models;
 
 namespace WebBlazorDeliveryCRM.Services;
@@ -46,10 +47,25 @@ public class ClientsApiService
         return await _http.GetFromJsonAsync<BoundCardDto>($"/api/Clients/{profileId}/bound-card");
     }
 
-    public async Task<bool> BindCardAsync(int profileId, BindCardRequestDto request)
+    public async Task<(bool ok, string? error)> BindCardAsync(int profileId, BindCardRequestDto request)
     {
         var response = await _http.PostAsJsonAsync($"/api/Clients/{profileId}/bind-card", request);
-        return response.IsSuccessStatusCode;
+        if (response.IsSuccessStatusCode)
+            return (true, null);
+        var body = await response.Content.ReadAsStringAsync();
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty("message", out var msg))
+                    return (false, msg.GetString());
+            }
+            catch
+            {
+            }
+        }
+        return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)response.StatusCode}" : body);
     }
 
     public async Task<List<BoundCardListItemDto>> GetBoundCardsAsync(int profileId)
@@ -57,6 +73,27 @@ public class ClientsApiService
         var stream = await _http.GetStreamAsync($"/api/Clients/{profileId}/bound-cards");
         var list = await JsonSerializer.DeserializeAsync<List<BoundCardListItemDto>>(stream, JsonOpts);
         return list ?? new List<BoundCardListItemDto>();
+    }
+
+    public async Task<(bool ok, string? error)> UploadAvatarAsync(int userId, IBrowserFile file)
+    {
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            using var fileContent = new StreamContent(stream);
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(file.ContentType);
+            content.Add(fileContent, "file", file.Name);
+            var response = await _http.PostAsync($"/api/Files/avatar?userId={userId}", content);
+            if (response.IsSuccessStatusCode)
+                return (true, null);
+            var body = await response.Content.ReadAsStringAsync();
+            return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)response.StatusCode}" : body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
     }
 }
 
@@ -97,5 +134,7 @@ public sealed class BoundCardListItemDto
     public string? MaskedCard { get; set; }
     public string? Expiry { get; set; }
     public string? CardHolder { get; set; }
+    public string? PaymentSystem { get; set; }
+    public string? SecurityCodeLabel { get; set; }
     public DateTime CreatedAt { get; set; }
 }

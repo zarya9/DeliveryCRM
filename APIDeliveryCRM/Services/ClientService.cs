@@ -120,8 +120,8 @@ namespace APIDeliveryCRM.Services
                 return new BadRequestObjectResult(new { message = "Не найден пользователь клиента." });
 
             var digits = new string((request.CardNumber ?? string.Empty).Where(char.IsDigit).ToArray());
-            if (digits.Length < 16 || digits.Length > 19)
-                return new BadRequestObjectResult(new { message = "Некорректный номер карты." });
+            if (digits.Length != 16)
+                return new BadRequestObjectResult(new { message = "Номер карты должен содержать 16 цифр." });
 
             var masked = $"**** **** **** {digits[^4..]}";
             var expiry = (request.Expiry ?? string.Empty).Trim();
@@ -131,13 +131,18 @@ namespace APIDeliveryCRM.Services
                 return new BadRequestObjectResult(new { message = "Укажите срок действия, имя владельца и CVV." });
             if (!Regex.IsMatch(expiry, "^(0[1-9]|1[0-2])\\/\\d{2}$"))
                 return new BadRequestObjectResult(new { message = "Срок действия укажите в формате MM/YY." });
+            var paymentSystem = DetectPaymentSystem(digits);
+            var securityLabel = GetSecurityCodeLabel(paymentSystem);
+            var expectedLength = paymentSystem == "UnionPay" ? 3 : 3;
             if (!Regex.IsMatch(cvv, "^\\d{3,4}$"))
-                return new BadRequestObjectResult(new { message = "CVV должен содержать 3 или 4 цифры." });
+                return new BadRequestObjectResult(new { message = $"{securityLabel} должен содержать только цифры." });
+            if (cvv.Length != expectedLength)
+                return new BadRequestObjectResult(new { message = $"{securityLabel} для {paymentSystem} должен содержать {expectedLength} цифры." });
 
             var noteType = await EnsureCardNoteTypeAsync();
             var token = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
             // Не храним PAN/CVV, только маску + метаданные.
-            var payload = $"CARDV2|{masked}|{expiry}|{holder}|{token}";
+            var payload = $"CARDV3|{masked}|{expiry}|{holder}|{paymentSystem}|{securityLabel}|{token}";
 
             var cardNote = new ClientNote
             {
@@ -170,6 +175,17 @@ namespace APIDeliveryCRM.Services
                 return new OkObjectResult(new { isBound = false });
 
             var parts = note.Text.Split('|');
+            if (parts.Length >= 7 && string.Equals(parts[0], "CARDV3", StringComparison.OrdinalIgnoreCase))
+            {
+                return new OkObjectResult(new
+                {
+                    isBound = true,
+                    maskedCard = parts[1],
+                    expiry = parts[2],
+                    cardHolder = parts[3]
+                });
+            }
+
             if (parts.Length >= 5 && string.Equals(parts[0], "CARDV2", StringComparison.OrdinalIgnoreCase))
             {
                 return new OkObjectResult(new
@@ -213,10 +229,12 @@ namespace APIDeliveryCRM.Services
                     if (string.IsNullOrWhiteSpace(n.Text))
                         return null;
                     var parts = n.Text.Split('|');
+                    if (parts.Length >= 7 && string.Equals(parts[0], "CARDV3", StringComparison.OrdinalIgnoreCase))
+                        return new { id = n.ID_ClientNote, maskedCard = parts[1], expiry = parts[2], cardHolder = parts[3], paymentSystem = parts[4], securityCodeLabel = parts[5], createdAt = n.Created_at };
                     if (parts.Length >= 5 && string.Equals(parts[0], "CARDV2", StringComparison.OrdinalIgnoreCase))
-                        return new { id = n.ID_ClientNote, maskedCard = parts[1], expiry = parts[2], cardHolder = parts[3], createdAt = n.Created_at };
+                        return new { id = n.ID_ClientNote, maskedCard = parts[1], expiry = parts[2], cardHolder = parts[3], paymentSystem = DetectPaymentSystemByMask(parts[1]), securityCodeLabel = "CVV", createdAt = n.Created_at };
                     if (parts.Length >= 4 && string.Equals(parts[0], "CARD", StringComparison.OrdinalIgnoreCase))
-                        return new { id = n.ID_ClientNote, maskedCard = parts[1], expiry = parts[2], cardHolder = parts[3], createdAt = n.Created_at };
+                        return new { id = n.ID_ClientNote, maskedCard = parts[1], expiry = parts[2], cardHolder = parts[3], paymentSystem = "Неизвестно", securityCodeLabel = "CVV", createdAt = n.Created_at };
                     return null;
                 })
                 .Where(x => x != null)
@@ -351,6 +369,36 @@ namespace APIDeliveryCRM.Services
             await _context.SaveChangesAsync();
             return noteType;
         }
+
+        private static string DetectPaymentSystem(string digits)
+        {
+            if (string.IsNullOrWhiteSpace(digits))
+                return "Неизвестно";
+            if (digits.StartsWith("4"))
+                return "Visa";
+            if (digits.StartsWith("22"))
+                return "Мир";
+            if (digits.StartsWith("5"))
+                return "Mastercard";
+            if (digits.StartsWith("6"))
+                return "UnionPay";
+            return "Неизвестно";
+        }
+
+        private static string DetectPaymentSystemByMask(string maskedCard)
+        {
+            // По маске определить нельзя, возвращаем безопасный fallback.
+            return "Неизвестно";
+        }
+
+        private static string GetSecurityCodeLabel(string paymentSystem) => paymentSystem switch
+        {
+            "Mastercard" => "CVC",
+            "Visa" => "CVV",
+            "Мир" => "CVP",
+            "UnionPay" => "CVN",
+            _ => "CVV"
+        };
     }
 }
 

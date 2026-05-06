@@ -11,9 +11,9 @@ public class IdNameDto
 {
     public int Id { get; set; }
     public string? Name { get; set; }
+    public decimal? MaxWeight { get; set; }
 }
 
-/// <summary>Модель из справочника VehicleModels (ответ GET catalog/models).</summary>
 public class VehicleCatalogModelDto
 {
     public int Id { get; set; }
@@ -31,7 +31,6 @@ public class VehicleCatalogModelDto
     public string? DriveTypeName { get; set; }
 }
 
-/// <summary>Тело POST /api/Vehicles — совпадает с API.</summary>
 public class CreateVehicleApiRequest
 {
     public string License_plate { get; set; } = "";

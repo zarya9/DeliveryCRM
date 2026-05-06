@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20260317164537_ClientNotes")]
     partial class ClientNotes
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

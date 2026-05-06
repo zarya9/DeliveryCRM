@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APIDeliveryCRM.Model
@@ -53,21 +53,24 @@ namespace APIDeliveryCRM.Model
         public DateTime? In_transit_at { get; set; }
         public DateTime? Arrived_at { get; set; }
 
-        /// <summary>Плановое время доставки (для SLA-контроля).</summary>
         public DateTime? Sla_due_at { get; set; }
 
-        /// <summary>Когда заказ впервые пересек SLA-границу.</summary>
         public DateTime? Sla_breached_at { get; set; }
 
-        /// <summary>ETA в UTC, обновляется при изменении статуса/назначении.</summary>
         public DateTime? Eta_at { get; set; }
 
-        /// <summary>Причина просрочки (ручной ввод менеджера/логиста).</summary>
         [MaxLength(1000)]
         public string? Delay_reason { get; set; }
 
-        /// <summary>Приоритет заказа: 0 обычный, 1 срочный, 2 критический.</summary>
         public byte Priority { get; set; } = 0;
+
+        public OrderHandoffStage HandoffStage { get; set; } = OrderHandoffStage.None;
+
+        [ForeignKey(nameof(LockedShiftPlan))]
+        public int? Plan_locked_shiftPlan_id { get; set; }
+        public ShiftPlan? LockedShiftPlan { get; set; }
+
+        public DateTime? Plan_locked_at { get; set; }
 
         [Required]
         [ForeignKey(nameof(PaymentMethod))]
@@ -85,7 +88,6 @@ namespace APIDeliveryCRM.Model
         public int DeliveryAddress_id { get; set; }
         public Address DeliveryAddress { get; set; }
 
-        /// <summary>Схема доставки: город / через хабы / прямой межгород.</summary>
         public DeliveryRouteKind DeliveryRouteKind { get; set; } = DeliveryRouteKind.LocalUrban;
 
         [ForeignKey(nameof(OriginHub))]
@@ -98,7 +100,6 @@ namespace APIDeliveryCRM.Model
 
         public ICollection<ChatRoom> ChatRooms { get; set; } = new List<ChatRoom>();
 
-        /// <summary>Упорядоченный список точек маршрута (порядок = SortOrder).</summary>
         public ICollection<OrderRouteStop> RouteStops { get; set; } = new List<OrderRouteStop>();
         public ICollection<OrderTimelineEvent> TimelineEvents { get; set; } = new List<OrderTimelineEvent>();
     }

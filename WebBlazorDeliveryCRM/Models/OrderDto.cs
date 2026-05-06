@@ -1,4 +1,4 @@
-namespace WebBlazorDeliveryCRM.Models;
+﻿namespace WebBlazorDeliveryCRM.Models;
 
 public class OrderDto
 {
@@ -23,13 +23,11 @@ public class OrderDto
     public byte Priority { get; set; }
     public bool Is_paid { get; set; }
 
-    /// <summary>Из API: LocalUrban, ViaHub, DirectIntercity.</summary>
     public string? DeliveryRouteKind { get; set; }
 
     public int? OriginHub_id { get; set; }
     public int? DestinationHub_id { get; set; }
 
-    /// <summary>Упорядоченные точки маршрута (массив остановок).</summary>
     public List<OrderRouteStopDto>? RouteStops { get; set; }
 
     public OrderStatusDto? OrderStatus { get; set; }
@@ -100,7 +98,6 @@ public class OrderTypeDto
     public string Name { get; set; } = "";
 }
 
-/// <summary>Элемент GET /api/Orders/statuses.</summary>
 public class OrderStatusOptionDto
 {
     public int Id { get; set; }

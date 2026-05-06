@@ -49,6 +49,18 @@ namespace APIDeliveryCRM.Controllers
             return _employeeService.FireAsync(employeeId, resolvedCompanyId.Value, actorUserId.Value);
         }
 
+        [HttpPost("{employeeId:int}/role")]
+        [Authorize(Roles = "Менеджер,Администратор,Админ")]
+        public Task<IActionResult> ChangeEmployeeRole(int employeeId, [FromBody] ChangeEmployeeRoleRequest request, [FromQuery] int? companyId = null)
+        {
+            var resolvedCompanyId = ResolveCompanyId(companyId, out var forbidden);
+            if (forbidden) return Task.FromResult<IActionResult>(Forbid());
+            if (!resolvedCompanyId.HasValue) return Task.FromResult<IActionResult>(Unauthorized());
+            var actorUserId = GetCurrentUserId();
+            if (!actorUserId.HasValue) return Task.FromResult<IActionResult>(Unauthorized());
+            return _employeeService.ChangeRoleAsync(employeeId, resolvedCompanyId.Value, actorUserId.Value, request.RoleId);
+        }
+
         private int? ResolveCompanyId(int? requestedCompanyId, out bool forbidden)
         {
             forbidden = false;

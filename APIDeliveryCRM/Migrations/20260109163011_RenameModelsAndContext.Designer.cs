@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20260109163011_RenameModelsAndContext")]
     partial class RenameModelsAndContext
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

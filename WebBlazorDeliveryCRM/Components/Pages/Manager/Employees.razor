@@ -145,8 +145,8 @@
                 <div class="col-md-3 text-center">
                     <img src="@_avatarSrc"
                          alt="Аватар"
-                         class="img-fluid rounded-circle"
-                         style="max-width: 96px;"
+                         class="img-fluid employee-avatar-rect"
+                         style="max-width: 120px;"
                          @onerror="OnAvatarError" />
                 </div>
                 <div class="col-md-9">
@@ -159,6 +159,17 @@
                     <p class="mb-1"><strong>Создан:</strong> @_selectedEmployee.Created_at.ToString("dd.MM.yyyy HH:mm")</p>
                     <div class="d-flex gap-2 mt-2">
                         <button type="button" class="btn btn-outline-primary" @onclick="GoToChat">Написать</button>
+                        @if (_selectedEmployee.Id != _currentUserId)
+                        {
+                            @if (CanPromoteToLogistician(_selectedEmployee))
+                            {
+                                <button type="button" class="btn btn-outline-info" @onclick="PromoteToLogisticianAsync">Сделать логистом</button>
+                            }
+                            @if (CanDemoteToCourier(_selectedEmployee))
+                            {
+                                <button type="button" class="btn btn-outline-warning" @onclick="DemoteToCourierAsync">Сделать курьером</button>
+                            }
+                        }
                         @if (_selectedEmployee.Id != _currentUserId)
                         {
                             <button type="button" class="btn btn-outline-danger" @onclick="FireSelectedEmployeeAsync">Уволить</button>
@@ -192,6 +203,8 @@
     private HashSet<int> _onlineUserIds = new();
     private IDisposable? _presenceHubSubscription;
     private bool _hubConnected;
+    private int _courierRoleId;
+    private int _logisticRoleId;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -213,6 +226,8 @@
         }
 
         _roles = await RolesApi.GetAllAsync();
+        _courierRoleId = _roles.FirstOrDefault(r => string.Equals(r.Name, "Курьер", StringComparison.OrdinalIgnoreCase))?.Id ?? 0;
+        _logisticRoleId = _roles.FirstOrDefault(r => string.Equals(r.Name, "Логист", StringComparison.OrdinalIgnoreCase))?.Id ?? 0;
         await LoadEmployees();
         await LoadPresenceAsync();
         await StartPresenceSignalRAsync();
@@ -373,6 +388,46 @@
         Navigation.NavigateTo($"/manager/chat?userId={_selectedEmployee.Id}");
     }
 
+    private bool CanDemoteToCourier(EmployeeDto employee)
+        => _courierRoleId > 0 && employee.Role.Contains("логист", StringComparison.OrdinalIgnoreCase);
+
+    private bool CanPromoteToLogistician(EmployeeDto employee)
+        => _logisticRoleId > 0 && employee.Role.Contains("курьер", StringComparison.OrdinalIgnoreCase);
+
+    private async Task DemoteToCourierAsync()
+    {
+        if (_selectedEmployee is null || _courierRoleId <= 0)
+            return;
+        var (ok, error) = await EmployeesApi.ChangeRoleAsync(_selectedEmployee.Id, _companyId, _courierRoleId);
+        if (!ok)
+        {
+            Notify.ShowError($"Не удалось изменить роль: {error}");
+            return;
+        }
+
+        Notify.ShowSuccess("Роль изменена на Курьер.");
+        await LoadEmployees();
+        _selectedEmployee = _employees.FirstOrDefault(e => e.Id == _selectedEmployee.Id);
+        StateHasChanged();
+    }
+
+    private async Task PromoteToLogisticianAsync()
+    {
+        if (_selectedEmployee is null || _logisticRoleId <= 0)
+            return;
+        var (ok, error) = await EmployeesApi.ChangeRoleAsync(_selectedEmployee.Id, _companyId, _logisticRoleId);
+        if (!ok)
+        {
+            Notify.ShowError($"Не удалось изменить роль: {error}");
+            return;
+        }
+
+        Notify.ShowSuccess("Роль изменена на Логист.");
+        await LoadEmployees();
+        _selectedEmployee = _employees.FirstOrDefault(e => e.Id == _selectedEmployee.Id);
+        StateHasChanged();
+    }
+
     private void CloseEmployee()
     {
         _selectedEmployee = null;
@@ -413,4 +468,14 @@
         _presenceHubSubscription?.Dispose();
     }
 }
+
+<style>
+    .employee-avatar-rect {
+        width: 120px;
+        height: 90px;
+        object-fit: cover;
+        border-radius: 8px;
+        border: 1px solid var(--dms-card-border);
+    }
+</style>
 

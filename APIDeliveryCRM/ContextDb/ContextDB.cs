@@ -250,6 +250,67 @@ namespace APIDeliveryCRM.ContextDb
                 .HasForeignKey(sa => sa.Order_id)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            modelBuilder.Entity<ShiftAssignment>()
+                .HasOne(sa => sa.ShiftPlan)
+                .WithMany(sp => sp.Assignments)
+                .HasForeignKey(sa => sa.ShiftPlan_id)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<ShiftAssignment>()
+                .HasOne(sa => sa.OrderRouteStop)
+                .WithMany()
+                .HasForeignKey(sa => sa.OrderRouteStop_id)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<ShiftAssignment>()
+                .HasIndex(sa => new { sa.OrderRouteStop_id, sa.Status })
+                .HasDatabaseName("IX_ShiftAssignments_RouteStop_Status");
+
+            modelBuilder.Entity<ShiftAssignment>()
+                .HasIndex(sa => sa.ShiftPlan_id);
+
+            modelBuilder.Entity<ShiftAssignment>()
+                .HasIndex(sa => sa.Order_id)
+                .HasDatabaseName("UX_ShiftAssignments_ActiveOrder")
+                .IsUnique()
+                .HasFilter("\"ShiftPlan_id\" IS NOT NULL AND \"Status\" IN (1,2)");
+
+            modelBuilder.Entity<ShiftPlan>()
+                .HasOne(sp => sp.Company)
+                .WithMany()
+                .HasForeignKey(sp => sp.Company_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ShiftPlan>()
+                .HasOne(sp => sp.CourierShift)
+                .WithMany()
+                .HasForeignKey(sp => sp.Shift_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ShiftPlan>()
+                .HasOne(sp => sp.CourierProfile)
+                .WithMany()
+                .HasForeignKey(sp => sp.Courier_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ShiftPlan>()
+                .HasOne(sp => sp.Vehicle)
+                .WithMany()
+                .HasForeignKey(sp => sp.Vehicle_id)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<ShiftPlan>()
+                .HasIndex(sp => new { sp.Company_id, sp.Status });
+
+            modelBuilder.Entity<Order>()
+                .HasOne(o => o.LockedShiftPlan)
+                .WithMany()
+                .HasForeignKey(o => o.Plan_locked_shiftPlan_id)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<Order>()
+                .HasIndex(o => o.Plan_locked_shiftPlan_id);
+
             modelBuilder.Entity<Notification>()
                 .HasOne(n => n.User)
                 .WithMany()
@@ -650,6 +711,7 @@ namespace APIDeliveryCRM.ContextDb
         public DbSet<CourierShift> CourierShifts { get; set; }
         public DbSet<ShiftStatus> ShiftStatuses { get; set; }
         public DbSet<ShiftAssignment> ShiftAssignments { get; set; }
+        public DbSet<ShiftPlan> ShiftPlans { get; set; }
         public DbSet<PackageType> PackageTypes { get; set; }
         public DbSet<PaymentMethod> PaymentMethods { get; set; }
         public DbSet<Order> Orders { get; set; }

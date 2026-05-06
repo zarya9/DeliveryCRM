@@ -1,5 +1,6 @@
 @implements IDisposable
 @inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
 
 <div class="desktop-layout">
     <aside class="desktop-sidebar">
@@ -21,9 +22,22 @@
         </div>
     </main>
 </div>
+@if (_mobileNavItems.Count > 0)
+{
+    <nav class="mobile-nav dms-mobile-nav">
+        @foreach (var item in _mobileNavItems)
+        {
+            <NavLink href="@item.Href" class="mobile-nav-item" Match="@(item.Exact ? NavLinkMatch.All : NavLinkMatch.Prefix)">
+                <span>@item.Text</span>
+            </NavLink>
+        }
+    </nav>
+}
+<BlazoredToasts />
 
 @code {
     private ErrorBoundary? _errorBoundary;
+    private List<MobileNavItem> _mobileNavItems = new();
 
     [Parameter]
     public RenderFragment? SidebarContent { get; set; }
@@ -31,16 +45,79 @@
     [Parameter]
     public RenderFragment? ChildContent { get; set; }
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         Navigation.LocationChanged += OnLocationChanged;
+        await RefreshMobileNavAsync();
     }
 
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    private async void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
         _errorBoundary?.Recover();
+        await RefreshMobileNavAsync();
         InvokeAsync(StateHasChanged);
     }
+
+    private async Task RefreshMobileNavAsync()
+    {
+        var path = Navigation.ToBaseRelativePath(Navigation.Uri).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(path))
+            path = "home";
+        var role = await ResolveRoleAsync();
+        _mobileNavItems = BuildMobileNav(path, role);
+    }
+
+    private async Task<string?> ResolveRoleAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = state.User;
+        return user.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
+               ?? user.FindFirst("role")?.Value
+               ?? user.FindFirst("http://schemas.microsoft.com/ws/2008/06/identity/claims/role")?.Value;
+    }
+
+    private static List<MobileNavItem> BuildMobileNav(string path, string? role)
+    {
+        if (path.StartsWith("courier"))
+            return
+            [
+                new("/courier/shift", "Смена", true),
+                new("/courier/orders", "Заказы", false),
+                new("/courier/chat", "Чат", false),
+                new("/courier/notifications", "Уведомл.", false),
+                new("/courier/profile", "Профиль", false)
+            ];
+        if (path.StartsWith("logistician"))
+            return
+            [
+                new("/logistician", "Главная", true),
+                new("/logistician/shifts", "Смены", false),
+                new("/logistician/monitoring", "Карта", false),
+                new("/logistician/chat", "Чат", false),
+                new("/logistician/profile", "Профиль", false)
+            ];
+        if (path.StartsWith("manager") || role is "Менеджер" or "Админ" or "Администратор")
+            return
+            [
+                new("/manager", "Главная", true),
+                new("/manager/orders", "Заказы", false),
+                new("/manager/employees", "Команда", false),
+                new("/manager/chat", "Чат", false),
+                new("/manager/profile", "Профиль", false)
+            ];
+        if (path.StartsWith("customer") || role == "Клиент")
+            return
+            [
+                new("/customer", "Главная", true),
+                new("/customer/orders", "Заказы", false),
+                new("/customer/tracking", "Трекинг", false),
+                new("/customer/chat", "Чат", false),
+                new("/customer/profile", "Профиль", false)
+            ];
+        return new List<MobileNavItem>();
+    }
+
+    private sealed record MobileNavItem(string Href, string Text, bool Exact);
 
     public void Dispose()
     {

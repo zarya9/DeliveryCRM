@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20251209120853_fixedUser")]
     partial class fixedUser
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

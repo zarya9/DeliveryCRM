@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20251213065916_AuditLog")]
     partial class AuditLog
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

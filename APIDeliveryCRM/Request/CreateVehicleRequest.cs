@@ -1,18 +1,15 @@
-using System;
+﻿using System;
 
 namespace APIDeliveryCRM.Request
 {
-    /// <summary>Создание ТС логистом (поля соответствуют таблице Vehicles).</summary>
     public class CreateVehicleRequest
     {
         public string License_plate { get; set; } = string.Empty;
         public string VIN { get; set; } = string.Empty;
         public int Category_id { get; set; }
 
-        /// <summary>Опционально: привязка к справочнику VehicleModels (админ/интеграции).</summary>
         public int? Model_id { get; set; }
 
-        /// <summary>Марка и модель вручную (основной сценарий логиста).</summary>
         public string Brand_name { get; set; } = string.Empty;
         public string Model_name { get; set; } = string.Empty;
 
@@ -30,7 +27,6 @@ namespace APIDeliveryCRM.Request
         public DateTime? Maintenance_due_at { get; set; }
         public bool Is_available { get; set; } = true;
 
-        /// <summary>Сразу закрепить за курьером; null — только автопарк.</summary>
         public int? CurrentCourier_id { get; set; }
     }
 }

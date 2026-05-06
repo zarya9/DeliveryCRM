@@ -208,6 +208,8 @@
 
             var token = result.Token;
             await JS.InvokeVoidAsync("deliveryCrmAuth.setSessionToken", token);
+            if (AuthStateProvider is CustomAuthenticationStateProvider customAuth)
+                await customAuth.MarkUserAsAuthenticatedAsync(token);
 
             Notify.ShowSuccess("Вход выполнен.");
             _ = Notify.RequestPushPermissionAsync();

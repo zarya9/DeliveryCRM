@@ -164,29 +164,26 @@ h1:focus {
     margin-right: 0;
 }
 
-/* Mobile nav */
+/* Мобильная навигация */
 .mobile-nav .mobile-nav-item {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    gap: 2px;
+    gap: 0;
     padding: 8px 12px;
     min-width: 44px;
     min-height: 44px;
     justify-content: center;
     color: var(--dms-text-muted);
     text-decoration: none;
-    font-size: 0.75rem;
+    font-size: 0.78rem;
+    line-height: 1;
 }
 .mobile-nav .mobile-nav-item.active {
     color: var(--dms-text);
     font-weight: 600;
 }
-.mobile-nav .mobile-nav-item .mobile-nav-icon {
-    font-size: 1.25rem;
-}
-
-/* Page content – DMS */
+/* контент страницы – DMS */
 .page-block {
     margin-bottom: 1.5rem;
 }
@@ -210,7 +207,7 @@ h1:focus {
     box-shadow: var(--dms-card-shadow, 0 1px 3px rgba(0,0,0,0.06));
 }
 
-/* Role selector (Home) – только веб-роли: Клиент, Менеджер, Логист */
+/* выбор роли(Home) – только веб-роли: Клиент, Менеджер, Логист */
 .role-selector {
     max-width: 720px;
     margin: 3rem auto;
@@ -321,12 +318,30 @@ h1:focus {
     width: 100%;
 }
 
-/* Leaflet Routing Machine: панель маршрута поверх карты (Mud/AppBar ~1100+) */
+/* Мастер «Новый заказ»: шире и выше, тело формы прокручивается внутри компонента */
+.employee-modal--order-wizard {
+    max-width: min(980px, calc(100vw - 1rem));
+    width: calc(100vw - 1.5rem);
+    max-height: min(92vh, 720px);
+    padding: 1.15rem 1.35rem;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.employee-modal--order-wizard .order-wizard-fill {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/*панель маршрута поверх карты*/
 .leaflet-routing-container {
     z-index: 1200 !important;
 }
 
-/* Neutral theme overrides for common Bootstrap controls */
 .form-control,
 .form-select {
     background-color: var(--dms-card-bg);
@@ -336,6 +351,55 @@ h1:focus {
 
 .form-control::placeholder {
     color: var(--dms-text-light);
+}
+
+[data-theme="dark"] .form-control,
+[data-theme="dark"] .form-select,
+[data-theme="dark"] .form-control:focus,
+[data-theme="dark"] .form-select:focus,
+[data-theme="dark"] .form-control:disabled,
+[data-theme="dark"] .form-select:disabled,
+[data-theme="dark"] .form-control[readonly] {
+    color: var(--dms-text) !important;
+    background-color: var(--dms-card-bg) !important;
+    border-color: var(--dms-card-border) !important;
+    -webkit-text-fill-color: var(--dms-text) !important;
+}
+
+[data-theme="dark"] .form-control::placeholder,
+[data-theme="dark"] .form-select::placeholder,
+[data-theme="dark"] textarea::placeholder {
+    color: var(--dms-text-light) !important;
+    opacity: 1;
+}
+
+[data-theme="dark"] .form-select option {
+    color: var(--dms-text);
+    background-color: #2f2f2f;
+}
+
+[data-theme="dark"] .apexcharts-menu {
+    background: #ffffff !important;
+    border: 1px solid #d1d5db !important;
+}
+
+[data-theme="dark"] .apexcharts-menu-item {
+    color: #0f172a !important;
+}
+
+[data-theme="dark"] .apexcharts-toolbar svg {
+    fill: #e2e8f0 !important;
+}
+
+[data-theme="dark"] input:-webkit-autofill,
+[data-theme="dark"] input:-webkit-autofill:hover,
+[data-theme="dark"] input:-webkit-autofill:focus,
+[data-theme="dark"] textarea:-webkit-autofill,
+[data-theme="dark"] select:-webkit-autofill {
+    -webkit-text-fill-color: var(--dms-text) !important;
+    -webkit-box-shadow: 0 0 0 1000px var(--dms-card-bg) inset !important;
+    box-shadow: 0 0 0 1000px var(--dms-card-bg) inset !important;
+    transition: background-color 5000s ease-in-out 0s;
 }
 
 .table {
@@ -453,7 +517,7 @@ body.bg-gradient {
     border-color: rgba(37, 99, 235, 0.35);
 }
 
-.telegram-chat-avatar {
+.chat-avatar {
     width: 42px;
     height: 42px;
     border-radius: 50%;

@@ -15,7 +15,6 @@ namespace APIDeliveryCRM.Migrations
     [Migration("20251210052138_DeletedSomeTablesVehicle")]
     partial class DeletedSomeTablesVehicle
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
