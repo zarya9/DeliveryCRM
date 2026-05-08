@@ -14,15 +14,10 @@ window.leafletMap = {
     routeMarkers: [],
     heatLayer: null,
     circleLayers: [],
-    /** Базовый URL OSRM без завершающего слэша */
     osrmBaseUrl: "",
-    /** Язык пошаговых инструкций (код для LRM: ru, en, de, fr, …) */
     routeLanguage: "ru",
-    /** Построение маршрута по кликам (только страница логиста) */
     enableRouting: false,
-    /** AbortController для текущего OSRM запроса */
     routeAbortController: null,
-    /** Счётчик запроса маршрута для отсечения устаревших ответов */
     routeRequestId: 0,
 
     init: function (elementId, centerLat, centerLon, zoom, theme, osrmBaseUrl, enableRouting, routeLanguage) {
@@ -82,7 +77,6 @@ window.leafletMap = {
                 serviceUrl: serviceUrl,
                 profile: "driving",
                 useHints: false,
-                /** Полная геометрия по дорогам; иначе LRM/OSRM по умолчанию может дать «ломаную»/упрощённую линию. */
                 requestParameters: {
                     overview: "full",
                     geometries: "geojson"
@@ -97,10 +91,7 @@ window.leafletMap = {
                 formatter: fmt,
                 routeWhileDragging: false,
                 addWaypoints: false,
-                /**
-                 * Видимую линию рисуем только через drawRouteOsrm (тот же OSRM, overview=full).
-                 * Линия самого LRM при ошибке/лимите часто превращается в прямые отрезки между точками.
-                 */
+                
                 lineOptions: {
                     styles: [{ color: "#2563eb", weight: 5, opacity: 0 }]
                 },
@@ -234,7 +225,6 @@ window.leafletMap = {
         this.circleLayers = [];
     },
 
-    /** Два клика → setWaypoints в LRM (панель справа с шагами на routeLanguage). */
     handleClickForRouteLrm: function (latlng) {
         if (!this.map || !this.routingControl) return;
 
@@ -266,7 +256,6 @@ window.leafletMap = {
         this.addRouteMarker(latlng, "Старт");
     },
 
-    /** Fallback без LRM: только линия по OSRM. */
     handleClickForRouteLegacy: function (latlng) {
         if (!this.map) return;
         if (!this.routeStart) {
@@ -297,10 +286,6 @@ window.leafletMap = {
         this.clearRouteInternal();
     },
 
-    /**
-     * Явная постановка маршрута по множеству точек (2+).
-     * points: [{ lat: number, lon: number, title?: string }]
-     */
     setRouteWaypoints: function (points) {
         if (!this.map || !points || points.length < 2) return;
 

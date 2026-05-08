@@ -1,4 +1,4 @@
-﻿using System.Linq;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
@@ -23,7 +23,7 @@ public class VehiclesController : Controller
             _db = db;
         }
 
-        [Authorize(Roles = "Р›РѕРіРёСЃС‚,РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ,РђРґРјРёРЅ,РњРµРЅРµРґР¶РµСЂ")]
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
         [HttpGet("catalog/brands")]
         public async Task<IActionResult> GetCatalogBrands()
         {
@@ -34,7 +34,7 @@ public class VehiclesController : Controller
             return Ok(list);
         }
 
-        [Authorize(Roles = "Р›РѕРіРёСЃС‚,РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ,РђРґРјРёРЅ,РњРµРЅРµРґР¶РµСЂ")]
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
         [HttpGet("catalog/models")]
         public async Task<IActionResult> GetCatalogModels([FromQuery] int? brandId)
         {
@@ -66,7 +66,7 @@ public class VehiclesController : Controller
             return Ok(list);
         }
 
-        [Authorize(Roles = "Р›РѕРіРёСЃС‚,РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ,РђРґРјРёРЅ,РњРµРЅРµРґР¶РµСЂ")]
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
         [HttpGet("lookups")]
         public async Task<IActionResult> GetLookups()
         {
@@ -93,13 +93,13 @@ public class VehiclesController : Controller
             });
         }
 
-        [Authorize(Roles = "Р›РѕРіРёСЃС‚,РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ,РђРґРјРёРЅ,РњРµРЅРµРґР¶РµСЂ")]
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreateVehicleRequest dto)
         {
             var companyId = GetCompanyId();
             if (!companyId.HasValue)
-                return Unauthorized(new { message = "РќРµ СѓРєР°Р·Р°РЅР° РєРѕРјРїР°РЅРёСЏ РІ С‚РѕРєРµРЅРµ." });
+                return Unauthorized(new { message = "Не указана компания в токене." });
 
             var userId = GetUserId();
             var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
@@ -115,17 +115,17 @@ public class VehiclesController : Controller
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = $"РћС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ РўРЎ: {ex.Message}" });
+                return StatusCode(500, new { message = $"Ошибка создания ТС: {ex.Message}" });
             }
         }
 
-        [Authorize(Roles = "Р›РѕРіРёСЃС‚,РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ,РђРґРјРёРЅ,РњРµРЅРµРґР¶РµСЂ")]
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
         [HttpGet("expiring-docs")]
         public async Task<IActionResult> GetExpiringDocs([FromQuery] int days = 14)
         {
             var companyId = GetCompanyId();
             if (!companyId.HasValue)
-                return Unauthorized(new { message = "РќРµ СѓРєР°Р·Р°РЅР° РєРѕРјРїР°РЅРёСЏ РІ С‚РѕРєРµРЅРµ." });
+                return Unauthorized(new { message = "Не указана компания в токене." });
 
             if (days <= 0) days = 14;
             var now = DateTime.UtcNow;

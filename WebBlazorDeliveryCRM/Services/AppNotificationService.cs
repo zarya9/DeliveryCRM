@@ -1,4 +1,4 @@
-﻿using Blazored.Toast.Services;
+using Blazored.Toast.Services;
 using Microsoft.JSInterop;
 
 namespace WebBlazorDeliveryCRM.Services;
@@ -17,13 +17,13 @@ public class AppNotificationService
     public void ShowSuccess(string message, bool pushWhenHidden = false)
     {
         _toast.ShowSuccess(message);
-        if (pushWhenHidden) _ = TryShowPushAsync("РЈСЃРїРµС€РЅРѕ", message);
+        if (pushWhenHidden) _ = TryShowPushAsync("Успешно", message);
     }
 
     public void ShowError(string message, bool pushWhenHidden = false)
     {
         _toast.ShowError(message);
-        if (pushWhenHidden) _ = TryShowPushAsync("РћС€РёР±РєР°", message);
+        if (pushWhenHidden) _ = TryShowPushAsync("Ошибка", message);
     }
 
     public void ShowWarning(string message)

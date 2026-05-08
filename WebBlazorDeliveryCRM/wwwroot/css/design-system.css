@@ -108,6 +108,7 @@ html, body {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: var(--dms-space-4);
+    margin-bottom: 15px;
 }
 
 .dms-stat-card {

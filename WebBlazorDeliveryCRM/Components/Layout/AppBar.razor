@@ -13,9 +13,9 @@
     <a href="/" class="dms-appbar-logo">@DisplayTitle</a>
     <div class="dms-appbar-actions">
         <div style="position: relative;">
-            <button type="button" class="dms-btn-outline" @onclick="ToggleUiSettings">
+            <button type="button" class="dms-btn-outline" @onclick="ToggleUiSettings" title="Вид" aria-label="Вид">
                 <HugeIcon Name="settings-01" CssClass="dms-icon me-1" />
-                Вид
+                <span class="dms-btn-text">Вид</span>
             </button>
             @if (_showUiSettings)
             {
@@ -47,7 +47,7 @@
         </div>
         <button type="button" class="dms-btn-outline theme-toggle-btn" @onclick="ToggleTheme" title="Сменить тему">
             <HugeIcon Name="@ThemeIconName" CssClass="dms-icon" />
-            <span>@(_theme == "dark" ? "Светлая" : "Тёмная")</span>
+            <span class="dms-btn-text">@(_theme == "dark" ? "Светлая" : "Тёмная")</span>
         </button>
         @if (_isAuthenticated)
         {
@@ -57,16 +57,16 @@
             <a href="@NotificationsHref" class="dms-btn-outline dms-icon-btn" title="Уведомления" aria-label="Уведомления">
                 <HugeIcon Name="notification-01" CssClass="dms-icon" />
             </a>
-            <button type="button" class="dms-btn-outline" @onclick="Logout">
+            <button type="button" class="dms-btn-outline" @onclick="Logout" title="Выйти" aria-label="Выйти">
                 <HugeIcon Name="logout-01" CssClass="dms-icon me-1" />
-                Выйти
+                <span class="dms-btn-text">Выйти</span>
             </button>
         }
         else
         {
-            <a href="/" class="dms-btn-outline">
+            <a href="/" class="dms-btn-outline" title="Войти" aria-label="Войти">
                 <HugeIcon Name="user-03" CssClass="dms-icon me-1" />
-                Войти
+                <span class="dms-btn-text">Войти</span>
             </a>
         }
     </div>

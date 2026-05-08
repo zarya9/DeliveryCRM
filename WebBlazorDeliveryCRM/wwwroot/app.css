@@ -167,9 +167,9 @@ h1:focus {
 /* Мобильная навигация */
 .mobile-nav .mobile-nav-item {
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
     align-items: center;
-    gap: 0;
+    gap: 2px;
     padding: 8px 12px;
     min-width: 44px;
     min-height: 44px;
@@ -182,6 +182,37 @@ h1:focus {
 .mobile-nav .mobile-nav-item.active {
     color: var(--dms-text);
     font-weight: 600;
+}
+.mobile-nav .mobile-nav-item .mobile-nav-icon {
+    font-size: 1.25rem;
+}
+
+@media (max-width: 900px) {
+    .dms-appbar-logo {
+        display: none;
+    }
+
+    .dms-appbar-actions {
+        margin-left: auto;
+        gap: 0.55rem;
+    }
+
+    .dms-appbar .dms-btn-outline {
+        min-width: 2.2rem;
+        min-height: 2.2rem;
+        padding: 0.42rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .dms-appbar .dms-btn-outline .dms-btn-text {
+        display: none;
+    }
+
+    .dms-appbar .dms-btn-outline .dms-icon {
+        margin-right: 0 !important;
+    }
 }
 /* контент страницы – DMS */
 .page-block {
@@ -337,6 +368,115 @@ h1:focus {
     overflow: hidden;
 }
 
+/* Карточка сотрудника (менеджер): просторнее, выше */
+.employee-modal--employee-detail {
+    max-width: min(580px, calc(100vw - 1.5rem));
+    min-height: min(320px, 85vh);
+    padding: 1.85rem 2rem 1.75rem;
+}
+
+.employee-detail-header {
+    margin-bottom: 0.25rem;
+}
+
+.employee-detail-body {
+    display: flex;
+    gap: 1.75rem;
+    align-items: flex-start;
+    margin-top: 1.1rem;
+    margin-bottom: 1.35rem;
+}
+
+.employee-detail-avatar-wrap {
+    flex-shrink: 0;
+}
+
+.employee-detail-avatar {
+    width: 148px;
+    height: 148px;
+    object-fit: cover;
+    border-radius: 12px;
+    border: 1px solid var(--dms-card-border, rgba(148, 163, 184, 0.35));
+    background: var(--dms-page-bg, rgba(0, 0, 0, 0.03));
+}
+
+.employee-detail-fields {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.employee-detail-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.65rem 0;
+    border-bottom: 1px solid var(--dms-card-border, rgba(148, 163, 184, 0.35));
+}
+
+.employee-detail-row:last-child {
+    border-bottom: none;
+}
+
+.employee-detail-row-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
+.employee-detail-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+    opacity: 0.72;
+    color: var(--bs-secondary-color, inherit);
+}
+
+.employee-detail-value {
+    font-size: 1.02rem;
+    line-height: 1.35;
+    word-break: break-word;
+    color: var(--bs-body-color, inherit);
+}
+
+.employee-detail-row-icon {
+    width: 1.4rem;
+    height: 1.4rem;
+    flex-shrink: 0;
+    opacity: 0.88;
+}
+
+.employee-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    padding-top: 0.35rem;
+    margin-top: 0.25rem;
+}
+
+.employee-detail-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.85rem !important;
+    font-size: 0.8125rem !important;
+    line-height: 1.2 !important;
+    border-radius: 8px;
+}
+
+.employee-detail-btn-icon {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+}
+
 /*панель маршрута поверх карты*/
 .leaflet-routing-container {
     z-index: 1200 !important;
@@ -452,7 +592,7 @@ body.bg-gradient {
     margin-bottom: 0.65rem;
 }
 
-.telegram-chat-shell {
+.chat-shell {
     display: grid;
     grid-template-columns: 280px 1fr;
     gap: 0;
@@ -461,19 +601,19 @@ body.bg-gradient {
     min-height: 78vh;
 }
 
-.telegram-chat-list {
+.chat-list {
     border-right: 1px solid var(--dms-card-border);
     min-height: 78vh;
     background: rgba(148, 163, 184, 0.05);
 }
 
-.telegram-chat-list-items {
+.chat-list-items {
     max-height: calc(78vh - 96px);
     overflow: auto;
     padding: 0.4rem;
 }
 
-.telegram-user-search-results {
+.chat-user-search-results {
     max-height: 210px;
     overflow: auto;
     border: 1px solid var(--dms-card-border);
@@ -481,20 +621,23 @@ body.bg-gradient {
     background: var(--dms-card-bg);
 }
 
-.telegram-user-search-item {
+.chat-user-search-item {
     width: 100%;
     border: none;
     background: transparent;
     text-align: left;
     padding: 0.45rem 0.6rem;
     color: var(--dms-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.telegram-user-search-item:hover {
+.chat-user-search-item:hover {
     background: rgba(37, 99, 235, 0.12);
 }
 
-.telegram-chat-item {
+.chat-item {
     width: 100%;
     text-align: left;
     border: 1px solid transparent;
@@ -508,11 +651,11 @@ body.bg-gradient {
     gap: 0.65rem;
 }
 
-.telegram-chat-item:hover {
+.chat-item:hover {
     background: rgba(148, 163, 184, 0.12);
 }
 
-.telegram-chat-item.active {
+.chat-item.active {
     background: rgba(37, 99, 235, 0.16);
     border-color: rgba(37, 99, 235, 0.35);
 }
@@ -531,21 +674,21 @@ body.bg-gradient {
     flex-shrink: 0;
 }
 
-.telegram-chat-item-content {
+.chat-item-content {
     min-width: 0;
     flex: 1;
     display: flex;
     flex-direction: column;
 }
 
-.telegram-chat-item-top {
+.chat-item-top {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 0.5rem;
 }
 
-.telegram-chat-item-name {
+.chat-item-name {
     font-weight: 600;
     color: var(--dms-text);
     overflow: hidden;
@@ -553,13 +696,13 @@ body.bg-gradient {
     white-space: nowrap;
 }
 
-.telegram-chat-item-time {
+.chat-item-time {
     color: var(--dms-text-muted);
     font-size: 0.78rem;
     flex-shrink: 0;
 }
 
-.telegram-chat-item-preview {
+.chat-item-preview {
     color: var(--dms-text-muted);
     font-size: 0.9rem;
     overflow: hidden;
@@ -567,7 +710,7 @@ body.bg-gradient {
     white-space: nowrap;
 }
 
-.telegram-chat-unread-dot {
+.chat-unread-dot {
     width: 9px;
     height: 9px;
     border-radius: 50%;
@@ -595,28 +738,32 @@ body.bg-gradient {
     color: var(--dms-text);
 }
 
-.telegram-chat-main {
+.chat-main {
     padding: 0.75rem;
     display: flex;
     flex-direction: column;
     min-height: 78vh;
 }
 
-.telegram-chat-messages {
+.chat-mobile-header {
+    display: none;
+}
+
+.chat-messages {
     background-image: radial-gradient(rgba(148, 163, 184, 0.18) 1px, transparent 1px);
     background-size: 18px 18px;
     position: relative;
     min-height: 60vh;
 }
 
-.telegram-empty-chat {
+.chat-empty {
     min-height: 260px;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
-.telegram-empty-chat-box {
+.chat-empty-box {
     padding: 0.5rem 0.8rem;
     border: 1px solid var(--dms-card-border);
     border-radius: 10px;
@@ -625,20 +772,20 @@ body.bg-gradient {
     font-size: 0.9rem;
 }
 
-.telegram-bubble-wrap {
+.chat-bubble-wrap {
     display: flex;
     margin-bottom: 0.45rem;
 }
 
-.telegram-bubble-wrap.mine {
+.chat-bubble-wrap.mine {
     justify-content: flex-end;
 }
 
-.telegram-bubble-wrap.other {
+.chat-bubble-wrap.other {
     justify-content: flex-start;
 }
 
-.telegram-bubble {
+.chat-bubble {
     max-width: min(78%, 680px);
     padding: 0.5rem 0.65rem;
     border-radius: 12px;
@@ -646,11 +793,11 @@ body.bg-gradient {
     background: var(--dms-card-bg);
 }
 
-.telegram-bubble-wrap.mine .telegram-bubble {
+.chat-bubble-wrap.mine .chat-bubble {
     background: rgba(37, 99, 235, 0.22);
 }
 
-.telegram-composer {
+.chat-composer {
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -660,7 +807,7 @@ body.bg-gradient {
     padding: 0.35rem 0.5rem;
 }
 
-.telegram-composer-input {
+.chat-composer-input {
     flex: 1;
     border: none;
     outline: none;
@@ -668,7 +815,7 @@ body.bg-gradient {
     color: var(--dms-text);
 }
 
-.telegram-sender-name {
+.chat-sender-name {
     font-size: 0.78rem;
     font-weight: 600;
     /* Имя автора: как основной текст темы (тёмное в светлой, светлое в тёмной) */
@@ -676,14 +823,14 @@ body.bg-gradient {
     margin-bottom: 0.25rem;
 }
 
-.telegram-clip-btn {
+.chat-clip-btn {
     cursor: pointer;
     width: 28px;
     text-align: center;
     color: var(--dms-muted);
 }
 
-.telegram-send-btn {
+.chat-send-btn {
     border: none;
     border-radius: 999px;
     width: 34px;
@@ -695,11 +842,11 @@ body.bg-gradient {
     justify-content: center;
 }
 
-.telegram-send-btn:disabled {
+.chat-send-btn:disabled {
     opacity: 0.5;
 }
 
-.telegram-image-preview {
+.chat-image-preview {
     max-width: 220px;
     max-height: 160px;
 }
@@ -726,7 +873,7 @@ body.bg-gradient {
     font-weight: 700;
 }
 
-.telegram-action-icon {
+.chat-action-icon {
     width: 18px;
     height: 18px;
     display: block;
@@ -748,13 +895,38 @@ body.bg-gradient {
 }
 
 @media (max-width: 900px) {
-    .telegram-chat-shell {
+    .chat-shell {
         grid-template-columns: 1fr;
     }
-    .telegram-chat-list {
+    .chat-shell.mobile-list-open .chat-main {
+        display: none;
+    }
+    .chat-shell.mobile-chat-open .chat-list {
+        display: none;
+    }
+    .chat-list {
         border-right: none;
         border-bottom: 1px solid var(--dms-card-border);
         min-height: auto;
+    }
+    .chat-main {
+        min-height: 74vh;
+    }
+    .chat-mobile-header {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+        margin-bottom: 0.5rem;
+    }
+    .chat-mobile-title {
+        font-weight: 600;
+        font-size: 0.95rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .chat-back-btn {
+        flex-shrink: 0;
     }
 
     .dms-card {
@@ -851,4 +1023,71 @@ body.bg-gradient {
     border-radius: 8px;
     margin-top: 0.6rem;
     pointer-events: none;
+}
+
+:root {
+    --dms-fluid-text: clamp(14px, 0.2vw + 13px, 16px);
+}
+
+body {
+    font-size: var(--dms-fluid-text);
+}
+
+h1, .h1 {
+    font-size: clamp(1.5rem, 1.1rem + 1.8vw, 2.15rem);
+}
+
+h2, .h2 {
+    font-size: clamp(1.2rem, 1rem + 1vw, 1.65rem);
+}
+
+h3, .h3 {
+    font-size: clamp(1.05rem, 0.9rem + 0.7vw, 1.35rem);
+}
+
+p, .form-label, .form-control, .form-select, .btn, .badge {
+    font-size: clamp(0.86rem, 0.78rem + 0.25vw, 1rem);
+}
+
+.dms-page-header h1 {
+    font-size: clamp(1.5rem, 1rem + 2.1vw, 2.2rem);
+}
+
+.dms-page-header .subtitle {
+    font-size: clamp(0.92rem, 0.8rem + 0.45vw, 1.05rem);
+}
+
+@media (max-width: 900px) {
+    .dms-card {
+        overflow-x: hidden;
+    }
+
+    .dms-card > table.table {
+        display: block;
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+    }
+
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .table {
+        font-size: clamp(0.8rem, 0.72rem + 0.6vw, 0.92rem);
+    }
+
+    .table th,
+    .table td {
+        padding: 0.45rem 0.5rem;
+        vertical-align: middle;
+    }
+
+    .table td .btn,
+    .table td .form-select,
+    .table td .form-control {
+        max-width: 100%;
+    }
 }

@@ -15,6 +15,35 @@ namespace APIDeliveryCRM.Services
 {
     public class FileService : IFileService
     {
+        private string? ResolveLocalWebFilePath(string relativePath)
+        {
+            var normalized = (relativePath ?? string.Empty).Trim().TrimStart('~', '/', '\\');
+            if (string.IsNullOrWhiteSpace(normalized))
+                return null;
+
+            normalized = normalized.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+
+            var primary = Path.Combine(_environment.WebRootPath ?? string.Empty, normalized);
+            if (!string.IsNullOrWhiteSpace(primary) && System.IO.File.Exists(primary))
+                return primary;
+
+            var fallback = Path.Combine(_environment.ContentRootPath ?? string.Empty, "wwwroot", normalized);
+            if (!string.IsNullOrWhiteSpace(fallback) && System.IO.File.Exists(fallback))
+                return fallback;
+
+            return null;
+        }
+
+        private static ContentResult SvgPlaceholderAvatar()
+        {
+            const string svg =
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"128\" height=\"128\" viewBox=\"0 0 128 128\">" +
+                "<rect fill=\"#e8eaf0\" width=\"128\" height=\"128\"/>" +
+                "<circle cx=\"64\" cy=\"46\" r=\"20\" fill=\"#b0b8c9\"/>" +
+                "<path fill=\"#b0b8c9\" d=\"M24 122c4-28 22-42 40-42s36 14 40 42\"/></svg>";
+            return new ContentResult { Content = svg, ContentType = "image/svg+xml", StatusCode = 200 };
+        }
+
         private readonly IWebHostEnvironment _environment;
         private readonly ILogger<FileService> _logger;
         private readonly ContextDB _context;
@@ -51,11 +80,11 @@ namespace APIDeliveryCRM.Services
                 return new NotFoundObjectResult(new { message = "Пользователь не найден" });
             }
 
-            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif" };
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
             var fileExtension = Path.GetExtension(file.FileName).ToLowerInvariant();
             if (!allowedExtensions.Contains(fileExtension))
             {
-                return new BadRequestObjectResult(new { message = "Недопустимый тип файла. Разрешены: jpg, jpeg, png, gif" });
+                return new BadRequestObjectResult(new { message = "Недопустимый тип файла. Разрешены: jpg, jpeg, png, gif, webp" });
             }
 
             if (file.Length > 5 * 1024 * 1024)
@@ -269,7 +298,8 @@ namespace APIDeliveryCRM.Services
                     var stream = await _azureBlobService.DownloadFileAsync(blobName);
                     if (stream == null)
                     {
-                        return new NotFoundObjectResult(new { message = "Аватар не найден в Azure Storage" });
+                        _logger.LogWarning("Аватар не найден в Azure Storage: {Blob}", blobName);
+                        return SvgPlaceholderAvatar();
                     }
 
                     var memoryStream = new MemoryStream();
@@ -282,33 +312,29 @@ namespace APIDeliveryCRM.Services
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Ошибка при загрузке аватара из Azure Storage");
-                    return new NotFoundObjectResult(new { message = "Ошибка при загрузке аватара" });
+                    return SvgPlaceholderAvatar();
                 }
             }
             else
             {
-                var filePath = Path.Combine(_environment.WebRootPath, avatarPath.TrimStart('/'));
+                var filePath = ResolveLocalWebFilePath(avatarPath);
 
-                if (!System.IO.File.Exists(filePath))
+                if (string.IsNullOrWhiteSpace(filePath))
                 {
-                    var defaultPath = Path.Combine(_environment.WebRootPath, "avatars", "default.png");
-                    if (System.IO.File.Exists(defaultPath))
+                    var defaultPath = ResolveLocalWebFilePath("/avatars/default.png");
+                    if (!string.IsNullOrWhiteSpace(defaultPath))
                     {
                         var defaultBytes = await System.IO.File.ReadAllBytesAsync(defaultPath);
                         var contentType = GetContentType(defaultPath);
                         return new FileContentResult(defaultBytes, contentType);
                     }
-                    return new NotFoundObjectResult(new { message = "Аватар не найден" });
+                    // Нет файла на диске — отдаём SVG, иначе браузер получает JSON 404 и показывает «битую» картинку.
+                    return SvgPlaceholderAvatar();
                 }
 
                 var fileBytes = await System.IO.File.ReadAllBytesAsync(filePath);
                 var fileContentType = GetContentType(filePath);
-                var fileName = Path.GetFileName(filePath);
-
-                return new FileContentResult(fileBytes, fileContentType)
-                {
-                    FileDownloadName = fileName
-                };
+                return new FileContentResult(fileBytes, fileContentType);
             }
         }
 
@@ -386,6 +412,7 @@ namespace APIDeliveryCRM.Services
                 ".jpg" or ".jpeg" => "image/jpeg",
                 ".png" => "image/png",
                 ".gif" => "image/gif",
+                ".webp" => "image/webp",
                 ".pdf" => "application/pdf",
                 ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ".xls" => "application/vnd.ms-excel",

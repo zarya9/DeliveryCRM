@@ -1,4 +1,4 @@
-﻿namespace APIDeliveryCRM.Helpers;
+namespace APIDeliveryCRM.Helpers;
 
 public static class VinHelper
 {
@@ -9,14 +9,14 @@ public static class VinHelper
         errorMessage = null;
         if (string.IsNullOrWhiteSpace(vin))
         {
-            errorMessage = "РЈРєР°Р¶РёС‚Рµ VIN.";
+            errorMessage = "Укажите VIN.";
             return false;
         }
 
         var s = vin.Trim().ToUpperInvariant();
         if (s.Length != 17)
         {
-            errorMessage = "VIN РґРѕР»Р¶РµРЅ СЃРѕРґРµСЂР¶Р°С‚СЊ 17 СЃРёРјРІРѕР»РѕРІ.";
+            errorMessage = "VIN должен содержать 17 символов.";
             return false;
         }
 
@@ -24,7 +24,7 @@ public static class VinHelper
         {
             if (AllowedCharacters.IndexOf(c) < 0)
             {
-                errorMessage = "VIN: РґРѕРїСѓСЃС‚РёРјС‹ С‚РѕР»СЊРєРѕ С†РёС„СЂС‹ Рё Р»Р°С‚РёРЅСЃРєРёРµ Р±СѓРєРІС‹ РёР· РЅР°Р±РѕСЂР° Р±РµР· I, O Рё Q.";
+                errorMessage = "VIN: допустимы только цифры и латинские буквы из набора без I, O и Q.";
                 return false;
             }
         }

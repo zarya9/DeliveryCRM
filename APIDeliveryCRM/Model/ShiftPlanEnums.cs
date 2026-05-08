@@ -1,4 +1,4 @@
-﻿namespace APIDeliveryCRM.Model;
+namespace APIDeliveryCRM.Model;
 
 public enum ShiftPlanStatus : byte
 {

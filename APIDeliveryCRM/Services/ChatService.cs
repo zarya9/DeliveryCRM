@@ -6,6 +6,8 @@ using APIDeliveryCRM.Request;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using System.IO;
+using System.Text.Json;
 
 namespace APIDeliveryCRM.Services;
 
@@ -318,8 +320,13 @@ public class ChatService : IChatService
             .OrderByDescending(m => m.Sent_at)
             .ToListAsync();
 
+        var participantUserIds = rooms
+            .SelectMany(r => r.Participants.Where(p => p.Is_active).Select(p => p.User_id))
+            .Distinct()
+            .ToList();
+
         var users = await _context.Users.AsNoTracking()
-            .Where(u => u.Company_id == companyId)
+            .Where(u => participantUserIds.Contains(u.ID_User))
             .Select(u => new { u.ID_User, u.Name, u.FName })
             .ToListAsync();
 
@@ -403,8 +410,26 @@ public class ChatService : IChatService
 
     public async Task<IActionResult> CreateOrGetDirectRoomAsync(int companyId, int userId, int peerUserId)
     {
+        // #region agent log
+        AppendDebugLog("run2", "H7", "ChatService.cs:CreateOrGetDirectRoomAsync:start", "CreateOrGetDirectRoomAsync called", new
+        {
+            companyId,
+            userId,
+            peerUserId
+        });
+        // #endregion
         if (peerUserId <= 0 || peerUserId == userId)
+        {
+            // #region agent log
+            AppendDebugLog("run2", "H7", "ChatService.cs:CreateOrGetDirectRoomAsync:badPeer", "Invalid peer user", new
+            {
+                companyId,
+                userId,
+                peerUserId
+            });
+            // #endregion
             return new BadRequestObjectResult(new { message = "Некорректный собеседник." });
+        }
 
         var typeId = await ResolveRoomTypeIdAsync("direct", "Личный чат между двумя пользователями");
 
@@ -438,6 +463,15 @@ public class ChatService : IChatService
 
         await EnsureParticipantAsync(room.ID_ChatRoom, userId);
         await EnsureParticipantAsync(room.ID_ChatRoom, peerUserId);
+        // #region agent log
+        AppendDebugLog("run2", "H7", "ChatService.cs:CreateOrGetDirectRoomAsync:ok", "Direct room ensured", new
+        {
+            companyId,
+            userId,
+            peerUserId,
+            roomId = room.ID_ChatRoom
+        });
+        // #endregion
         return new OkObjectResult(new { roomId = room.ID_ChatRoom, roomName = room.Name });
     }
 
@@ -543,11 +577,21 @@ public class ChatService : IChatService
 
     private async Task<int> ResolveRoomTypeIdAsync(string code, string description)
     {
+        var codeLower = code.ToLowerInvariant();
+        var normalizedCode = NormalizeRoomKind(code);
+
+        // Сначала — SQL-транслируемые проверки.
         var existing = await _context.ChatRoomTypes
             .FirstOrDefaultAsync(t =>
                 t.Name == code ||
-                t.Name.ToLower() == code.ToLower() ||
-                NormalizeRoomKind(t.Name) == NormalizeRoomKind(code));
+                t.Name.ToLower() == codeLower);
+
+        // Затем — нормализация по нашим правилам в памяти (EF не умеет транслировать NormalizeRoomKind).
+        if (existing == null)
+        {
+            var allTypes = await _context.ChatRoomTypes.ToListAsync();
+            existing = allTypes.FirstOrDefault(t => NormalizeRoomKind(t.Name) == normalizedCode);
+        }
         if (existing != null)
             return existing.ID_ChatRoomType;
 
@@ -599,4 +643,25 @@ public class ChatService : IChatService
         foreach (var userId in participantIds)
             await _hubContext.Clients.Group($"User_{userId}").SendAsync(method, payload);
     }
+
+    // #region agent log
+    private static void AppendDebugLog(string runId, string hypothesisId, string location, string message, object data)
+    {
+        try
+        {
+            var line = JsonSerializer.Serialize(new
+            {
+                sessionId = "7b40bb",
+                runId,
+                hypothesisId,
+                location,
+                message,
+                data,
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+            File.AppendAllText(@"c:\Users\zarip\source\repos\DeliveryCRM\debug-7b40bb.log", line + Environment.NewLine);
+        }
+        catch { }
+    }
+    // #endregion
 }

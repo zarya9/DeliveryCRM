@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Json;
+using System.Net.Http.Json;
 using System.Text.Json;
 using WebBlazorDeliveryCRM.Models;
 
@@ -6,7 +6,7 @@ namespace WebBlazorDeliveryCRM.Services;
 
 public class AuthApiService
 {
-    public const string ServerUnavailableUserMessage = "РР·РІРёРЅРёС‚Рµ, РѕС€РёР±РєР° РЅР° СЃС‚РѕСЂРѕРЅРµ СЃРµСЂРІРµСЂР°. РЈР¶Рµ СЂР°Р±РѕС‚Р°РµРј.";
+    public const string ServerUnavailableUserMessage = "Извините, ошибка на стороне сервера. Уже работаем.";
 
     private readonly IHttpClientFactory _factory;
     private readonly IConfiguration _configuration;
@@ -35,13 +35,13 @@ public class AuthApiService
                 var raw = await response.Content.ReadAsStringAsync();
                 var token = ParseTokenFromResponse(raw);
                 if (string.IsNullOrEmpty(token))
-                    return new LoginResult { Success = false, ErrorMessage = "РЎРµСЂРІРµСЂ РІРµСЂРЅСѓР» РїСѓСЃС‚РѕР№ С‚РѕРєРµРЅ." };
+                    return new LoginResult { Success = false, ErrorMessage = "Сервер вернул пустой токен." };
                 return new LoginResult { Success = true, Token = token };
             }
 
-            // РћС€РёР±РєР° 400/401 вЂ” С‡РёС‚Р°РµРј message РёР· С‚РµР»Р°
+            // Ошибка 400/401 — читаем message из тела
             var errorBody = await response.Content.ReadAsStringAsync();
-            var message = "РќРµРІРµСЂРЅС‹Р№ email РёР»Рё РїР°СЂРѕР»СЊ.";
+            var message = "Неверный email или пароль.";
             if (!string.IsNullOrEmpty(errorBody))
             {
                 try
@@ -50,7 +50,7 @@ public class AuthApiService
                     if (doc.RootElement.TryGetProperty("message", out var msgProp))
                         message = msgProp.GetString() ?? message;
                 }
-                catch { /* РёСЃРїРѕР»СЊР·СѓРµРј message РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ */ }
+                catch { /* используем message по умолчанию */ }
             }
             return new LoginResult { Success = false, ErrorMessage = message };
         }
@@ -83,10 +83,10 @@ public class AuthApiService
         if (string.IsNullOrWhiteSpace(raw))
             return null;
         raw = raw.Trim();
-        // Plain text JWT (РЅР°С‡РёРЅР°РµС‚СЃСЏ СЃ eyJ)
+        // Plain text JWT (начинается с eyJ)
         if (raw.StartsWith("eyJ", StringComparison.Ordinal))
             return raw;
-        // JSON-СЃС‚СЂРѕРєР° РІ РєР°РІС‹С‡РєР°С…
+        // JSON-строка в кавычках
         if (raw.Length >= 2 && raw[0] == '"' && raw[^1] == '"')
             return raw[1..^1].Replace("\\\"", "\"");
         try
@@ -111,7 +111,7 @@ public class AuthApiService
             }
 
             var errorBody = await response.Content.ReadAsStringAsync();
-            var message = "РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°С‚СЊ Р°РєРєР°СѓРЅС‚.";
+            var message = "Не удалось зарегистрировать аккаунт.";
             if (!string.IsNullOrWhiteSpace(errorBody))
             {
                 try

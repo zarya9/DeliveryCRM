@@ -16,14 +16,15 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject AppNotificationService Notify
 @inject NavigationManager Navigation
+@inject IConfiguration Configuration
+@inject ChatApiService ChatApi
 
 <PageTitle>Сотрудники — Менеджер</PageTitle>
 
 <div class="dms-page-header">
     <h1>Сотрудники компании</h1>
-    <p class="subtitle">Список сотрудников и создание новых аккаунтов. Индикатор «в сети» обновляется по SignalR без перезагрузки страницы.</p>
-    <StatusBadge Text="@(_hubConnected ? "Presence realtime: подключено" : "Presence realtime: офлайн")"
-                 Tone="@(_hubConnected ? "success" : "warning")" />
+    <p class="subtitle"></p>
+    
 </div>
 
 <div class="dms-stat-grid mb-3">
@@ -32,22 +33,51 @@
 </div>
 
 <div class="dms-card mb-3">
-    <div class="d-flex justify-content-between align-items-center mb-2">
-        <h2 class="dms-card-title">Сотрудники</h2>
-        <input class="form-control"
-               style="max-width: 260px;"
-               placeholder="Поиск по ФИО"
-               @bind="_searchText" @bind:event="oninput" />
+    <div class="d-flex justify-content-between align-items-center gap-2 mb-2 flex-wrap flex-md-nowrap">
+        <h2 class="dms-card-title mb-0 flex-shrink-0">Сотрудники</h2>
+        <div class="employees-toolbar d-flex gap-2 align-items-center flex-nowrap justify-content-end flex-grow-1">
+            <input class="form-control employees-toolbar-search"
+                   placeholder="Поиск по ФИО"
+                   @bind="_searchText" @bind:event="oninput" />
+            <select class="form-select employees-toolbar-role" @bind="_roleFilter">
+                <option value="">Все</option>
+                @foreach (var role in RolesForEmployees)
+                {
+                    <option value="@role.Name">@role.Name</option>
+                }
+            </select>
+            <button type="button" class="btn btn-primary flex-shrink-0" @onclick="OpenCreateEmployeeModal" title="Добавить сотрудника">+</button>
+        </div>
     </div>
     @if (_employees is { Count: > 0 })
     {
         <table class="table">
             <thead>
                 <tr>
-                    <th>ФИО</th>
-                    <th>Роль</th>
-                    <th>Email</th>
-                    <th>Создан</th>
+                    <th>
+                        <span class="employees-table-th">
+                            <span>ФИО</span>
+                            <HugeIcon Name="user-03" CssClass="employees-th-icon" />
+                        </span>
+                    </th>
+                    <th>
+                        <span class="employees-table-th">
+                            <span>Должность</span>
+                            <HugeIcon Name="briefcase-01" CssClass="employees-th-icon" />
+                        </span>
+                    </th>
+                    <th>
+                        <span class="employees-table-th">
+                            <span>Почта</span>
+                            <HugeIcon Name="mail-01" CssClass="employees-th-icon" />
+                        </span>
+                    </th>
+                    <th>
+                        <span class="employees-table-th">
+                            <span>Создан</span>
+                            <HugeIcon Name="calendar-03" CssClass="employees-th-icon" />
+                        </span>
+                    </th>
                 </tr>
             </thead>
             <tbody>
@@ -58,14 +88,17 @@
                             <span class="status-dot @(_onlineUserIds.Contains(e.Id) ? "status-dot-online" : "status-dot-offline")"
                                   title="@(_onlineUserIds.Contains(e.Id) ? "В сети" : "Не в сети")"></span>
                             @e.FullName
-                            <StatusBadge Text="@(_onlineUserIds.Contains(e.Id) ? "Онлайн" : "Офлайн")"
-                                         Tone="@(_onlineUserIds.Contains(e.Id) ? "success" : "neutral")" />
                             @if (e.Id == _currentUserId)
                             {
                                 <span class="text-muted ms-1">(Вы)</span>
                             }
                         </td>
-                        <td><StatusBadge Text="@e.Role" Tone="@GetRoleTone(e.Role)" /></td>
+                        <td>
+                            <span class="employees-role-cell text-body">
+                                <HugeIcon Name="@GetRoleIconName(e.Role)" CssClass="employees-role-icon" />
+                                <span>@e.Role</span>
+                            </span>
+                        </td>
                         <td>@e.Email</td>
                         <td>@e.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
                     </tr>
@@ -79,100 +112,142 @@
     }
 </div>
 
-<div class="dms-card">
-    <h2 class="dms-card-title">Новый сотрудник</h2>
+@if (_showCreateModal)
+{
+    <div class="employee-modal-backdrop" @onclick="CloseCreateEmployeeModal">
+        <div class="employee-modal" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <h2 class="h5 mb-0">Новый сотрудник</h2>
+                <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseCreateEmployeeModal"></button>
+            </div>
 
-    <div class="row g-3">
-        <div class="col-md-4">
-            <label class="form-label">Фамилия</label>
-            <input class="form-control" @bind="_fName" />
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">Имя</label>
-            <input class="form-control" @bind="_name" />
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">Отчество</label>
-            <input class="form-control" @bind="_patronymic" />
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">Дата рождения</label>
-            <input type="date" class="form-control" @bind="_birthDate" />
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">Email (логин)</label>
-            <input type="email" class="form-control" @bind="_email" />
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">Пароль</label>
-            <input type="password" class="form-control" @bind="_password" />
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">Роль</label>
-            <select class="form-select" @bind="_selectedRoleId">
-                <option value="0">— выберите роль —</option>
-                @foreach (var r in _roles)
-                {
-                    <option value="@r.Id">@r.Name</option>
-                }
-            </select>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Фамилия</label>
+                    <input class="form-control" @bind="_fName" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Имя</label>
+                    <input class="form-control" @bind="_name" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Отчество</label>
+                    <input class="form-control" @bind="_patronymic" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Дата рождения</label>
+                    <input type="date" class="form-control" @bind="_birthDate" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Email (логин)</label>
+                    <input type="email" class="form-control" @bind="_email" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Пароль</label>
+                    <input type="password" class="form-control" @bind="_password" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Должность</label>
+                    <select class="form-select" @bind="_selectedRoleId">
+                        <option value="0">— выберите должность —</option>
+                        @foreach (var r in RolesForEmployees)
+                        {
+                            <option value="@r.Id">@r.Name</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger mt-3">@_error</div>
+            }
+            @if (!string.IsNullOrEmpty(_success))
+            {
+                <div class="alert alert-success mt-3">@_success</div>
+            }
+
+            <div class="d-flex justify-content-end gap-2 mt-3">
+                <button type="button" class="btn btn-outline-secondary" @onclick="CloseCreateEmployeeModal">Отмена</button>
+                <button class="btn btn-primary dms-btn-primary" disabled="@_saving" @onclick="SaveEmployee">
+                    @(_saving ? "Сохраняем..." : "Создать сотрудника")
+                </button>
+            </div>
         </div>
     </div>
-
-    @if (!string.IsNullOrEmpty(_error))
-    {
-        <div class="alert alert-danger mt-3">@_error</div>
-    }
-    @if (!string.IsNullOrEmpty(_success))
-    {
-        <div class="alert alert-success mt-3">@_success</div>
-    }
-
-    <button class="btn btn-primary dms-btn-primary mt-3" disabled="@_saving" @onclick="SaveEmployee">
-        @(_saving ? "Сохраняем..." : "Создать сотрудника")
-    </button>
-</div>
+}
 
 @if (_selectedEmployee is not null)
 {
     <div class="employee-modal-backdrop" @onclick="CloseEmployee">
-        <div class="employee-modal" @onclick:stopPropagation="true">
-            <div class="d-flex justify-content-between align-items-start mb-3">
+        <div class="employee-modal employee-modal--employee-detail" @onclick:stopPropagation="true">
+            <div class="employee-detail-header d-flex justify-content-between align-items-start">
                 <h2 class="h5 mb-0">Карточка сотрудника</h2>
                 <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseEmployee"></button>
             </div>
-            <div class="row g-3 align-items-center">
-                <div class="col-md-3 text-center">
+
+            <div class="employee-detail-body">
+                <div class="employee-detail-avatar-wrap">
                     <img src="@_avatarSrc"
                          alt="Аватар"
-                         class="img-fluid employee-avatar-rect"
-                         style="max-width: 120px;"
+                         class="employee-detail-avatar"
                          @onerror="OnAvatarError" />
+                    <div class="employee-detail-avatar-actions">
+                        <button type="button" class="btn btn-primary btn-sm employee-detail-btn text-white" @onclick="GoToChatAsync">
+                            <HugeIcon Name="message-01" CssClass="employee-detail-btn-icon" /> Написать
+                        </button>
+                    </div>
                 </div>
-                <div class="col-md-9">
-                    <p class="mb-1"><strong>ФИО:</strong> @_selectedEmployee.FullName</p>
-                    <p class="mb-1"><strong>Роль:</strong> @_selectedEmployee.Role</p>
+                <div class="employee-detail-fields">
+                    <div class="employee-detail-row">
+                        <div class="employee-detail-row-text">
+                            <span class="employee-detail-label">ФИО</span>
+                            <span class="employee-detail-value">@_selectedEmployee.FullName</span>
+                        </div>
+                        <HugeIcon Name="user-03" CssClass="employee-detail-row-icon" />
+                    </div>
+                    <div class="employee-detail-row">
+                        <div class="employee-detail-row-text">
+                            <span class="employee-detail-label">Должность</span>
+                            <span class="employee-detail-value">@_selectedEmployee.Role</span>
+                        </div>
+                        <HugeIcon Name="@GetRoleIconName(_selectedEmployee.Role)" CssClass="employee-detail-row-icon" />
+                    </div>
                     @if (!string.IsNullOrWhiteSpace(_selectedEmployee.Email))
                     {
-                        <p class="mb-1"><strong>Email:</strong> @_selectedEmployee.Email</p>
+                        <div class="employee-detail-row">
+                            <div class="employee-detail-row-text">
+                                <span class="employee-detail-label">Почта</span>
+                                <span class="employee-detail-value">@_selectedEmployee.Email</span>
+                            </div>
+                            <HugeIcon Name="mail-01" CssClass="employee-detail-row-icon" />
+                        </div>
                     }
-                    <p class="mb-1"><strong>Создан:</strong> @_selectedEmployee.Created_at.ToString("dd.MM.yyyy HH:mm")</p>
-                    <div class="d-flex gap-2 mt-2">
-                        <button type="button" class="btn btn-outline-primary" @onclick="GoToChat">Написать</button>
+                    <div class="employee-detail-row">
+                        <div class="employee-detail-row-text">
+                            <span class="employee-detail-label">Создан</span>
+                            <span class="employee-detail-value">@_selectedEmployee.Created_at.ToString("dd.MM.yyyy HH:mm")</span>
+                        </div>
+                        <HugeIcon Name="calendar-03" CssClass="employee-detail-row-icon" />
+                    </div>
+                    <div class="employee-detail-info-actions">
                         @if (_selectedEmployee.Id != _currentUserId)
                         {
                             @if (CanPromoteToLogistician(_selectedEmployee))
                             {
-                                <button type="button" class="btn btn-outline-info" @onclick="PromoteToLogisticianAsync">Сделать логистом</button>
+                                <button type="button" class="btn btn-info btn-sm employee-detail-btn text-white" @onclick="PromoteToLogisticianAsync">
+                                    <HugeIcon Name="package-moving" CssClass="employee-detail-btn-icon" /> Сделать логистом
+                                </button>
                             }
                             @if (CanDemoteToCourier(_selectedEmployee))
                             {
-                                <button type="button" class="btn btn-outline-warning" @onclick="DemoteToCourierAsync">Сделать курьером</button>
+                                <button type="button" class="btn btn-warning btn-sm employee-detail-btn text-dark" @onclick="DemoteToCourierAsync">
+                                    <HugeIcon Name="delivery-truck-01" CssClass="employee-detail-btn-icon" /> Сделать курьером
+                                </button>
                             }
-                        }
-                        @if (_selectedEmployee.Id != _currentUserId)
-                        {
-                            <button type="button" class="btn btn-outline-danger" @onclick="FireSelectedEmployeeAsync">Уволить</button>
+                            <button type="button" class="btn btn-danger btn-sm employee-detail-btn text-white" @onclick="FireSelectedEmployeeAsync">
+                                <HugeIcon Name="delete-02" CssClass="employee-detail-btn-icon" /> Уволить
+                            </button>
                         }
                     </div>
                 </div>
@@ -187,7 +262,9 @@
     private int _companyId;
     private int? _currentUserId;
     private EmployeeDto? _selectedEmployee;
-    private string _avatarSrc = "/avatars/default.png";
+    private string _avatarSrc = "/favicon.png";
+    private long _avatarVersion = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    private bool _avatarFallback;
 
     private string _fName = "";
     private string _name = "";
@@ -200,11 +277,13 @@
     private string? _error;
     private string? _success;
     private string _searchText = string.Empty;
+    private string _roleFilter = string.Empty;
     private HashSet<int> _onlineUserIds = new();
     private IDisposable? _presenceHubSubscription;
     private bool _hubConnected;
     private int _courierRoleId;
     private int _logisticRoleId;
+    private bool _showCreateModal;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -255,7 +334,6 @@
         }
         catch
         {
-            /* SignalR недоступен — остаётся актуальный снимок из LoadPresenceAsync */
             _hubConnected = false;
         }
     }
@@ -331,6 +409,7 @@
                 _patronymic = null;
                 _birthDate = null;
                 _selectedRoleId = 0;
+                _showCreateModal = false;
             }
             else
             {
@@ -362,31 +441,120 @@
         }
     }
 
+    /// <summary>Роли, доступные для сотрудников (без «Клиент»).</summary>
+    private IEnumerable<RolesApiService.RoleDto> RolesForEmployees =>
+        _roles.Where(r => !IsClientRole(r.Name));
+
+    private static bool IsClientRole(string? name) =>
+        string.Equals(name?.Trim(), "Клиент", StringComparison.OrdinalIgnoreCase);
+
     private bool FilterEmployee(EmployeeDto e)
     {
-        if (string.IsNullOrWhiteSpace(_searchText)) return true;
-        var q = _searchText.Trim().ToLowerInvariant();
-        return (e.FullName ?? string.Empty).ToLowerInvariant().Contains(q);
+        var byName = string.IsNullOrWhiteSpace(_searchText)
+            || (e.FullName ?? string.Empty).ToLowerInvariant().Contains(_searchText.Trim().ToLowerInvariant());
+        var byRole = string.IsNullOrWhiteSpace(_roleFilter)
+            || string.Equals(e.Role?.Trim(), _roleFilter.Trim(), StringComparison.OrdinalIgnoreCase);
+        return byName && byRole;
+    }
+
+    private void OpenCreateEmployeeModal()
+    {
+        _error = null;
+        _success = null;
+        _showCreateModal = true;
+    }
+
+    private void CloseCreateEmployeeModal()
+    {
+        _showCreateModal = false;
     }
 
     private void OpenEmployee(EmployeeDto e)
     {
         _selectedEmployee = e;
-        _avatarSrc = $"/avatars/{e.Id}.png";
+        _avatarFallback = false;
+        _avatarVersion = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        _avatarSrc = BuildAvatarApiUrl(e.Id);
+    }
+
+    // Аватар: абсолютный URL на API (как AuthorizedClient). Пустой ApiBaseUrl — тот же дефолт, что в Program.cs.
+    private string BuildAvatarApiUrl(int userId)
+    {
+        var raw = Configuration["ApiBaseUrl"];
+        var apiBase = string.IsNullOrWhiteSpace(raw) ? "http://localhost:5220" : raw.TrimEnd('/');
+        var q = $"v={_avatarVersion}";
+        return $"{apiBase}/api/Files/avatar/{userId}?{q}";
     }
 
     private void OnAvatarError()
     {
-        if (_avatarSrc != "/avatars/default.png")
-            _avatarSrc = "/avatars/default.png";
+        if (_avatarFallback)
+            return;
+        _avatarFallback = true;
+        _avatarSrc = "/favicon.png";
+        StateHasChanged();
     }
 
-    private void GoToChat()
+    private async Task GoToChatAsync()
     {
         if (_selectedEmployee is null)
             return;
-        Navigation.NavigateTo($"/manager/chat?userId={_selectedEmployee.Id}");
+
+        var peerUserId = _selectedEmployee.Id;
+        // #region agent log
+        AppendDebugLog("run1", "H1", "Employees.razor:GoToChatAsync:start", "GoToChatAsync invoked", new
+        {
+            peerUserId,
+            selectedEmployeeId = _selectedEmployee?.Id,
+            currentUserId = _currentUserId
+        });
+        // #endregion
+        if (peerUserId <= 0)
+        {
+            Notify.ShowError("Некорректный идентификатор сотрудника для чата.");
+            return;
+        }
+
+        // Сначала пытаемся получить/создать ЛС сразу, чтобы открыть конкретный room, а не общий чат.
+        var direct = await ChatApi.CreateOrGetDirectRoomAsync(peerUserId);
+        // #region agent log
+        AppendDebugLog("run1", "H1", "Employees.razor:GoToChatAsync:createOrGetResult", "CreateOrGetDirectRoomAsync result", new
+        {
+            peerUserId,
+            ok = direct.ok,
+            roomId = direct.roomId
+        });
+        // #endregion
+        if (direct.ok && direct.roomId > 0)
+        {
+            Navigation.NavigateTo($"/manager/chat?roomId={direct.roomId}");
+            return;
+        }
+
+        // Фолбэк на старый путь через userId.
+        Navigation.NavigateTo($"/manager/chat?userId={peerUserId}");
     }
+
+    // #region agent log
+    private static void AppendDebugLog(string runId, string hypothesisId, string location, string message, object data)
+    {
+        try
+        {
+            var line = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                sessionId = "7b40bb",
+                runId,
+                hypothesisId,
+                location,
+                message,
+                data,
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+            System.IO.File.AppendAllText(@"c:\Users\zarip\source\repos\DeliveryCRM\debug-7b40bb.log", line + Environment.NewLine);
+        }
+        catch { }
+    }
+    // #endregion
 
     private bool CanDemoteToCourier(EmployeeDto employee)
         => _courierRoleId > 0 && employee.Role.Contains("логист", StringComparison.OrdinalIgnoreCase);
@@ -451,16 +619,18 @@
         StateHasChanged();
     }
 
-    private static string GetRoleTone(string? role)
+    private static string GetRoleIconName(string? role)
     {
         var r = (role ?? string.Empty).ToLowerInvariant();
-        if (r.Contains("админ"))
-            return "danger";
         if (r.Contains("менедж"))
-            return "primary";
+            return "manager";
         if (r.Contains("логист"))
-            return "info";
-        return "neutral";
+            return "package-moving";
+        if (r.Contains("курьер"))
+            return "delivery-truck-01";
+        if (r.Contains("админ"))
+            return "settings-01";
+        return "briefcase-01";
     }
 
     public void Dispose()
@@ -470,12 +640,64 @@
 }
 
 <style>
-    .employee-avatar-rect {
-        width: 120px;
-        height: 90px;
-        object-fit: cover;
-        border-radius: 8px;
-        border: 1px solid var(--dms-card-border);
+    .employees-toolbar {
+        min-width: 0;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .employees-toolbar-search {
+        flex: 1 1 140px;
+        min-width: 120px;
+        max-width: 280px;
+    }
+
+    .employees-toolbar-role {
+        flex: 0 0 auto;
+        width: auto;
+        min-width: 160px;
+        max-width: 220px;
+    }
+
+    .employees-table-th {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        white-space: nowrap;
+    }
+
+    .employees-th-icon,
+    .employees-role-icon {
+        width: 1.125rem;
+        height: 1.125rem;
+        flex-shrink: 0;
+        opacity: 0.9;
+    }
+
+    .employees-role-cell {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35em;
+    }
+
+    .employee-modal--employee-detail .employee-detail-body {
+        align-items: stretch;
+    }
+
+    .employee-modal--employee-detail .employee-detail-avatar-wrap,
+    .employee-modal--employee-detail .employee-detail-fields {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .employee-detail-avatar-actions,
+    .employee-detail-info-actions {
+        margin-top: auto;
+        padding-top: 0.35rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
     }
 </style>
 

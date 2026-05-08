@@ -1,4 +1,4 @@
-﻿using APIDeliveryCRM.Model;
+using APIDeliveryCRM.Model;
 
 namespace APIDeliveryCRM.Responses;
 

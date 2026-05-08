@@ -5,6 +5,7 @@
 @inject AccountApiService AccountApi
 @inject ClientsApiService ClientsApi
 @inject AppNotificationService Notify
+@inject IConfiguration Configuration
 
 <PageTitle>@Title</PageTitle>
 
@@ -31,7 +32,7 @@
                 <div class="profile-meta"><strong>Должность:</strong> @_roleName</div>
                 <div class="profile-meta"><strong>Дата рождения:</strong> @_birthDateText</div>
                 <div class="profile-meta"><strong>Компания:</strong> @_companyName</div>
-                <div class="profile-meta"><strong>Логин (почта):</strong> @_email</div>
+                <div class="profile-meta"><strong>Почтовый адрес:</strong> @_email</div>
                 <div class="mt-2 d-flex gap-2 justify-content-start flex-wrap">
                     <label class="btn btn-outline-secondary btn-sm mb-0">
                         Загрузить аватар
@@ -156,15 +157,21 @@
     }
     .profile-modal-card {
         width: min(95vw, 520px);
-        background: #fff;
+        background: var(--dms-card-bg, #fff);
+        color: var(--dms-text, #0f172a);
+        border: 1px solid var(--dms-card-border, #e2e8f0);
         border-radius: 12px;
         padding: 1rem;
         box-shadow: 0 20px 50px rgba(2, 6, 23, 0.3);
     }
+
+    .profile-modal-card .text-muted {
+        color: var(--dms-text-muted, #64748b) !important;
+    }
 </style>
 
 @code {
-    [Parameter] public string Title { get; set; } = "Профиль";
+    [Parameter] public string Title { get; set; } = "Данные о сотруднике";
 
     private bool _loading = true;
     private string? _error;
@@ -189,16 +196,24 @@
     {
         get
         {
-            var v = $"{_fName} {_name}".Trim();
-            return string.IsNullOrWhiteSpace(v) ? "Пользователь" : v;
+            var v = $"{_fName} {_name} {_patronymic}".Trim();
+            return string.IsNullOrWhiteSpace(v) ? "Сотрудник" : v;
         }
     }
 
     private string AvatarUrl => _avatarFailed
         ? "/favicon.png"
         : (_currentUserId > 0
-            ? $"/api/Files/avatar/{_currentUserId}?v={_avatarVersion}"
+            ? BuildAvatarApiUrl(_currentUserId)
             : "/favicon.png");
+
+    private string BuildAvatarApiUrl(int userId)
+    {
+        var raw = Configuration["ApiBaseUrl"];
+        var apiBase = string.IsNullOrWhiteSpace(raw) ? "http://localhost:5220" : raw.TrimEnd('/');
+        var q = $"v={_avatarVersion}";
+        return $"{apiBase}/api/Files/avatar/{userId}?{q}";
+    }
 
     protected override async Task OnInitializedAsync()
     {

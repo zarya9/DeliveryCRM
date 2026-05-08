@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -9,79 +9,79 @@ namespace APIDeliveryCRM.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql("""
-                UPDATE "FuelTypes" SET "Name" = 'Р‘РµРЅР·РёРЅ РђР-95'
-                WHERE lower(trim("Name")) = lower('Р‘РµРЅР·РёРЅ');
+                UPDATE "FuelTypes" SET "Name" = 'Бензин АИ-95'
+                WHERE lower(trim("Name")) = lower('Бензин');
 
-                UPDATE "FuelTypes" SET "Name" = 'Р“Р°Р· (LPG/РјРµС‚Р°РЅ)'
-                WHERE lower(trim("Name")) = lower('Р“Р°Р·');
+                UPDATE "FuelTypes" SET "Name" = 'Газ (LPG/метан)'
+                WHERE lower(trim("Name")) = lower('Газ');
 
-                UPDATE "FuelTypes" SET "Name" = 'Р“РёР±СЂРёРґ (Р±РµРЅР·РёРЅ/СЌР»РµРєС‚СЂРѕ)'
-                WHERE lower(trim("Name")) = lower('Р“РёР±СЂРёРґ');
+                UPDATE "FuelTypes" SET "Name" = 'Гибрид (бензин/электро)'
+                WHERE lower(trim("Name")) = lower('Гибрид');
 
-                UPDATE "FuelTypes" SET "Name" = 'Р­Р»РµРєС‚СЂРѕ'
-                WHERE lower(trim("Name")) IN (lower('Р­Р»РµРєС‚...'), lower('Р­Р»РµРєС‚СЂРѕ'));
+                UPDATE "FuelTypes" SET "Name" = 'Электро'
+                WHERE lower(trim("Name")) = lower('Электро');
 
-                UPDATE "FuelTypes" SET "Name" = 'Р”РёР·РµР»СЊ'
-                WHERE lower(trim("Name")) = lower('Р”РёР·РµР»СЊ');
+                UPDATE "FuelTypes" SET "Name" = 'Дизель'
+                WHERE lower(trim("Name")) = lower('Дизель');
 
                 INSERT INTO "FuelTypes" ("Name")
-                SELECT 'Р‘РµРЅР·РёРЅ РђР-92'
+                SELECT 'Бензин АИ-92'
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р‘РµРЅР·РёРЅ РђР-92')
+                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Бензин АИ-92')
                 );
 
                 INSERT INTO "FuelTypes" ("Name")
-                SELECT 'Р‘РµРЅР·РёРЅ РђР-98'
+                SELECT 'Бензин АИ-98'
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р‘РµРЅР·РёРЅ РђР-98')
+                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Бензин АИ-98')
                 );
 
                 INSERT INTO "FuelTypes" ("Name")
-                SELECT 'Р‘РµРЅР·РёРЅ РђР-100'
+                SELECT 'Бензин АИ-100'
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р‘РµРЅР·РёРЅ РђР-100')
+                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Бензин АИ-100')
                 );
 
                 INSERT INTO "FuelTypes" ("Name")
-                SELECT 'Р“Р°Р· (CNG/РјРµС‚Р°РЅ)'
+                SELECT 'Газ (CNG/метан)'
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р“Р°Р· (CNG/РјРµС‚Р°РЅ)')
+                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Газ (CNG/метан)')
                 );
 
                 INSERT INTO "FuelTypes" ("Name")
-                SELECT 'Р­Р»РµРєС‚СЂРѕ (Р°РєРєСѓРјСѓР»СЏС‚РѕСЂ)'
+                SELECT 'Электро (аккумулятор)'
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р­Р»РµРєС‚СЂРѕ (Р°РєРєСѓРјСѓР»СЏС‚РѕСЂ)')
+                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Электро (аккумулятор)')
                 );
 
                 INSERT INTO "FuelTypes" ("Name")
-                SELECT 'РџР»Р°РіРёРЅ-РіРёР±СЂРёРґ (PHEV)'
+                SELECT 'Плагин-гибрид (PHEV)'
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('РџР»Р°РіРёРЅ-РіРёР±СЂРёРґ (PHEV)')
+                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Плагин-гибрид (PHEV)')
                 );
 
                 INSERT INTO "FuelTypes" ("Name")
-                SELECT 'MHEV (РјСЏРіРєРёР№ РіРёР±СЂРёРґ)'
+                SELECT 'MHEV (мягкий гибрид)'
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('MHEV (РјСЏРіРєРёР№ РіРёР±СЂРёРґ)')
+                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('MHEV (мягкий гибрид)')
                 );
 
                 INSERT INTO "FuelTypes" ("Name")
-                SELECT 'Р’РѕРґРѕСЂРѕРґ (FCEV)'
+                SELECT 'Водород (FCEV)'
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р’РѕРґРѕСЂРѕРґ (FCEV)')
+                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Водород (FCEV)')
                 );
 
                 INSERT INTO "FuelTypes" ("Name")
-                SELECT 'Р‘РёРѕРґРёР·РµР»СЊ'
+                SELECT 'Биодизель'
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р‘РёРѕРґРёР·РµР»СЊ')
+                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Биодизель')
                 );
 
                 INSERT INTO "FuelTypes" ("Name")
-                SELECT 'Р­С‚Р°РЅРѕР» (E85)'
+                SELECT 'Этанол (E85)'
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р­С‚Р°РЅРѕР» (E85)')
+                    SELECT 1 FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Этанол (E85)')
                 );
                 """);
         }
@@ -89,25 +89,25 @@ namespace APIDeliveryCRM.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql("""
-                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р‘РµРЅР·РёРЅ РђР-92');
-                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р‘РµРЅР·РёРЅ РђР-98');
-                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р‘РµРЅР·РёРЅ РђР-100');
-                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р“Р°Р· (CNG/РјРµС‚Р°РЅ)');
-                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р­Р»РµРєС‚СЂРѕ (Р°РєРєСѓРјСѓР»СЏС‚РѕСЂ)');
-                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('РџР»Р°РіРёРЅ-РіРёР±СЂРёРґ (PHEV)');
-                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('MHEV (РјСЏРіРєРёР№ РіРёР±СЂРёРґ)');
-                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р’РѕРґРѕСЂРѕРґ (FCEV)');
-                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р‘РёРѕРґРёР·РµР»СЊ');
-                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Р­С‚Р°РЅРѕР» (E85)');
+                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Бензин АИ-92');
+                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Бензин АИ-98');
+                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Бензин АИ-100');
+                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Газ (CNG/метан)');
+                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Электро (аккумулятор)');
+                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Плагин-гибрид (PHEV)');
+                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('MHEV (мягкий гибрид)');
+                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Водород (FCEV)');
+                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Биодизель');
+                DELETE FROM "FuelTypes" WHERE lower(trim("Name")) = lower('Этанол (E85)');
 
-                UPDATE "FuelTypes" SET "Name" = 'Р‘РµРЅР·РёРЅ'
-                WHERE lower(trim("Name")) = lower('Р‘РµРЅР·РёРЅ РђР-95');
+                UPDATE "FuelTypes" SET "Name" = 'Бензин'
+                WHERE lower(trim("Name")) = lower('Бензин АИ-95');
 
-                UPDATE "FuelTypes" SET "Name" = 'Р“Р°Р·'
-                WHERE lower(trim("Name")) = lower('Р“Р°Р· (LPG/РјРµС‚Р°РЅ)');
+                UPDATE "FuelTypes" SET "Name" = 'Газ'
+                WHERE lower(trim("Name")) = lower('Газ (LPG/метан)');
 
-                UPDATE "FuelTypes" SET "Name" = 'Р“РёР±СЂРёРґ'
-                WHERE lower(trim("Name")) = lower('Р“РёР±СЂРёРґ (Р±РµРЅР·РёРЅ/СЌР»РµРєС‚СЂРѕ)');
+                UPDATE "FuelTypes" SET "Name" = 'Гибрид'
+                WHERE lower(trim("Name")) = lower('Гибрид (бензин/электро)');
                 """);
         }
     }

@@ -1,6 +1,8 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
+using System.IO;
+using System.Text.Json;
 using APIDeliveryCRM.ContextDb;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
@@ -53,13 +55,13 @@ namespace APIDeliveryCRM.Services
         {
             if (!await _context.Roles.AnyAsync(r => r.ID_Role == request.RoleId))
             {
-                return new BadRequestObjectResult(new { message = "РЈРєР°Р·Р°РЅРЅР°СЏ СЂРѕР»СЊ РЅРµ РЅР°Р№РґРµРЅР°" });
+                return new BadRequestObjectResult(new { message = "Указанная роль не найдена" });
             }
 
             var existingLogin = await _context.Logins.FirstOrDefaultAsync(l => l.Email == request.Email);
             if (existingLogin != null)
             {
-                return new BadRequestObjectResult(new { message = "РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ С‚Р°РєРёРј email СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚" });
+                return new BadRequestObjectResult(new { message = "Пользователь с таким email уже существует" });
             }
 
             using var transaction = await _context.Database.BeginTransactionAsync();
@@ -69,7 +71,7 @@ namespace APIDeliveryCRM.Services
                 var company = await _context.Companies.FirstOrDefaultAsync(c => c.ID_Company == companyId);
                 if (company == null)
                 {
-                    return new BadRequestObjectResult(new { message = "РљРѕРјРїР°РЅРёСЏ РЅРµ РЅР°Р№РґРµРЅР°" });
+                    return new BadRequestObjectResult(new { message = "Компания не найдена" });
                 }
 
                 var user = new User
@@ -98,7 +100,7 @@ namespace APIDeliveryCRM.Services
                 _context.Logins.Add(login);
                 await _context.SaveChangesAsync();
 
-                if (string.Equals(role.Name, "РљСѓСЂСЊРµСЂ", StringComparison.Ordinal))
+                if (string.Equals(role.Name, "Курьер", StringComparison.OrdinalIgnoreCase))
                     await CreateCourierProfileInTransactionAsync(user.ID_User, company.ID_Company);
 
                 await transaction.CommitAsync();
@@ -112,7 +114,7 @@ namespace APIDeliveryCRM.Services
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return new BadRequestObjectResult(new { message = $"РћС€РёР±РєР° РїСЂРё СЃРѕР·РґР°РЅРёРё СЃРѕС‚СЂСѓРґРЅРёРєР°: {ex.Message}" });
+                return new BadRequestObjectResult(new { message = $"Ошибка при создании сотрудника: {ex.Message}" });
             }
         }
 
@@ -121,17 +123,17 @@ namespace APIDeliveryCRM.Services
             var user = await _context.Users
                 .FirstOrDefaultAsync(u => u.ID_User == employeeId && u.Company_id == companyId);
             if (user == null)
-                return new NotFoundObjectResult(new { message = "РЎРѕС‚СЂСѓРґРЅРёРє РЅРµ РЅР°Р№РґРµРЅ." });
+                return new NotFoundObjectResult(new { message = "Сотрудник не найден." });
 
             if (user.ID_User == actorUserId)
-                return new BadRequestObjectResult(new { message = "РќРµР»СЊР·СЏ СѓРІРѕР»РёС‚СЊ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ." });
+                return new BadRequestObjectResult(new { message = "Нельзя уволить текущего пользователя." });
 
             if (!user.Is_Active)
-                return new OkObjectResult(new { message = "РЎРѕС‚СЂСѓРґРЅРёРє СѓР¶Рµ СѓРІРѕР»РµРЅ." });
+                return new OkObjectResult(new { message = "Сотрудник уже уволен." });
 
             user.Is_Active = false;
             await _context.SaveChangesAsync();
-            return new OkObjectResult(new { message = "РЎРѕС‚СЂСѓРґРЅРёРє СѓРІРѕР»РµРЅ." });
+            return new OkObjectResult(new { message = "Сотрудник уволен." });
         }
 
         public async Task<IActionResult> ChangeRoleAsync(int employeeId, int companyId, int actorUserId, int roleId)
@@ -140,29 +142,43 @@ namespace APIDeliveryCRM.Services
                 .Include(u => u.Role)
                 .FirstOrDefaultAsync(u => u.ID_User == employeeId && u.Company_id == companyId && u.Is_Active);
             if (user == null)
-                return new NotFoundObjectResult(new { message = "РЎРѕС‚СЂСѓРґРЅРёРє РЅРµ РЅР°Р№РґРµРЅ." });
+                return new NotFoundObjectResult(new { message = "Сотрудник не найден." });
             if (user.ID_User == actorUserId)
-                return new BadRequestObjectResult(new { message = "РќРµР»СЊР·СЏ РјРµРЅСЏС‚СЊ СЂРѕР»СЊ СЃР°РјРѕРјСѓ СЃРµР±Рµ." });
+                return new BadRequestObjectResult(new { message = "Нельзя менять роль самому себе." });
 
             var targetRole = await _context.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.ID_Role == roleId);
             if (targetRole == null)
-                return new BadRequestObjectResult(new { message = "Р РѕР»СЊ РЅРµ РЅР°Р№РґРµРЅР°." });
+                return new BadRequestObjectResult(new { message = "Роль не найдена." });
 
             var oldRoleName = user.Role?.Name ?? string.Empty;
             var newRoleName = targetRole.Name ?? string.Empty;
+
+            AppendDebugLog("pre-fix", "H3", "EmployeeService.cs:ChangeRoleAsync:156", "Loaded role names", new { employeeId, companyId, actorUserId, roleId, oldRoleName, newRoleName });
+
+            var oldRole = oldRoleName.Trim().ToLowerInvariant();
+            var newRole = newRoleName.Trim().ToLowerInvariant();
+            var isOldLogistic = oldRole.Contains("\u043b\u043e\u0433\u0438\u0441\u0442");
+            var isOldCourier = oldRole.Contains("\u043a\u0443\u0440\u044c\u0435\u0440");
+            var isNewLogistic = newRole.Contains("\u043b\u043e\u0433\u0438\u0441\u0442");
+            var isNewCourier = newRole.Contains("\u043a\u0443\u0440\u044c\u0435\u0440");
             var canChange =
-                (oldRoleName == "Р›РѕРіРёСЃС‚" && newRoleName == "РљСѓСЂСЊРµСЂ") ||
-                (oldRoleName == "РљСѓСЂСЊРµСЂ" && newRoleName == "Р›РѕРіРёСЃС‚");
+                (isOldLogistic && isNewCourier) ||
+                (isOldCourier && isNewLogistic);
+
+            AppendDebugLog("post-fix", "H3", "EmployeeService.cs:ChangeRoleAsync:168", "Computed role transition flag", new { oldRoleName, newRoleName, oldRole, newRole, isOldLogistic, isOldCourier, isNewLogistic, isNewCourier, canChange });
+
             if (!canChange)
-                return new BadRequestObjectResult(new { message = "Р Р°Р·СЂРµС€РµРЅРѕ РјРµРЅСЏС‚СЊ С‚РѕР»СЊРєРѕ Р›РѕРіРёСЃС‚ в†” РљСѓСЂСЊРµСЂ." });
+                return new BadRequestObjectResult(new { message = "\u0420\u0430\u0437\u0440\u0435\u0448\u0435\u043d\u043e \u043c\u0435\u043d\u044f\u0442\u044c \u0442\u043e\u043b\u044c\u043a\u043e \u041b\u043e\u0433\u0438\u0441\u0442 \u2194 \u041a\u0443\u0440\u044c\u0435\u0440." });
 
             user.Role_id = targetRole.ID_Role;
             await _context.SaveChangesAsync();
 
-            if (newRoleName == "РљСѓСЂСЊРµСЂ")
+            AppendDebugLog("pre-fix", "H4", "EmployeeService.cs:ChangeRoleAsync:170", "Role update saved", new { employeeId, newRoleId = targetRole.ID_Role, newRoleName });
+
+            if (string.Equals(newRoleName, "Курьер", StringComparison.OrdinalIgnoreCase))
                 await CreateCourierProfileInTransactionAsync(user.ID_User, companyId);
 
-            return new OkObjectResult(new { message = $"Р РѕР»СЊ РёР·РјРµРЅРµРЅР°: {oldRoleName} в†’ {newRoleName}." });
+            return new OkObjectResult(new { message = $"Роль изменена: {oldRoleName} → {newRoleName}." });
         }
 
         private async Task CreateCourierProfileInTransactionAsync(int userId, int companyId)
@@ -175,10 +191,10 @@ namespace APIDeliveryCRM.Services
             if (defaultCategory == null || defaultSchedule == null)
                 return;
 
-            var defaultStatus = await _context.CourierStatuses.FirstOrDefaultAsync(s => s.Name == "РќРµ РЅР° СЃРјРµРЅРµ");
+            var defaultStatus = await _context.CourierStatuses.FirstOrDefaultAsync(s => s.Name == "Не на смене");
             if (defaultStatus == null)
             {
-                defaultStatus = new CourierStatus { Name = "РќРµ РЅР° СЃРјРµРЅРµ", Description = "РљСѓСЂСЊРµСЂ РЅРµ РЅР° СЃРјРµРЅРµ" };
+                defaultStatus = new CourierStatus { Name = "Не на смене", Description = "Курьер не на смене" };
                 _context.CourierStatuses.Add(defaultStatus);
                 await _context.SaveChangesAsync();
             }
@@ -198,6 +214,25 @@ namespace APIDeliveryCRM.Services
                 LastActivity_at = DateTime.UtcNow
             });
             await _context.SaveChangesAsync();
+        }
+
+        private static void AppendDebugLog(string runId, string hypothesisId, string location, string message, object data)
+        {
+            try
+            {
+                var line = JsonSerializer.Serialize(new
+                {
+                    sessionId = "7b40bb",
+                    runId,
+                    hypothesisId,
+                    location,
+                    message,
+                    data,
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                });
+                File.AppendAllText(@"c:\Users\zarip\source\repos\DeliveryCRM\debug-7b40bb.log", line + Environment.NewLine);
+            }
+            catch { }
         }
     }
 }

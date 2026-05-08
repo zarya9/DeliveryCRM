@@ -79,6 +79,7 @@
         display: flex;
         justify-content: space-around;
         align-items: stretch;
+        font-size: clamp(14px, 3vw, 18px); 
         gap: 0.15rem;
         padding: 0.35rem 0.35rem calc(0.35rem + env(safe-area-inset-bottom, 0px));
         border-top: 1px solid var(--dms-border, #e2e8f0);

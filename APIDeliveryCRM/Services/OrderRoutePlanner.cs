@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using APIDeliveryCRM.Model;
 
 namespace APIDeliveryCRM.Services;
@@ -21,7 +21,7 @@ public static class OrderRoutePlanner
                     {
                         SortOrder = 0,
                         Kind = OrderRouteStopKind.SenderPickup,
-                        Title = "Р—Р°Р±РѕСЂ Сѓ РѕС‚РїСЂР°РІРёС‚РµР»СЏ",
+                        Title = "Забор у отправителя",
                         Address_id = pickup.ID_Address,
                         Status = OrderRouteStopStatus.Pending
                     },
@@ -29,7 +29,7 @@ public static class OrderRoutePlanner
                     {
                         SortOrder = 1,
                         Kind = OrderRouteStopKind.RecipientDelivery,
-                        Title = "Р”РѕСЃС‚Р°РІРєР° РїРѕР»СѓС‡Р°С‚РµР»СЋ",
+                        Title = "Доставка получателю",
                         Address_id = delivery.ID_Address,
                         Status = OrderRouteStopStatus.Pending
                     }
@@ -42,7 +42,7 @@ public static class OrderRoutePlanner
                     {
                         SortOrder = 0,
                         Kind = OrderRouteStopKind.SenderPickup,
-                        Title = "Р—Р°Р±РѕСЂ (РѕС‚РїСЂР°РІРёС‚РµР»СЊ)",
+                        Title = "Забор (отправитель)",
                         Address_id = pickup.ID_Address,
                         Status = OrderRouteStopStatus.Pending
                     },
@@ -50,7 +50,7 @@ public static class OrderRoutePlanner
                     {
                         SortOrder = 1,
                         Kind = OrderRouteStopKind.RecipientDelivery,
-                        Title = "Р’СЂСѓС‡РµРЅРёРµ (РїРѕР»СѓС‡Р°С‚РµР»СЊ), РїСЂСЏРјРѕР№ СЂРµР№СЃ",
+                        Title = "Вручение (получатель), прямой рейс",
                         Address_id = delivery.ID_Address,
                         Status = OrderRouteStopStatus.Pending
                     }
@@ -58,7 +58,7 @@ public static class OrderRoutePlanner
 
             case DeliveryRouteKind.ViaHub:
                 if (originHub == null || destinationHub == null)
-                    throw new InvalidOperationException("Р”Р»СЏ РґРѕСЃС‚Р°РІРєРё С‡РµСЂРµР· С…Р°Р±С‹ Р·Р°РґР°Р№С‚Рµ СЃРєР»Р°Рґ РѕС‚РїСЂР°РІР»РµРЅРёСЏ Рё СЃРєР»Р°Рґ РЅР°Р·РЅР°С‡РµРЅРёСЏ.");
+                    throw new InvalidOperationException("Для доставки через хабы задайте склад отправления и склад назначения.");
 
                 return new List<OrderRouteStop>
                 {
@@ -66,7 +66,7 @@ public static class OrderRoutePlanner
                     {
                         SortOrder = 0,
                         Kind = OrderRouteStopKind.SenderPickup,
-                        Title = "Р—Р°Р±РѕСЂ Сѓ РѕС‚РїСЂР°РІРёС‚РµР»СЏ",
+                        Title = "Забор у отправителя",
                         Address_id = pickup.ID_Address,
                         Status = OrderRouteStopStatus.Pending
                     },
@@ -74,7 +74,7 @@ public static class OrderRoutePlanner
                     {
                         SortOrder = 1,
                         Kind = OrderRouteStopKind.Hub,
-                        Title = $"РЎРєР»Р°Рґ РѕС‚РїСЂР°РІР»РµРЅРёСЏ: {originHub.Name}",
+                        Title = $"Склад отправления: {originHub.Name}",
                         Address_id = originHub.Address_id,
                         LogisticsHub_id = originHub.ID_LogisticsHub,
                         Status = OrderRouteStopStatus.Pending
@@ -83,7 +83,7 @@ public static class OrderRoutePlanner
                     {
                         SortOrder = 2,
                         Kind = OrderRouteStopKind.Hub,
-                        Title = $"РЎРєР»Р°Рґ РЅР°Р·РЅР°С‡РµРЅРёСЏ: {destinationHub.Name}",
+                        Title = $"Склад назначения: {destinationHub.Name}",
                         Address_id = destinationHub.Address_id,
                         LogisticsHub_id = destinationHub.ID_LogisticsHub,
                         Status = OrderRouteStopStatus.Pending
@@ -92,7 +92,7 @@ public static class OrderRoutePlanner
                     {
                         SortOrder = 3,
                         Kind = OrderRouteStopKind.RecipientDelivery,
-                        Title = "Р”РѕСЃС‚Р°РІРєР° РїРѕР»СѓС‡Р°С‚РµР»СЋ",
+                        Title = "Доставка получателю",
                         Address_id = delivery.ID_Address,
                         Status = OrderRouteStopStatus.Pending
                     }

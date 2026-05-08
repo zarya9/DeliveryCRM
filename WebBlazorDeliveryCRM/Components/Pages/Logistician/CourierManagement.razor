@@ -14,7 +14,7 @@
 
 <div class="dms-page-header">
     <h1>Управление курьерами</h1>
-    <p class="subtitle">Список курьеров — откройте карточку для назначения ТС и просмотра данных</p>
+    <p class="subtitle"></p>
 </div>
 
 <div class="dms-card">
@@ -145,7 +145,7 @@
                         <input class="form-control" value="@_newVehicle.License_plate" @oninput="OnLicensePlateInput" />
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">VIN * (17 символов, без I, O, Q)</label>
+                        <label class="form-label">VIN *</label>
                         <input class="form-control" maxlength="17" value="@_newVehicle.VIN" @oninput="OnVinInput" />
                     </div>
                     @if (UseVehicleCatalog)

@@ -351,6 +351,86 @@ namespace APIDeliveryCRM.Services
             return new OkObjectResult(items);
         }
 
+        public async Task<IActionResult> PayPendingInvoiceAsync(int companyId, int invoiceId)
+        {
+            var invoice = await _context.BillingInvoices
+                .Include(i => i.Company)
+                .Include(i => i.Plan)
+                .FirstOrDefaultAsync(i => i.ID_BillingInvoice == invoiceId && i.Company_id == companyId);
+            if (invoice == null)
+                return new NotFoundObjectResult(new { message = "Счёт не найден." });
+
+            if (invoice.Status != "pending" && invoice.Status != "pending_upgrade")
+                return new BadRequestObjectResult(new { message = "Оплатить можно только ожидающий счёт." });
+
+            var tx = await _context.PaymentTransactions
+                .Where(t => t.BillingInvoice_id == invoice.ID_BillingInvoice)
+                .OrderByDescending(t => t.ID_PaymentTransaction)
+                .FirstOrDefaultAsync();
+
+            if (tx != null)
+            {
+                tx.Status = "succeeded";
+                tx.Succeeded_at = DateTime.UtcNow;
+                tx.FailureReason = null;
+            }
+
+            var invoiceStatusBeforePay = invoice.Status;
+            invoice.Status = "paid";
+            invoice.Paid_at = DateTime.UtcNow;
+
+            var subscription = await EnsureSubscriptionAsync(invoice.Company_id);
+            if (subscription == null)
+                return new BadRequestObjectResult(new { message = "Подписка компании не инициализирована." });
+
+            var now = DateTime.UtcNow;
+            var isUpgradeInvoice = string.Equals(invoiceStatusBeforePay, "pending_upgrade", StringComparison.OrdinalIgnoreCase);
+            subscription.SubscriptionPlan_id = invoice.SubscriptionPlan_id;
+            subscription.Status = "active";
+            subscription.Canceled_at = null;
+            if (!isUpgradeInvoice)
+            {
+                var periodStart = subscription.CurrentPeriodEnd_at > now ? subscription.CurrentPeriodEnd_at : now;
+                subscription.CurrentPeriodStart_at = periodStart;
+                subscription.CurrentPeriodEnd_at = periodStart.AddMonths(invoice.PeriodMonths);
+            }
+
+            invoice.Company.SubscriptionPlan = invoice.Plan.Code;
+            invoice.Company.MaxUsers = invoice.Plan.MaxUsers;
+            invoice.Company.MaxOrdersPerMonth = invoice.Plan.MaxOrdersPerMonth;
+            invoice.Company.SubscriptionExpiresAt = subscription.CurrentPeriodEnd_at;
+            invoice.Company.Is_Active = true;
+
+            await _context.SaveChangesAsync();
+            return new OkObjectResult(new { message = "Счёт успешно оплачен." });
+        }
+
+        public async Task<IActionResult> CancelPendingInvoiceAsync(int companyId, int invoiceId)
+        {
+            var invoice = await _context.BillingInvoices
+                .FirstOrDefaultAsync(i => i.ID_BillingInvoice == invoiceId && i.Company_id == companyId);
+            if (invoice == null)
+                return new NotFoundObjectResult(new { message = "Счёт не найден." });
+
+            if (invoice.Status != "pending" && invoice.Status != "pending_upgrade")
+                return new BadRequestObjectResult(new { message = "Отменить можно только ожидающий счёт." });
+
+            invoice.Status = "canceled";
+            invoice.Paid_at = null;
+
+            var txs = await _context.PaymentTransactions
+                .Where(t => t.BillingInvoice_id == invoice.ID_BillingInvoice && t.Status != "succeeded")
+                .ToListAsync();
+            foreach (var tx in txs)
+            {
+                tx.Status = "canceled";
+                tx.FailureReason = "Canceled by user";
+            }
+
+            await _context.SaveChangesAsync();
+            return new OkObjectResult(new { message = "Счёт отменён." });
+        }
+
         private async Task<CompanySubscription?> EnsureSubscriptionAsync(int companyId)
         {
             await EnsureDefaultPlansAsync();

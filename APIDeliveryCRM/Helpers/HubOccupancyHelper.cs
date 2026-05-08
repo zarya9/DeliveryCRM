@@ -1,4 +1,4 @@
-﻿using System.Linq;
+using System.Linq;
 using APIDeliveryCRM.Model;
 
 namespace APIDeliveryCRM.Helpers;
@@ -33,18 +33,18 @@ public static class HubOccupancyHelper
     public static string FormatClientName(ClientProfile? client)
     {
         if (client?.User == null)
-            return "РљР»РёРµРЅС‚";
+            return "Клиент";
         return $"{client.User.FName} {client.User.Name}".Trim();
     }
 
     public static string FormatDeliveryLine(Address? addr)
     {
         if (addr == null)
-            return "вЂ”";
+            return "—";
         var parts = new[] { addr.City, addr.Street, addr.House }
             .Where(p => !string.IsNullOrWhiteSpace(p))
             .Select(p => p!.Trim());
         var s = string.Join(", ", parts);
-        return string.IsNullOrWhiteSpace(s) ? "вЂ”" : s;
+        return string.IsNullOrWhiteSpace(s) ? "—" : s;
     }
 }

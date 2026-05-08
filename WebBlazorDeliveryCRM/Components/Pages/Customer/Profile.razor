@@ -11,6 +11,7 @@
 @inject AddressSuggestApiService AddressSuggestApi
 @inject AppNotificationService Notify
 @inject IJSRuntime JS
+@inject IConfiguration Configuration
 
 <PageTitle>Профиль — Клиент</PageTitle>
 
@@ -247,9 +248,19 @@
         _paymentMethods.FirstOrDefault(x => x.ID_PaymentMethod == _profile?.Preferred_payment_method_id)?.Name
         ?? "Не выбран";
 
+    private long _profileAvatarVer;
+
     private string AvatarUrl => _profile?.User_id > 0
-        ? $"/api/Files/avatar/{_profile.User_id}?v={DateTimeOffset.UtcNow.ToUnixTimeSeconds()}"
+        ? BuildAvatarApiUrl(_profile.User_id)
         : _avatarFallback;
+
+    private string BuildAvatarApiUrl(int userId)
+    {
+        var raw = Configuration["ApiBaseUrl"];
+        var apiBase = string.IsNullOrWhiteSpace(raw) ? "http://localhost:5220" : raw.TrimEnd('/');
+        var q = $"v={_profileAvatarVer}";
+        return $"{apiBase}/api/Files/avatar/{userId}?{q}";
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -271,6 +282,7 @@
                 return;
             }
 
+            _profileAvatarVer = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             _paymentMethods = await ClientsApi.GetPaymentMethodsAsync();
 
             var orders = await OrdersApi.GetByClientAsync(_profile.ID_ClientProfile) ?? new List<OrderDto>();

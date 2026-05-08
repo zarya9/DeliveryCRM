@@ -6,9 +6,12 @@
 
 <PageTitle>Чат — Менеджер</PageTitle>
 
-<CompanyChatPanel TargetUserId="@UserId" />
+<CompanyChatPanel TargetUserId="@UserId" TargetRoomId="@RoomId" />
 
 @code {
     [SupplyParameterFromQuery(Name = "userId")]
     public int? UserId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "roomId")]
+    public int? RoomId { get; set; }
 }

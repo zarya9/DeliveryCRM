@@ -18,16 +18,16 @@
 <div class="dms-card mb-3">
     <div class="d-flex gap-2 flex-wrap">
         <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ReloadAsync">
-            <HugeIcon Name="refresh" CssClass="telegram-action-icon" /> Обновить
+            <HugeIcon Name="refresh" CssClass="chat-action-icon" /> Обновить
         </button>
         <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OpenOsmRoute" disabled="@(!_hasRouteEndpoints)">
-            <HugeIcon Name="maps-square-02" CssClass="telegram-action-icon" /> OSM
+            <HugeIcon Name="maps-square-02" CssClass="chat-action-icon" /> OSM
         </button>
         <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OpenYandexRoute" disabled="@(!_hasRouteEndpoints)">
-            <HugeIcon Name="navigation-03" CssClass="telegram-action-icon" /> Яндекс
+            <HugeIcon Name="navigation-03" CssClass="chat-action-icon" /> Яндекс
         </button>
         <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OpenTwoGisRoute" disabled="@(!_hasRouteEndpoints)">
-            <HugeIcon Name="route-03" CssClass="telegram-action-icon" /> 2ГИС
+            <HugeIcon Name="route-03" CssClass="chat-action-icon" /> 2ГИС
         </button>
         <button type="button" class="btn btn-link btn-sm" @onclick="BackToCouriers">Назад к списку</button>
     </div>

@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -95,7 +95,7 @@ public class AddressSuggestController : Controller
             }
         }
 
-        // 1) РЎС‚СЂСѓРєС‚СѓСЂРёСЂРѕРІР°РЅРЅС‹Р№: СѓР»РёС†Р° + РіРѕСЂРѕРґ (+ РЅРѕРјРµСЂ, РµСЃР»Рё СЂР°СЃРїРѕР·РЅР°Р»Рё).
+        // 1) Структурированный: улица + город (+ номер, если распознали).
         if (!string.IsNullOrWhiteSpace(city))
         {
             var url =
@@ -106,7 +106,7 @@ public class AddressSuggestController : Controller
             await CollectAsync(url);
         }
 
-        // 2) Р”РѕРїРѕР»РЅСЏРµРј СЃРІРѕР±РѕРґРЅС‹Рј РїРѕРёСЃРєРѕРј (РґСЂСѓРіР°СЏ СЂР°РЅР¶РёСЂРѕРІРєР°; РїРѕСЃР»Рµ СЃС‚СЂСѓРєС‚СѓСЂРёСЂРѕРІР°РЅРЅРѕРіРѕ вЂ” РїР°СѓР·Р° РґР»СЏ Nominatim).
+        // 2) Дополняем свободным поиском (другая ранжировка; после структурированного — пауза для Nominatim).
         if (list.Count < limit)
         {
             if (requests > 0)
@@ -119,7 +119,7 @@ public class AddressSuggestController : Controller
             await CollectAsync(free);
         }
 
-        // 3) Photon вЂ” С‡Р°С‰Рµ РґР°С‘С‚ house_number РїРѕ СѓР»РёС†Рµ (OSM РІ Р Р¤ С‡Р°СЃС‚Рѕ Р±РµР· РґРѕРјРѕРІ РІ Nominatim).
+        // 3) Photon — чаще даёт house_number по улице (OSM в РФ часто без домов в Nominatim).
         if (list.Count < limit && !string.IsNullOrWhiteSpace(city))
         {
             if (requests > 0)
@@ -226,7 +226,7 @@ public class AddressSuggestController : Controller
         }
         catch
         {
-            /* Photon РЅРµРґРѕСЃС‚СѓРїРµРЅ вЂ” РѕСЃС‚Р°С‘РјСЃСЏ РЅР° Nominatim */
+            /* Photon недоступен — остаёмся на Nominatim */
         }
     }
 
@@ -236,7 +236,7 @@ public class AddressSuggestController : Controller
         housePart = null;
         var m = Regex.Match(
             q.Trim(),
-            @"^(?<s>.+?)[\s,]+(?<h>\d+[Рђ-РЇР°-СЏA-Za-z/-]*)$",
+            @"^(?<s>.+?)[\s,]+(?<h>\d+[А-Яа-яA-Za-z/-]*)$",
             RegexOptions.CultureInvariant);
         if (!m.Success)
             return;
@@ -258,8 +258,8 @@ public class AddressSuggestController : Controller
 
     private static readonly HashSet<string> NoiseTokens = new(StringComparer.OrdinalIgnoreCase)
     {
-        "СѓР»РёС†Р°", "СѓР»", "СѓР».", "РїСЂРѕСЃРїРµРєС‚", "РїСЂ-С‚", "С€РѕСЃСЃРµ", "РїРµСЂРµСѓР»РѕРє", "РїРµСЂ", "РїСЂРѕРµР·Рґ",
-        "РЅР°Р±РµСЂРµР¶РЅР°СЏ", "РїР»РѕС‰Р°РґСЊ", "РїР»", "Р±СѓР»СЊРІР°СЂ", "Р±-СЂ", "Р°Р»Р»РµСЏ", "РјРёРєСЂРѕСЂР°Р№РѕРЅ", "РјРєСЂ"
+        "улица", "ул", "ул.", "проспект", "пр-т", "шоссе", "переулок", "пер", "проезд",
+        "набережная", "площадь", "пл", "бульвар", "б-р", "аллея", "микрорайон", "мкр"
     };
 
     private static bool IsRelevantToUserQuery(string userQuery, string? road, string? display)

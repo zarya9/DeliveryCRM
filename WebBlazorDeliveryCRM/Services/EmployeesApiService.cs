@@ -1,10 +1,16 @@
 using System.Net.Http.Json;
 using System.Net;
+using System.Text.Json;
 
 namespace WebBlazorDeliveryCRM.Services;
 
 public class EmployeesApiService
 {
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     private readonly HttpClient _http;
 
     public EmployeesApiService(IHttpClientFactory factory)
@@ -16,10 +22,20 @@ public class EmployeesApiService
     {
         try
         {
-            var list = await _http.GetFromJsonAsync<List<EmployeeDto>>($"/api/Employees?companyId={companyId}", cancellationToken);
+            using var resp = await _http.GetAsync($"/api/Employees?companyId={companyId}", cancellationToken);
+            if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                return new List<EmployeeDto>();
+            if (!resp.IsSuccessStatusCode)
+                return new List<EmployeeDto>();
+            await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
+            var list = await JsonSerializer.DeserializeAsync<List<EmployeeDto>>(stream, JsonOpts, cancellationToken);
             return list ?? new List<EmployeeDto>();
         }
         catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized || ex.StatusCode == HttpStatusCode.Forbidden)
+        {
+            return new List<EmployeeDto>();
+        }
+        catch
         {
             return new List<EmployeeDto>();
         }
@@ -70,4 +86,3 @@ public class EmployeesApiService
         public int RoleId { get; set; }
     }
 }
-

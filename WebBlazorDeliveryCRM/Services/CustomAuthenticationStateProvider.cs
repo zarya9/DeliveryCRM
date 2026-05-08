@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.JSInterop;
 
@@ -92,7 +92,7 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider
         }
         catch
         {
-            /* circuit / JS РЅРµРґРѕСЃС‚СѓРїРµРЅ */
+            /* circuit / JS недоступен */
         }
 
         NotifyAuthenticationStateChanged(Task.FromResult(Anonymous()));

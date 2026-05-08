@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -11,7 +11,7 @@ namespace APIDeliveryCRM.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Р›РѕРіРёСЃС‚,РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ,РђРґРјРёРЅ,РњРµРЅРµРґР¶РµСЂ")]
+[Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
 public class MonitoringController : Controller
 {
     private readonly ContextDB _db;
@@ -26,7 +26,7 @@ public class MonitoringController : Controller
     {
         var companyId = GetCompanyId();
         if (!companyId.HasValue)
-            return Unauthorized(new { message = "РќРµ СѓРєР°Р·Р°РЅР° РєРѕРјРїР°РЅРёСЏ РІ С‚РѕРєРµРЅРµ." });
+            return Unauthorized(new { message = "Не указана компания в токене." });
 
         take = Math.Clamp(take, 10, 200);
         hours = Math.Clamp(hours, 1, 168);
@@ -57,7 +57,7 @@ public class MonitoringController : Controller
     {
         var companyId = GetCompanyId();
         if (!companyId.HasValue)
-            return Unauthorized(new { message = "РќРµ СѓРєР°Р·Р°РЅР° РєРѕРјРїР°РЅРёСЏ РІ С‚РѕРєРµРЅРµ." });
+            return Unauthorized(new { message = "Не указана компания в токене." });
 
         var shiftsByCourier = await _db.CourierShifts.AsNoTracking()
             .Where(s => s.Company_id == companyId.Value && s.TimeEnd == null)
@@ -83,7 +83,7 @@ public class MonitoringController : Controller
         var courierMarkers = couriers.Select(c =>
         {
             var started = shiftsByCourier.FirstOrDefault(x => x.CourierId == c.ID_CourierProfile)?.StartedAt;
-            var onlineText = c.Is_online ? "РѕРЅР»Р°Р№РЅ" : "РѕС„Р»Р°Р№РЅ";
+            var onlineText = c.Is_online ? "онлайн" : "офлайн";
             var hasCoords = c.Current_lat != 0 || c.Current_lon != 0;
             var markerLat = hasCoords
                 ? (double)c.Current_lat
@@ -92,7 +92,7 @@ public class MonitoringController : Controller
                 ? (double)c.Current_lon
                 : (double?)(fallbackHub?.Address?.Longitude ?? 0m) ?? 0d;
             var fallbackSuffix = !hasCoords && c.Is_online && markerLat != 0d && markerLon != 0d
-                ? " В· РєРѕРѕСЂРґРёРЅР°С‚С‹ СѓС‚РѕС‡РЅСЏСЋС‚СЃСЏ"
+                ? " · координаты уточняются"
                 : string.Empty;
 
             return new
@@ -102,8 +102,8 @@ public class MonitoringController : Controller
                 lat = markerLat,
                 lon = markerLon,
                 online = c.Is_online,
-                title = $"{c.User.FName} {c.User.Name}".Trim() + $" В· {onlineText}" + (started.HasValue
-                    ? $" В· СЃРјРµРЅР° СЃ {started.Value:dd.MM HH:mm} UTC"
+                title = $"{c.User.FName} {c.User.Name}".Trim() + $" · {onlineText}" + (started.HasValue
+                    ? $" · смена с {started.Value:dd.MM HH:mm} UTC"
                     : "") + fallbackSuffix
             };
         }).ToList();
@@ -116,7 +116,7 @@ public class MonitoringController : Controller
                 id = h.ID_LogisticsHub,
                 lat = (double)h.Address!.Latitude!.Value,
                 lon = (double)h.Address.Longitude!.Value,
-                title = string.IsNullOrWhiteSpace(h.Name) ? "РЎРєР»Р°Рґ" : h.Name!
+                title = string.IsNullOrWhiteSpace(h.Name) ? "Склад" : h.Name!
             })
             .ToList();
 
@@ -142,7 +142,7 @@ public class MonitoringController : Controller
                         id = order.OriginHub.ID_LogisticsHub,
                         lat = (double)olat,
                         lon = (double)olon,
-                        title = $"РЎРєР»Р°Рґ (РёР· Р·Р°РєР°Р·Р°): {order.OriginHub.Name}"
+                        title = $"Склад (из заказа): {order.OriginHub.Name}"
                     });
                 }
                 if (order.DestinationHub?.Address?.Latitude is { } dlat && order.DestinationHub.Address.Longitude is { } dlon && dlat != 0 && dlon != 0)
@@ -153,7 +153,7 @@ public class MonitoringController : Controller
                         id = order.DestinationHub.ID_LogisticsHub,
                         lat = (double)dlat,
                         lon = (double)dlon,
-                        title = $"РЎРєР»Р°Рґ (РёР· Р·Р°РєР°Р·Р°): {order.DestinationHub.Name}"
+                        title = $"Склад (из заказа): {order.DestinationHub.Name}"
                     });
                 }
             }

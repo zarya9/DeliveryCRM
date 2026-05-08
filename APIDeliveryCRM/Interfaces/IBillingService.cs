@@ -12,5 +12,7 @@ namespace APIDeliveryCRM.Interfaces
         Task<IActionResult> HandleWebhookAsync(PaymentWebhookRequest request);
         Task<IActionResult> HandleYooKassaWebhookAsync(JsonElement payload);
         Task<IActionResult> GetInvoicesAsync(int companyId);
+        Task<IActionResult> PayPendingInvoiceAsync(int companyId, int invoiceId);
+        Task<IActionResult> CancelPendingInvoiceAsync(int companyId, int invoiceId);
     }
 }

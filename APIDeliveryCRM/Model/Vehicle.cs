@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APIDeliveryCRM.Model
@@ -13,7 +13,7 @@ namespace APIDeliveryCRM.Model
         public int Company_id { get; set; }
         public Company Company { get; set; } = null!;
 
-        public string License_plate { get; set; } //РіРѕСЃРЅРѕРјРµСЂ
+        public string License_plate { get; set; } // госномер
         public string VIN {  get; set; }
 
         [Required]

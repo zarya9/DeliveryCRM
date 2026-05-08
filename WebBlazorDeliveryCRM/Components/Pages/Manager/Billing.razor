@@ -114,11 +114,14 @@
                         <th>Выставлен</th>
                         <th>Срок</th>
                         <th>Оплачен</th>
+                        <th class="text-end">Действия</th>
                     </tr>
                 </thead>
                 <tbody>
                     @foreach (var i in FilteredInvoices)
                     {
+                        var canManage = IsAwaitingPayment(i.Status);
+                        var busy = _invoiceActionBusy.Contains(i.Id);
                         <tr>
                             <td>@i.Number</td>
                             <td>@i.PlanName</td>
@@ -129,6 +132,27 @@
                             <td>@i.IssuedAt.ToString("dd.MM.yyyy HH:mm")</td>
                             <td>@i.DueAt.ToString("dd.MM.yyyy HH:mm")</td>
                             <td>@(i.PaidAt.HasValue ? i.PaidAt.Value.ToString("dd.MM.yyyy HH:mm") : "—")</td>
+                            <td class="text-end">
+                                @if (canManage)
+                                {
+                                    <div class="d-flex justify-content-end gap-2">
+                                        <button class="btn btn-sm btn-success"
+                                                disabled="@busy"
+                                                @onclick="() => PayInvoice(i)">
+                                            Оплатить
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger"
+                                                disabled="@busy"
+                                                @onclick="() => CancelInvoice(i)">
+                                            Отменить
+                                        </button>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
                         </tr>
                     }
                 </tbody>
@@ -145,6 +169,7 @@
     private string StatusFilter = string.Empty;
     private bool AutoRefresh;
     private bool _checkoutInProgress;
+    private readonly HashSet<int> _invoiceActionBusy = new();
     private PeriodicTimer? _timer;
     private CancellationTokenSource? _refreshCts;
     private string PlanMeta => $"Код: {Subscription?.PlanCode ?? "—"}";
@@ -270,6 +295,58 @@
             "canceled" => "neutral",
             _ => "neutral"
         };
+    }
+
+    private static bool IsAwaitingPayment(string? status)
+        => string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(status, "pending_upgrade", StringComparison.OrdinalIgnoreCase);
+
+    private async Task PayInvoice(BillingInvoiceDto invoice)
+    {
+        if (!_invoiceActionBusy.Add(invoice.Id))
+            return;
+
+        try
+        {
+            var error = await BillingApi.PayPendingInvoiceAsync(invoice.Id);
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                Notify.ShowError(error);
+                return;
+            }
+
+            Invoices.RemoveAll(x => x.Id == invoice.Id);
+            Notify.ShowSuccess("Счёт оплачен и убран из списка ожидающих.");
+            StateHasChanged();
+        }
+        finally
+        {
+            _invoiceActionBusy.Remove(invoice.Id);
+        }
+    }
+
+    private async Task CancelInvoice(BillingInvoiceDto invoice)
+    {
+        if (!_invoiceActionBusy.Add(invoice.Id))
+            return;
+
+        try
+        {
+            var error = await BillingApi.CancelPendingInvoiceAsync(invoice.Id);
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                Notify.ShowError(error);
+                return;
+            }
+
+            Invoices.RemoveAll(x => x.Id == invoice.Id);
+            Notify.ShowInfo("Счёт отменён и убран из списка.");
+            StateHasChanged();
+        }
+        finally
+        {
+            _invoiceActionBusy.Remove(invoice.Id);
+        }
     }
 
     private void ToggleAutoRefresh()

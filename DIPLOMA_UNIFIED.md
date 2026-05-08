@@ -223,11 +223,13 @@
 
 ### 2.3 Проектирование базы данных
 
-В качестве системы управления базами данных (СУБД) выбрана `PostgreSQL`, обеспечивающая высокую производительность, надежность хранения данных, поддержку транзакций и сложных SQL-запросов. Выбор данной СУБД дополнительно обусловлен свободной моделью распространения, наличием удобных средств администрирования (`pgAdmin`) и полной совместимостью с `Entity Framework Core`, используемым в серверной части проекта.
+В рамках разработки DeliveryCRM в качестве СУБД используется `PostgreSQL`. Выбор обусловлен сочетанием производительности и надежности, полноценной поддержкой транзакций, а также возможностью эффективно выполнять как операционные, так и аналитические SQL-запросы. Дополнительными факторами стали свободная лицензия, развитый инструментарий администрирования (`pgAdmin`) и корректная интеграция с `Entity Framework Core`, применяемым на уровне API.
 
-Проектирование базы данных выполнялось с применением нормализации, что позволило снизить избыточность данных, обеспечить логическую целостность и упростить сопровождение структуры при расширении функционала. Для ключевых сущностей определены первичные ключи, внешние связи и ограничения целостности, соответствующие бизнес-правилам системы доставки.
+Структура базы данных проектировалась на основе принципов нормализации. Это позволило минимизировать дублирование данных, сохранить согласованность связей между сущностями и упростить развитие схемы при добавлении новых модулей. Для основных таблиц зафиксированы первичные ключи, внешние ключи и ограничения целостности, отражающие бизнес-правила логистической системы.
 
 В результате сформирован словарь данных, включающий 17 основных таблиц. В таблицах 2.2-2.18 представлено описание структуры каждой таблицы базы данных. Для таблиц словаря данных применяется шрифт 12 и межстрочный интервал 1.
+
+Для повышения читаемости модели и удобства сопровождения в проекте используется логическое разбиение таблиц по схемам PostgreSQL: `пользователи_и_доступ`, `заказы`, `логистика_и_смены`, `автопарк`, `коммуникации`, `биллинг_и_подписки`, `аналитика_и_crm`. Такое разбиение не нарушает ссылочную целостность и позволяет отражать структуру БД в отчете по тематическим блокам.
 
 **Таблица 2.2 - Словарь данных таблицы Companies**  
 `[МЕСТО ДЛЯ ТАБЛИЦЫ 2.2]`
@@ -280,28 +282,251 @@
 **Таблица 2.18 - Словарь данных таблицы PaymentTransactions**  
 `[МЕСТО ДЛЯ ТАБЛИЦЫ 2.18]`
 
-После словаря данных приводятся текстовые команды `CREATE` и `INSERT` для создания таблиц и заполнения начальными данными.
+После словаря данных приводятся текстовые команды `CREATE` и `INSERT` для создания таблиц и заполнения начальными данными. В проекте применяется тематическое **структурирование таблиц по схемам**, что повышает управляемость и читаемость модели данных.
 
 ```sql
-CREATE TABLE "Roles" (
+CREATE DATABASE "DeliveryCRM";
+\c "DeliveryCRM";
+
+CREATE SCHEMA IF NOT EXISTS "пользователи_и_доступ";
+CREATE SCHEMA IF NOT EXISTS "заказы";
+CREATE SCHEMA IF NOT EXISTS "логистика_и_смены";
+CREATE SCHEMA IF NOT EXISTS "коммуникации";
+CREATE SCHEMA IF NOT EXISTS "биллинг_и_подписки";
+
+CREATE TABLE "пользователи_и_доступ"."Companies" (
+    "ID_Company" SERIAL PRIMARY KEY,
+    "Name" VARCHAR(200) NOT NULL,
+    "Subdomain" VARCHAR(100),
+    "Created_at" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "Is_Active" BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE TABLE "пользователи_и_доступ"."Roles" (
     "ID_Role" SERIAL PRIMARY KEY,
     "Name" VARCHAR(100) NOT NULL
 );
 
-INSERT INTO "Roles" ("Name") VALUES
-('Администратор'),
-('Менеджер'),
-('Логист'),
-('Курьер'),
-('Клиент');
-
-CREATE TABLE "OrderStatuses" (
-    "ID_OrderStatus" SERIAL PRIMARY KEY,
-    "Name" VARCHAR(80) NOT NULL,
-    "Description" VARCHAR(255)
+CREATE TABLE "пользователи_и_доступ"."Users" (
+    "ID_User" SERIAL PRIMARY KEY,
+    "FName" VARCHAR(100) NOT NULL,
+    "Name" VARCHAR(100) NOT NULL,
+    "Patronumic" VARCHAR(100),
+    "Created_at" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "Is_Active" BOOLEAN NOT NULL DEFAULT TRUE,
+    "Theme" VARCHAR(50) NOT NULL DEFAULT 'light',
+    "Avatar" VARCHAR(500) NOT NULL DEFAULT '/avatars/default.png',
+    "Company_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Companies"("ID_Company"),
+    "Role_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Roles"("ID_Role")
 );
 
-INSERT INTO "OrderStatuses" ("Name", "Description") VALUES
+CREATE TABLE "пользователи_и_доступ"."Logins" (
+    "ID_Login" SERIAL PRIMARY KEY,
+    "Email" VARCHAR(256) NOT NULL UNIQUE,
+    "Password" VARCHAR(256) NOT NULL,
+    "ID_User" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Users"("ID_User")
+);
+
+CREATE TABLE "заказы"."OrderStatuses" (
+    "ID_OrderStatus" SERIAL PRIMARY KEY,
+    "Name" VARCHAR(100) NOT NULL,
+    "Description" VARCHAR(500)
+);
+
+CREATE TABLE "заказы"."OrderTypes" (
+    "ID_OrderType" SERIAL PRIMARY KEY,
+    "Name" VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE "заказы"."PackageTypes" (
+    "ID_PackageType" SERIAL PRIMARY KEY,
+    "Name" VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE "заказы"."PaymentMethods" (
+    "ID_PaymentMethod" SERIAL PRIMARY KEY,
+    "Name" VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE "пользователи_и_доступ"."ClientProfiles" (
+    "ID_ClientProfile" SERIAL PRIMARY KEY,
+    "Company_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Companies"("ID_Company"),
+    "User_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Users"("ID_User"),
+    "Preferred_payment_method_id" INTEGER NOT NULL REFERENCES "заказы"."PaymentMethods"("ID_PaymentMethod"),
+    "Default_address" VARCHAR(500) NOT NULL DEFAULT '',
+    "Rating" NUMERIC(5,2) NOT NULL DEFAULT 0
+);
+
+CREATE TABLE "пользователи_и_доступ"."ManagerProfiles" (
+    "ID_ManagerProfile" SERIAL PRIMARY KEY,
+    "Company_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Companies"("ID_Company"),
+    "User_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Users"("ID_User"),
+    "Position" VARCHAR(100),
+    "Department" VARCHAR(50),
+    "HireDate" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "Is_Active" BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE TABLE "пользователи_и_доступ"."CourierProfiles" (
+    "ID_CourierProfile" SERIAL PRIMARY KEY,
+    "Company_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Companies"("ID_Company"),
+    "User_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Users"("ID_User"),
+    "DriverLicense" VARCHAR(200),
+    "Passport_data" VARCHAR(200),
+    "Rating" NUMERIC(5,2) NOT NULL DEFAULT 0,
+    "Total_deliveries" INTEGER NOT NULL DEFAULT 0,
+    "Is_online" BOOLEAN NOT NULL DEFAULT FALSE,
+    "Current_lat" NUMERIC(12,7) NOT NULL DEFAULT 0,
+    "Current_lon" NUMERIC(12,7) NOT NULL DEFAULT 0,
+    "LastActivity_at" TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE "логистика_и_смены"."Addresses" (
+    "ID_Address" SERIAL PRIMARY KEY,
+    "Street" VARCHAR(200) NOT NULL,
+    "House" VARCHAR(50) NOT NULL,
+    "Flat" VARCHAR(50),
+    "City" VARCHAR(100),
+    "Region" VARCHAR(100),
+    "PostalCode" VARCHAR(20),
+    "Comment" VARCHAR(500),
+    "Latitude" NUMERIC(12,7),
+    "Longitude" NUMERIC(12,7),
+    "Company_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Companies"("ID_Company"),
+    "User_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Users"("ID_User")
+);
+
+CREATE TABLE "заказы"."Orders" (
+    "ID_Order" SERIAL PRIMARY KEY,
+    "Name" VARCHAR(200) NOT NULL,
+    "Description" TEXT NOT NULL,
+    "Order_Number" INTEGER NOT NULL,
+    "Company_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Companies"("ID_Company"),
+    "Client_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."ClientProfiles"("ID_ClientProfile"),
+    "OrderType_id" INTEGER NOT NULL REFERENCES "заказы"."OrderTypes"("ID_OrderType"),
+    "Status_id" INTEGER NOT NULL REFERENCES "заказы"."OrderStatuses"("ID_OrderStatus"),
+    "Courier_id" INTEGER REFERENCES "пользователи_и_доступ"."CourierProfiles"("ID_CourierProfile"),
+    "PackageType_id" INTEGER NOT NULL REFERENCES "заказы"."PackageTypes"("ID_PackageType"),
+    "Weight" NUMERIC(10,2) NOT NULL DEFAULT 0,
+    "Height" NUMERIC(10,2) NOT NULL DEFAULT 0,
+    "Length" NUMERIC(10,2) NOT NULL DEFAULT 0,
+    "Width" NUMERIC(10,2) NOT NULL DEFAULT 0,
+    "Estimated_cost" NUMERIC(12,2) NOT NULL DEFAULT 0,
+    "Final_cost" NUMERIC(12,2) NOT NULL DEFAULT 0,
+    "Created_at" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "Delivered_at" TIMESTAMP NULL,
+    "PaymentMethod_id" INTEGER NOT NULL REFERENCES "заказы"."PaymentMethods"("ID_PaymentMethod"),
+    "Is_paid" BOOLEAN NOT NULL DEFAULT FALSE,
+    "PickupAddress_id" INTEGER NOT NULL REFERENCES "логистика_и_смены"."Addresses"("ID_Address"),
+    "DeliveryAddress_id" INTEGER NOT NULL REFERENCES "логистика_и_смены"."Addresses"("ID_Address")
+);
+
+CREATE TABLE "заказы"."OrderTimelineEvents" (
+    "ID_OrderTimelineEvent" SERIAL PRIMARY KEY,
+    "Order_id" INTEGER NOT NULL REFERENCES "заказы"."Orders"("ID_Order"),
+    "EventType" VARCHAR(50) NOT NULL,
+    "Title" VARCHAR(100),
+    "Message" VARCHAR(1500),
+    "OldStatus_id" INTEGER,
+    "NewStatus_id" INTEGER,
+    "OldCourier_id" INTEGER,
+    "NewCourier_id" INTEGER,
+    "ActorUser_id" INTEGER,
+    "Created_at" TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE "коммуникации"."ChatRoomTypes" (
+    "ID_ChatRoomType" SERIAL PRIMARY KEY,
+    "Name" VARCHAR(50) NOT NULL
+);
+
+CREATE TABLE "коммуникации"."ChatRooms" (
+    "ID_ChatRoom" SERIAL PRIMARY KEY,
+    "Company_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Companies"("ID_Company"),
+    "Name" VARCHAR(200),
+    "ChatRoomType_id" INTEGER NOT NULL REFERENCES "коммуникации"."ChatRoomTypes"("ID_ChatRoomType"),
+    "Order_id" INTEGER REFERENCES "заказы"."Orders"("ID_Order"),
+    "Created_at" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "LastMessage_at" TIMESTAMP
+);
+
+CREATE TABLE "коммуникации"."ChatParticipants" (
+    "ID_ChatParticipant" SERIAL PRIMARY KEY,
+    "ChatRoom_id" INTEGER NOT NULL REFERENCES "коммуникации"."ChatRooms"("ID_ChatRoom"),
+    "User_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Users"("ID_User"),
+    "Joined_at" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "Left_at" TIMESTAMP,
+    "Is_active" BOOLEAN NOT NULL DEFAULT TRUE,
+    "LastRead_at" TIMESTAMP
+);
+
+CREATE TABLE "коммуникации"."ChatMessages" (
+    "ID_ChatMessage" SERIAL PRIMARY KEY,
+    "ChatRoom_id" INTEGER NOT NULL REFERENCES "коммуникации"."ChatRooms"("ID_ChatRoom"),
+    "Sender_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Users"("ID_User"),
+    "MessageText" VARCHAR(5000) NOT NULL,
+    "AttachmentUrl" VARCHAR(500),
+    "Sent_at" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "Edited_at" TIMESTAMP,
+    "Is_deleted" BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE "коммуникации"."NotificationTypes" (
+    "ID_NotificationType" SERIAL PRIMARY KEY,
+    "Name" VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE "коммуникации"."Notifications" (
+    "ID_Notification" SERIAL PRIMARY KEY,
+    "Company_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Companies"("ID_Company"),
+    "User_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Users"("ID_User"),
+    "Type_id" INTEGER NOT NULL REFERENCES "коммуникации"."NotificationTypes"("ID_NotificationType"),
+    "Title" VARCHAR(200) NOT NULL,
+    "Message" TEXT NOT NULL,
+    "Order_id" INTEGER REFERENCES "заказы"."Orders"("ID_Order"),
+    "Is_read" BOOLEAN NOT NULL DEFAULT FALSE,
+    "Priority" SMALLINT NOT NULL DEFAULT 0,
+    "Is_critical" BOOLEAN NOT NULL DEFAULT FALSE,
+    "Requires_ack" BOOLEAN NOT NULL DEFAULT FALSE,
+    "Acknowledged_at" TIMESTAMP,
+    "Sent_at" DATE NOT NULL DEFAULT CURRENT_DATE
+);
+
+CREATE TABLE "биллинг_и_подписки"."SubscriptionPlans" (
+    "ID_SubscriptionPlan" SERIAL PRIMARY KEY,
+    "Name" VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE "биллинг_и_подписки"."BillingInvoices" (
+    "ID_BillingInvoice" SERIAL PRIMARY KEY,
+    "Company_id" INTEGER NOT NULL REFERENCES "пользователи_и_доступ"."Companies"("ID_Company"),
+    "SubscriptionPlan_id" INTEGER NOT NULL REFERENCES "биллинг_и_подписки"."SubscriptionPlans"("ID_SubscriptionPlan"),
+    "Number" VARCHAR(50) NOT NULL,
+    "Amount" NUMERIC(12,2) NOT NULL,
+    "Currency" VARCHAR(10) NOT NULL DEFAULT 'RUB',
+    "Status" VARCHAR(20) NOT NULL DEFAULT 'pending',
+    "Issued_at" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "Due_at" TIMESTAMP NOT NULL,
+    "Paid_at" TIMESTAMP,
+    "PeriodMonths" INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE "биллинг_и_подписки"."PaymentTransactions" (
+    "ID_PaymentTransaction" SERIAL PRIMARY KEY,
+    "BillingInvoice_id" INTEGER NOT NULL REFERENCES "биллинг_и_подписки"."BillingInvoices"("ID_BillingInvoice"),
+    "Provider" VARCHAR(50) NOT NULL DEFAULT 'MockPay',
+    "ProviderPaymentId" VARCHAR(100) NOT NULL,
+    "Status" VARCHAR(20) NOT NULL DEFAULT 'initiated',
+    "Amount" NUMERIC(12,2) NOT NULL,
+    "Created_at" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "Succeeded_at" TIMESTAMP,
+    "FailureReason" TEXT
+);
+
+INSERT INTO "пользователи_и_доступ"."Roles" ("Name") VALUES
+('Администратор'), ('Менеджер'), ('Логист'), ('Курьер'), ('Клиент');
+
+INSERT INTO "заказы"."OrderStatuses" ("Name", "Description") VALUES
 ('Создан', 'Заказ создан клиентом'),
 ('Принят', 'Заказ принят менеджером'),
 ('В обработке', 'Заказ передан в операционный контур'),
@@ -315,13 +540,13 @@ INSERT INTO "OrderStatuses" ("Name", "Description") VALUES
 
 ```sql
 SELECT "ID_Order", "Order_Number", "Created_at", "Status_id"
-FROM "Orders"
+FROM "заказы"."Orders"
 ORDER BY "Created_at" DESC;
 ```
 
 ```sql
 SELECT "OrderType_id", COUNT(*) AS "OrdersCount", SUM("Final_cost") AS "Revenue"
-FROM "Orders"
+FROM "заказы"."Orders"
 GROUP BY "OrderType_id"
 ORDER BY "OrdersCount" DESC;
 ```
@@ -332,38 +557,67 @@ ORDER BY "OrdersCount" DESC;
 
 ### 2.4 Проектирование пользовательского интерфейса
 
-Проектирование пользовательского интерфейса выполнено по ролевой модели, где для каждой категории пользователей предусмотрен отдельный набор экранов и операций. Такой подход обеспечивает снижение когнитивной нагрузки и ускоряет выполнение типовых сценариев.
+После проектирования пользовательского интерфейса были определены доступные экраны и операции для каждой роли в DeliveryCRM в соответствии с уровнем доступа. Для каждой категории пользователей формализованы сценарии работы и ограничения, что позволило исключить пересечение ответственности между участниками операционного процесса.
 
-Ролевые контуры интерфейса:
-- клиент: создание заказа, отслеживание статуса, коммуникация с поддержкой;
-- менеджер: обработка заявок, контроль клиентского контура, управление статусами;
-- логист: диспетчеризация и распределение заказов, контроль маршрутов;
-- курьер: принятие и выполнение доставок, фиксация этапов исполнения;
-- администратор: управление пользователями, ролями, справочниками и аудитом.
+Ролевая модель интерфейса обеспечивает структурированность архитектуры и возможность гибкой адаптации функционала под задачи конкретной группы пользователей. В системе выделены пять основных категорий: администратор, менеджер, логист, курьер и клиент.
 
-Дополнительно определены требования к навигации и визуальной согласованности экранов: единый стиль форм, предсказуемое расположение элементов управления, быстрый доступ к ключевым операциям и индикация статусов в режиме реального времени.
+**Таблица 2.1 - Роли пользователей и доступный функционал**
 
-При проектировании интерфейсов учитывается принцип контекстной достаточности: пользователю отображаются только те данные и действия, которые необходимы для выполнения его текущей роли. Это снижает вероятность ошибочных операций и ускоряет выполнение задач в условиях высокой операционной нагрузки.
+| Функциональная область | Администратор | Менеджер | Логист | Курьер | Клиент |
+|---|---|---|---|---|---|
+| Авторизация | Полный доступ к панели управления | Доступ к операционной панели компании | Доступ к модулю маршрутизации и мониторинга | Доступ к мобильному/адаптивному кабинету курьера | Вход в клиентский кабинет |
+| Пользователи и роли | Управление сотрудниками, ролями и доступами | Просмотр состава команды | Просмотр назначенных курьеров | Просмотр собственного профиля | Редактирование персонального профиля |
+| Работа с заказами | Полный контроль заказов | Создание и изменение заказов, ручные назначения | Планирование смен и маршрутов, перераспределение | Выполнение назначенных заказов, смена статусов доставки | Создание заказов, просмотр истории и трекинг |
+| Логистика | Настройка справочников и правил | Контроль статусов и SLA | Управление хабами, сменами, маршрутами и картой | Передача геопозиции и подтверждение этапов | Просмотр статуса доставки |
+| Коммуникации | Контроль уведомлений и чатов | Корпоративный чат с сотрудниками и клиентами | Корпоративный чат и уведомления по сменам | Личные/корпоративные чаты, уведомления | Чат по заказу, сервисные уведомления |
+| Отчеты и биллинг | Доступ к аналитике и биллингу | Операционные отчеты компании | Логистическая аналитика | - | Просмотр стоимости и оплаты по заказу |
 
-Отдельный фокус сделан на информативности экранов и качестве обратной связи: для каждой операции предусмотрены сообщения о результате, индикация загрузки, предупреждения о рисковых действиях и контроль корректности вводимых данных до отправки запроса на сервер.
+Администратор обладает расширенными правами и выполняет функции системного управления: контроль учетных записей, ролей, параметров компании, аудит и доступ к финансовому контуру. Менеджер работает в операционной части: создает и сопровождает заказы, взаимодействует с клиентами, контролирует статусы и качество исполнения.
 
-**Рисунок 2.2 - Карта пользовательских интерфейсов**  
+Логист использует специализированные экраны планирования и мониторинга: формирует смены, управляет маршрутами, контролирует загрузку курьеров и оперативно реагирует на изменения в доставке. Курьер работает в адаптивном интерфейсе, где доступны сценарии начала/завершения смены, получение назначений, изменение статусов выполнения и коммуникация в чате.
+
+Клиентский контур ориентирован на оформление заказов и контроль их исполнения: создание заказа, отслеживание этапов доставки, получение уведомлений, просмотр истории и базовое управление профилем.
+
+Такое распределение прав и экранов обеспечивает информационную безопасность, снижает вероятность ошибочных действий и повышает эффективность выполнения бизнес-процессов в системе доставки.
+
+**Рисунок 2.2 - Карта пользовательских интерфейсов DeliveryCRM**  
 `[МЕСТО ДЛЯ РИСУНКА 2.2]`
 
-Карта пользовательских интерфейсов приведена на рисунке 2.2 (см. рисунок 2.2). Ролевая декомпозиция интерфейсов обеспечивает быстрый доступ к функциям и минимизирует пользовательские ошибки. Навигационная структура поддерживает последовательное выполнение рабочих сценариев и единообразие взаимодействия с системой. Принятые интерфейсные решения создают основу для масштабирования функционала без нарушения пользовательского опыта.
+Карта пользовательских интерфейсов приведена на рисунке 2.2 (см. рисунок 2.2). Ролевая декомпозиция интерфейсов обеспечивает быстрый доступ к целевым функциям и минимизирует пользовательские ошибки. Навигационная структура поддерживает последовательное выполнение рабочих сценариев и единообразие взаимодействия с системой.
 
 ### 2.5 Диаграмма вариантов использования (Диаграмма Use-case)
 
-Для системы сформирована диаграмма вариантов использования, отражающая взаимодействие ключевых ролей с основными функциями платформы. В модели зафиксированы сценарии авторизации, работы с заказами, назначения исполнителей, обновления статусов, обмена сообщениями и формирования отчетов.
+Диаграмма вариантов использования представляет собой модель, в которой фиксируются связи между акторами и функциями системы [14]. Формально такая диаграмма может рассматриваться как граф, где вершинами выступают акторы и прецеденты, а ребрами - отношения между ними [14]. Данный инструмент позволяет наглядно определить границы функциональности и распределение ответственности между участниками.
 
-В диаграмме выделены как базовые сценарии, выполняемые всеми ролями, так и специализированные сценарии, доступные только пользователям с расширенными полномочиями. Такой подход позволяет явно зафиксировать границы ответственности и требования к проверкам доступа на уровне API и интерфейсов.
+Под актором в работе понимается внешний по отношению к DeliveryCRM субъект, взаимодействующий с системой через web- или мобильный интерфейс [14]. Вариант использования (прецедент) описывает последовательность действий системы, приводящую к достижению значимого для актора результата [15].
 
-Для каждой роли определен набор прецедентов с указанием ожидаемого результата: клиент формирует заказ и отслеживает исполнение, курьер выполняет доставку и подтверждает этапы, менеджер и логист координируют операционный контур, администратор управляет настройками и доступами.
+На этапе построения use-case модели были выделены основные роли предметной области:
+1. **Клиент** - пользователь клиентского кабинета. Выполняет авторизацию, создание заказа, заполнение параметров доставки, отслеживание статуса и работу с историей заказов, а также получает уведомления и использует чат сопровождения.
+2. **Курьер** - сотрудник службы доставки, работающий в мобильном/адаптивном контуре. Выполняет авторизацию, начало и завершение смены, просмотр назначенных заказов, обновление этапов доставки и подтверждение выполнения заказа.
+3. **Менеджер** - оператор компании, работающий в web-интерфейсе. Отвечает за обработку заказов, изменение статусов, коммуникацию с клиентами и контроль операционного потока.
+4. **Логист** - сотрудник логистического контура. Формирует смены и маршруты, распределяет заказы между курьерами, контролирует карту, загрузку курьеров и показатели исполнения.
+5. **Администратор** - пользователь с расширенными правами доступа. Управляет сотрудниками и ролями, системными настройками, аудитом и административными разделами платформы.
 
-**Рисунок 2.3 - Диаграмма вариантов использования DeliveryCRM**  
-`[МЕСТО ДЛЯ РИСУНКА 2.3]`
+Для повышения наглядности сформированы отдельные диаграммы вариантов использования по ролям и итоговая объединяющая диаграмма.
 
-Диаграмма вариантов использования приведена на рисунке 2.3 (см. рисунок 2.3). Use-case модель фиксирует границы функциональности и ответственность ролей на уровне бизнес-сценариев. Диаграмма подтверждает полноту описанных требований и служит основанием для дальнейшей реализации модулей. Формализация прецедентов также упрощает подготовку тест-кейсов и проверку полноты покрытия на этапе валидации системы.
+**Рисунок 2.9 - Диаграмма вариантов использования для клиента**  
+`[МЕСТО ДЛЯ РИСУНКА 2.9]`
+
+**Рисунок 2.10 - Диаграмма вариантов использования для курьера**  
+`[МЕСТО ДЛЯ РИСУНКА 2.10]`
+
+**Рисунок 2.11 - Диаграмма вариантов использования для менеджера и логиста**  
+`[МЕСТО ДЛЯ РИСУНКА 2.11]`
+
+**Рисунок 2.12 - Диаграмма вариантов использования для администратора**  
+`[МЕСТО ДЛЯ РИСУНКА 2.12]`
+
+**Рисунок 2.13 - Общая диаграмма вариантов использования DeliveryCRM**  
+`[МЕСТО ДЛЯ РИСУНКА 2.13]`
+
+Построенные диаграммы демонстрируют иерархию прав доступа и поэтапное расширение функциональных возможностей от клиентского контура к административному. Каждая роль получает строго определенный набор операций, что обеспечивает защиту критичных функций и управляемость бизнес-процессов.
+
+Таким образом, диаграммы вариантов использования дают целостное представление о функциональных требованиях DeliveryCRM, фиксируют границы системы и формализуют взаимодействие между категориями пользователей.
 
 ## 3 РЕАЛИЗАЦИЯ ПРОЕКТА
 

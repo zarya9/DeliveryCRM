@@ -13,6 +13,89 @@ namespace APIDeliveryCRM.ContextDb
         {
             base.OnModelCreating(modelBuilder);
 
+            const string schemaUsers = "пользователи_и_доступ";
+            const string schemaOrders = "заказы";
+            const string schemaLogistics = "логистика_и_смены";
+            const string schemaFleet = "автопарк";
+            const string schemaComm = "коммуникации";
+            const string schemaBilling = "биллинг_и_подписки";
+            const string schemaAnalytics = "аналитика_и_crm";
+
+            static void Map<TEntity>(ModelBuilder mb, string table, string schema)
+                where TEntity : class
+                => mb.Entity<TEntity>().ToTable(table, schema);
+
+            Map<Company>(modelBuilder, "Companies", schemaUsers);
+            Map<User>(modelBuilder, "Users", schemaUsers);
+            Map<Role>(modelBuilder, "Roles", schemaUsers);
+            Map<Login>(modelBuilder, "Logins", schemaUsers);
+            Map<ClientProfile>(modelBuilder, "ClientProfiles", schemaUsers);
+            Map<ClientStatus>(modelBuilder, "ClientStatuses", schemaUsers);
+            Map<ClientSegment>(modelBuilder, "ClientSegments", schemaUsers);
+            Map<ClientNote>(modelBuilder, "ClientNotes", schemaUsers);
+            Map<ClientNoteType>(modelBuilder, "ClientNoteTypes", schemaUsers);
+            Map<CourierProfile>(modelBuilder, "CourierProfiles", schemaUsers);
+            Map<ManagerProfile>(modelBuilder, "ManagerProfiles", schemaUsers);
+            Map<CourierStatus>(modelBuilder, "CourierStatuses", schemaUsers);
+
+            Map<Order>(modelBuilder, "Orders", schemaOrders);
+            Map<OrderType>(modelBuilder, "OrderTypes", schemaOrders);
+            Map<OrderStatus>(modelBuilder, "OrderStatuses", schemaOrders);
+            Map<PackageType>(modelBuilder, "PackageTypes", schemaOrders);
+            Map<PaymentMethod>(modelBuilder, "PaymentMethods", schemaOrders);
+            Map<ScheduleType>(modelBuilder, "ScheduleTypes", schemaOrders);
+            Map<OrderRouteStop>(modelBuilder, "OrderRouteStops", schemaOrders);
+            Map<OrderTimelineEvent>(modelBuilder, "OrderTimelineEvents", schemaOrders);
+
+            Map<LogisticsHub>(modelBuilder, "LogisticsHubs", schemaLogistics);
+            Map<Address>(modelBuilder, "Addresses", schemaLogistics);
+            Map<CourierShift>(modelBuilder, "CourierShifts", schemaLogistics);
+            Map<ShiftStatus>(modelBuilder, "ShiftStatuses", schemaLogistics);
+            Map<ShiftAssignment>(modelBuilder, "ShiftAssignments", schemaLogistics);
+            Map<ShiftPlan>(modelBuilder, "ShiftPlans", schemaLogistics);
+            Map<ServiceAreaZone>(modelBuilder, "ServiceAreaZones", schemaLogistics);
+            Map<ServiceAreaZoneCourier>(modelBuilder, "ServiceAreaZoneCouriers", schemaLogistics);
+
+            Map<Vehicle>(modelBuilder, "Vehicles", schemaFleet);
+            Map<VehicleCategory>(modelBuilder, "VehicleCategories", schemaFleet);
+            Map<VehicleModel>(modelBuilder, "VehicleModels", schemaFleet);
+            Map<VehicleBrand>(modelBuilder, "VehicleBrands", schemaFleet);
+            Map<VehicleBodyType>(modelBuilder, "VehicleBodyTypes", schemaFleet);
+            Map<FuelType>(modelBuilder, "FuelTypes", schemaFleet);
+            Map<TransmissionType>(modelBuilder, "TransmissionTypes", schemaFleet);
+            Map<VehicleDriveType>(modelBuilder, "DriveTypes", schemaFleet);
+            Map<VehicleAssignment>(modelBuilder, "VehicleAssignments", schemaFleet);
+            Map<FuelCard>(modelBuilder, "FuelCards", schemaFleet);
+            Map<FuelCardStatus>(modelBuilder, "FuelCardStatuses", schemaFleet);
+            Map<FuelCardType>(modelBuilder, "FuelCardTypes", schemaFleet);
+            Map<FuelCompany>(modelBuilder, "FuelCompanies", schemaFleet);
+            Map<CourierFuelCard>(modelBuilder, "CourierFuelCards", schemaFleet);
+
+            Map<ChatRoom>(modelBuilder, "ChatRooms", schemaComm);
+            Map<ChatRoomType>(modelBuilder, "ChatRoomTypes", schemaComm);
+            Map<ChatMessage>(modelBuilder, "ChatMessages", schemaComm);
+            Map<ChatParticipant>(modelBuilder, "ChatParticipants", schemaComm);
+            Map<ChatQuickReplyTemplate>(modelBuilder, "ChatQuickReplyTemplates", schemaComm);
+            Map<NotificationType>(modelBuilder, "NotificationTypes", schemaComm);
+            Map<Notification>(modelBuilder, "Notifications", schemaComm);
+            Map<CommunicationTemplate>(modelBuilder, "CommunicationTemplates", schemaComm);
+            Map<SupportTicket>(modelBuilder, "SupportTickets", schemaComm);
+
+            Map<SubscriptionPlan>(modelBuilder, "SubscriptionPlans", schemaBilling);
+            Map<CompanySubscription>(modelBuilder, "CompanySubscriptions", schemaBilling);
+            Map<BillingInvoice>(modelBuilder, "BillingInvoices", schemaBilling);
+            Map<PaymentTransaction>(modelBuilder, "PaymentTransactions", schemaBilling);
+            Map<BillingWebhookEvent>(modelBuilder, "BillingWebhookEvents", schemaBilling);
+
+            Map<AuditLog>(modelBuilder, "AuditLogs", schemaAnalytics);
+            Map<Report>(modelBuilder, "Reports", schemaAnalytics);
+            Map<ReportStatus>(modelBuilder, "ReportStatuses", schemaAnalytics);
+            Map<Lead>(modelBuilder, "Leads", schemaAnalytics);
+            Map<LeadSource>(modelBuilder, "LeadSources", schemaAnalytics);
+            Map<LeadStage>(modelBuilder, "LeadStages", schemaAnalytics);
+            Map<Review>(modelBuilder, "Reviews", schemaAnalytics);
+            Map<ScheduledReportJob>(modelBuilder, "ScheduledReportJobs", schemaAnalytics);
+
             // Company relationships
             modelBuilder.Entity<User>()
                 .HasOne(u => u.Company)

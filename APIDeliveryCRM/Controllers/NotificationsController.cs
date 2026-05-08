@@ -1,4 +1,4 @@
-﻿using System.Linq;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
@@ -65,7 +65,7 @@ namespace APIDeliveryCRM.Controllers
 
             var ok = await _notificationService.AcknowledgeForUserAsync(id, userId.Value);
             if (!ok)
-                return BadRequest(new { message = "РЈРІРµРґРѕРјР»РµРЅРёРµ РЅРµ РЅР°Р№РґРµРЅРѕ РёР»Рё РЅРµ С‚СЂРµР±СѓРµС‚ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ." });
+                return BadRequest(new { message = "Уведомление не найдено или не требует подтверждения." });
             return Ok();
         }
 

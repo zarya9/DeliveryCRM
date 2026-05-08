@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Components.Forms;
+using System.IO;
 
 namespace WebBlazorDeliveryCRM.Services;
 
@@ -44,9 +45,57 @@ public class ChatApiService
     public async Task<(bool ok, int roomId, string? roomName)> CreateOrGetDirectRoomAsync(int peerUserId)
     {
         var res = await _http.PostAsync($"/api/Chat/rooms/direct?peerUserId={peerUserId}", null);
-        if (!res.IsSuccessStatusCode) return (false, 0, null);
+        if (!res.IsSuccessStatusCode)
+        {
+            // #region agent log
+            try
+            {
+                var body = await res.Content.ReadAsStringAsync();
+                var line = JsonSerializer.Serialize(new
+                {
+                    sessionId = "7b40bb",
+                    runId = "run2",
+                    hypothesisId = "H6",
+                    location = "ChatApiService.cs:CreateOrGetDirectRoomAsync:nonSuccess",
+                    message = "Direct room endpoint failed",
+                    data = new
+                    {
+                        peerUserId,
+                        statusCode = (int)res.StatusCode,
+                        body
+                    },
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                });
+                File.AppendAllText(@"c:\Users\zarip\source\repos\DeliveryCRM\debug-7b40bb.log", line + Environment.NewLine);
+            }
+            catch { }
+            // #endregion
+            return (false, 0, null);
+        }
         using var stream = await res.Content.ReadAsStreamAsync();
         var payload = await JsonSerializer.DeserializeAsync<EnsureRoomResponse>(stream, JsonOptions);
+        // #region agent log
+        try
+        {
+            var line = JsonSerializer.Serialize(new
+            {
+                sessionId = "7b40bb",
+                runId = "run2",
+                hypothesisId = "H6",
+                location = "ChatApiService.cs:CreateOrGetDirectRoomAsync:success",
+                message = "Direct room endpoint success",
+                data = new
+                {
+                    peerUserId,
+                    roomId = payload?.RoomId ?? 0,
+                    roomName = payload?.RoomName
+                },
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+            File.AppendAllText(@"c:\Users\zarip\source\repos\DeliveryCRM\debug-7b40bb.log", line + Environment.NewLine);
+        }
+        catch { }
+        // #endregion
         return (payload != null, payload?.RoomId ?? 0, payload?.RoomName);
     }
 

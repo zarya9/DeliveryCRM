@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
@@ -83,7 +83,7 @@ namespace APIDeliveryCRM.Controllers
             if (forbidden) return Forbid();
             if (!companyId.HasValue) return Unauthorized();
             if (!await HasActiveSubscriptionAsync(companyId.Value))
-                return StatusCode(402, new { message = "РўР°СЂРёС„ РєРѕРјРїР°РЅРёРё РЅРµР°РєС‚РёРІРµРЅ. РћС„РѕСЂРјРёС‚Рµ РёР»Рё РїСЂРѕРґР»РёС‚Рµ РїРѕРґРїРёСЃРєСѓ." });
+                return StatusCode(402, new { message = "Тариф компании неактивен. Оформите или продлите подписку." });
             try
             {
                 var created = await _orderService.CreateAsync(request);
@@ -106,9 +106,9 @@ namespace APIDeliveryCRM.Controllers
                 .AsNoTracking()
                 .FirstOrDefaultAsync(c => c.User_id == userId.Value);
             if (client == null)
-                return BadRequest(new { message = "РџСЂРѕС„РёР»СЊ РєР»РёРµРЅС‚Р° РЅРµ РЅР°Р№РґРµРЅ РґР»СЏ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ." });
+                return BadRequest(new { message = "Профиль клиента не найден для текущего пользователя." });
             if (!await HasActiveSubscriptionAsync(client.Company_id))
-                return StatusCode(402, new { message = "РўР°СЂРёС„ РєРѕРјРїР°РЅРёРё РЅРµР°РєС‚РёРІРµРЅ. РЎРѕР·РґР°РЅРёРµ Р·Р°РєР°Р·РѕРІ РІСЂРµРјРµРЅРЅРѕ РЅРµРґРѕСЃС‚СѓРїРЅРѕ." });
+                return StatusCode(402, new { message = "Тариф компании неактивен. Создание заказов временно недоступно." });
 
             var orderTypeId = await _context.OrderTypes
                 .AsNoTracking()
@@ -128,9 +128,9 @@ namespace APIDeliveryCRM.Controllers
                 .FirstOrDefaultAsync();
 
             if (orderTypeId == 0 || statusId == 0 || packageTypeId == 0)
-                return BadRequest(new { message = "РќРµ РЅР°СЃС‚СЂРѕРµРЅС‹ СЃРїСЂР°РІРѕС‡РЅРёРєРё Р·Р°РєР°Р·Р° (С‚РёРїС‹/СЃС‚Р°С‚СѓСЃС‹/РїР°РєРµС‚С‹)." });
+                return BadRequest(new { message = "Не настроены справочники заказа (типы/статусы/пакеты)." });
             if (client.Preferred_payment_method_id <= 0 && fallbackPaymentMethodId == 0)
-                return BadRequest(new { message = "РќРµ РЅР°СЃС‚СЂРѕРµРЅС‹ СЃРїРѕСЃРѕР±С‹ РѕРїР»Р°С‚С‹ РґР»СЏ РєРѕРјРїР°РЅРёРё." });
+                return BadRequest(new { message = "Не настроены способы оплаты для компании." });
 
             var pickupAddress = new Address
             {
@@ -272,7 +272,7 @@ namespace APIDeliveryCRM.Controllers
             if (order.Company_id != companyId.Value) return Forbid();
             var result = await _orderService.AutoDispatchAsync(id);
             if (result == null)
-                return NotFound(new { message = "Р—Р°РєР°Р· РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РЅРµС‚ РґРѕСЃС‚СѓРїРЅС‹С… РѕРЅР»Р°Р№РЅ-РєСѓСЂСЊРµСЂРѕРІ." });
+                return NotFound(new { message = "Заказ не найден или нет доступных онлайн-курьеров." });
 
             return Ok(result);
         }
@@ -285,7 +285,7 @@ namespace APIDeliveryCRM.Controllers
         }
 
         [HttpPost("{id:int}/pay")]
-        [Authorize(Roles = "РљР»РёРµРЅС‚")]
+        [Authorize(Roles = "Клиент")]
         public async Task<IActionResult> PayOrder(int id)
         {
             var userId = GetCurrentUserId();

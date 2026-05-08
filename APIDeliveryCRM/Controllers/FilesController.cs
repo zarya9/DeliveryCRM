@@ -44,6 +44,7 @@ namespace APIDeliveryCRM.Controllers
             return await _fileService.UpdateAvatarAsync(file, userId);
         }
 
+        [AllowAnonymous]
         [HttpGet("avatar/{userId:int}")]
         public async Task<IActionResult> GetAvatar(int userId)
         {

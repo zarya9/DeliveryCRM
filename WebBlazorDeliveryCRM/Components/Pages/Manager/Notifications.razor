@@ -10,11 +10,9 @@
 <div class="dms-page-header">
     <h1>Уведомления</h1>
     <p class="subtitle">
-        Сообщения о событиях в CRM: <strong>новые сообщения в чатах</strong>, при появлении — сразу в списке и через SignalR.
-        Дальше сюда же можно выводить смену статуса заказа, назначение курьера, лиды и напоминания.
+        
     </p>
-    <StatusBadge Text="@(_hubConnected ? "Realtime: подключено" : "Realtime: офлайн")"
-                 Tone="@(_hubConnected ? "success" : "warning")" />
+  
 </div>
 
 <NotificationsInbox />

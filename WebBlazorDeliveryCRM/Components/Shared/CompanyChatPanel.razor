@@ -12,17 +12,17 @@
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 
-<div class="dms-card telegram-chat-shell">
-    <aside class="telegram-chat-list">
+<div class="dms-card chat-shell @(_mobileChatOpen ? "mobile-chat-open" : "mobile-list-open")">
+    <aside class="chat-list">
         <div class="p-2 border-bottom">
             <input class="form-control form-control-sm" placeholder="Поиск сотрудника..." @bind="_chatSearch" @bind:event="oninput" />
             @if (SearchedEmployees.Count > 0)
             {
-                <div class="telegram-user-search-results mt-2">
+                <div class="chat-user-search-results mt-2">
                     @foreach (var e in SearchedEmployees)
                     {
-                        <button type="button" class="telegram-user-search-item" @onclick="() => OpenDirectChatWithUserAsync(e.Id)">
-                            @e.FullName
+                        <button type="button" class="chat-user-search-item" @onclick="() => OpenDirectChatWithUserAsync(e.Id)" title="@e.FullName">
+                            @FormatChatEmployeeDisplay(e)
                         </button>
                     }
                 </div>
@@ -32,45 +32,51 @@
                 <div class="small text-muted mt-2">Сотрудник не найден</div>
             }
         </div>
-        <div class="telegram-chat-list-items">
+        <div class="chat-list-items">
             @foreach (var room in RoomsForList)
             {
-                <button type="button" class="telegram-chat-item @(room.ChatRoomId == _activeRoomId ? "active" : "")"
+                <button type="button" class="chat-item @(room.ChatRoomId == _activeRoomId ? "active" : "")"
                         @onclick="() => OpenRoomAsync(room.ChatRoomId)">
                     <span class="chat-avatar">@GetInitials(GetRoomDisplayName(room))</span>
-                    <span class="telegram-chat-item-content">
-                        <span class="telegram-chat-item-top">
-                            <span class="telegram-chat-item-name">@GetRoomDisplayName(room)</span>
-                            <span class="telegram-chat-item-time">@FormatRoomTime(room.LastMessageAt)</span>
+                    <span class="chat-item-content">
+                        <span class="chat-item-top">
+                            <span class="chat-item-name">@GetRoomDisplayName(room)</span>
+                            <span class="chat-item-time">@FormatRoomTime(room.LastMessageAt)</span>
                         </span>
-                        <span class="telegram-chat-item-preview">@GetRoomPreview(room.LastMessageText)</span>
+                        <span class="chat-item-preview">@GetRoomPreview(room.LastMessageText)</span>
                     </span>
                     @if (room.UnreadCount > 0)
                     {
-                        <span class="telegram-chat-unread-dot" title="Непрочитанные сообщения"></span>
+                        <span class="chat-unread-dot" title="Непрочитанные сообщения"></span>
                     }
                 </button>
             }
         </div>
     </aside>
 
-    <section class="telegram-chat-main">
-        <div id="company-chat-messages" class="company-chat-messages flex-grow-1 overflow-auto mb-2 telegram-chat-messages">
+    <section class="chat-main">
+        <div class="chat-mobile-header">
+            <button type="button" class="btn btn-sm btn-outline-secondary chat-back-btn" @onclick="BackToRoomList">
+                Назад
+            </button>
+            <div class="chat-mobile-title">@ActiveRoomTitle</div>
+        </div>
+        <div id="company-chat-messages" class="company-chat-messages flex-grow-1 overflow-auto mb-2 chat-messages">
             @if (FilteredMessages.Count == 0)
             {
-                <div class="telegram-empty-chat">
-                    <div class="telegram-empty-chat-box">Сообщений пока нет</div>
+                <div class="chat-empty">
+                    <div class="chat-empty-box">Сообщений пока нет</div>
                 </div>
             }
             else
             {
                 @foreach (var m in FilteredMessages)
                 {
-                    <div class="telegram-bubble-wrap @(m.IsMine ? "mine" : "other")">
-                        <div class="telegram-bubble">
+                    <div class="chat-bubble-wrap @(m.IsMine ? "mine" : "other")">
+                        <div class="chat-bubble">
                             @if (ShouldShowSenderName(m))
                             {
-                                <div class="telegram-sender-name">@GetSenderDisplayName(m)</div>
+                                <div class="chat-sender-name">@GetSenderDisplayName(m)</div>
                             }
                             @if (_editingMessageId == m.Id && m.IsMine)
                             {
@@ -92,7 +98,7 @@
                                     </div>
                                     @if (m.IsImageAttachment)
                                     {
-                                        <img src="@m.AttachmentUrl" alt="@m.AttachmentFileName" class="rounded mt-2 border telegram-image-preview" />
+                                        <img src="@m.AttachmentUrl" alt="@m.AttachmentFileName" class="rounded mt-2 border chat-image-preview" />
                                     }
                                 </div>
                             }
@@ -102,10 +108,10 @@
                                 {
                                     <span class="d-flex gap-1">
                                         <button type="button" class="btn btn-sm btn-link p-0" @onclick="() => StartEdit(m.Id)">
-                                            <HugeIcon Name="pencil-edit-01" CssClass="telegram-action-icon" />
+                                            <HugeIcon Name="pencil-edit-01" CssClass="chat-action-icon" />
                                         </button>
                                         <button type="button" class="btn btn-sm btn-link p-0 text-danger" @onclick="() => DeleteForEveryone(m.Id)">
-                                            <HugeIcon Name="delete-02" CssClass="telegram-action-icon" />
+                                            <HugeIcon Name="delete-02" CssClass="chat-action-icon" />
                                         </button>
                                     </span>
                                 }
@@ -123,21 +129,21 @@
             }
         </div>
 
-        <div class="telegram-composer"
+        <div class="chat-composer"
              @ondragover:preventDefault
              @ondrop:preventDefault
              @ondrop="OnDropFileAsync">
-            <label class="telegram-clip-btn" for="chat-file-input" title="Прикрепить файл">
-                <HugeIcon Name="attachment-01" CssClass="telegram-action-icon" />
+            <label class="chat-clip-btn" for="chat-file-input" title="Прикрепить файл">
+                <HugeIcon Name="attachment-01" CssClass="chat-action-icon" />
                 <InputFile id="chat-file-input" OnChange="OnFileSelected" style="display:none" />
             </label>
-            <input class="telegram-composer-input"
+            <input class="chat-composer-input"
                    placeholder="Сообщение"
                    @bind="_newMessage"
                    @bind:event="oninput"
                    @onkeydown="OnKeyDown" />
-            <button type="button" class="telegram-send-btn" disabled="@(!CanSendMessage)" @onclick="SendMessageAsync" title="Отправить">
-                <HugeIcon Name="sent" CssClass="telegram-action-icon" />
+            <button type="button" class="chat-send-btn" disabled="@(!CanSendMessage)" @onclick="SendMessageAsync" title="Отправить">
+                <HugeIcon Name="sent" CssClass="chat-action-icon" />
             </button>
         </div>
         @if (!string.IsNullOrWhiteSpace(_attachmentName))
@@ -153,7 +159,7 @@
         }
         @if (!string.IsNullOrWhiteSpace(_attachmentUrl) && IsImageFile(_attachmentName))
         {
-            <img src="@_attachmentUrl" alt="preview" class="rounded border mt-2 telegram-image-preview" />
+            <img src="@_attachmentUrl" alt="preview" class="rounded border mt-2 chat-image-preview" />
         }
     </section>
 </div>
@@ -161,6 +167,9 @@
 @code {
     [Parameter]
     public int? TargetUserId { get; set; }
+
+    [Parameter]
+    public int? TargetRoomId { get; set; }
 
     private readonly List<ChatMessageVm> _messages = new();
     private readonly List<ChatRoomListItemDto> _rooms = new();
@@ -174,7 +183,10 @@
     private bool _initialized;
     private int _activeRoomId;
     private string _activeRoomKind = "company";
+    private bool _mobileChatOpen;
     private int? _lastHandledTargetUserId;
+    private int? _lastHandledTargetRoomId;
+    private int? _pendingDirectPeerUserId;
     private int? _editingMessageId;
     private string _editingText = string.Empty;
     private bool _uploadingAttachment;
@@ -193,14 +205,22 @@
     };
 
     private bool CanSendMessage => _activeRoomId > 0 && (!string.IsNullOrWhiteSpace(_newMessage) || !string.IsNullOrWhiteSpace(_attachmentUrl));
+    private string ActiveRoomTitle
+    {
+        get
+        {
+            var room = _rooms.FirstOrDefault(r => r.ChatRoomId == _activeRoomId);
+            return room is null ? "Чат" : GetRoomDisplayName(room);
+        }
+    }
     private List<ChatRoomListItemDto> RoomsForList => _rooms
-        .Where(r => r.LastMessageAt.HasValue || !string.IsNullOrWhiteSpace(r.LastMessageText))
         .OrderByDescending(r => r.LastMessageAt ?? DateTime.MinValue)
         .ToList();
     private List<EmployeesApiService.EmployeeDto> SearchedEmployees =>
         string.IsNullOrWhiteSpace(_chatSearch)
             ? new List<EmployeesApiService.EmployeeDto>()
             : _employees
+                .Where(e => e.Id != _currentUserId)
                 .Where(e => e.FullName.Contains(_chatSearch, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(e => e.FullName)
                 .Take(8)
@@ -215,6 +235,18 @@
             .Select(t => t.Content)
             .Distinct());
     private List<ChatMessageVm> FilteredMessages => _messages.OrderBy(m => m.SentAt).ToList();
+
+    // В выпадающем поиске — только фамилия и имя (одна строка).
+    private static string FormatChatEmployeeDisplay(EmployeesApiService.EmployeeDto e)
+    {
+        var full = (e.FullName ?? "").Trim();
+        if (string.IsNullOrEmpty(full))
+            return "—";
+        var parts = full.Split(new[] { ' ', '\t', '\u00A0' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length <= 2)
+            return full;
+        return $"{parts[0]} {parts[1]}";
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -285,9 +317,23 @@
                 await MarkActiveRoomAsReadAsync();
             }
 
-            if (TargetUserId.HasValue && TargetUserId.Value > 0)
+            if (TargetRoomId.HasValue && TargetRoomId.Value > 0)
             {
-                await OpenDirectChatWithUserAsync(TargetUserId.Value);
+                // #region agent log
+                AppendDebugLog("run1", "H2", "CompanyChatPanel.razor:OnInitializedAsync:targetRoom", "TargetRoomId detected on init", new
+                {
+                    targetRoomId = TargetRoomId,
+                    targetUserId = TargetUserId,
+                    activeRoomIdBefore = _activeRoomId
+                });
+                // #endregion
+                await OpenRoomAsync(TargetRoomId.Value);
+                _lastHandledTargetRoomId = TargetRoomId.Value;
+            }
+            else if (TargetUserId.HasValue && TargetUserId.Value > 0)
+            {
+                _pendingDirectPeerUserId = TargetUserId.Value;
+                await TryOpenDirectChatWithUserAsync(TargetUserId.Value, showError: false);
                 _lastHandledTargetUserId = TargetUserId.Value;
             }
 
@@ -304,12 +350,38 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        if (!_initialized || !TargetUserId.HasValue || TargetUserId.Value <= 0)
+        if (!_initialized)
+            return;
+
+        // #region agent log
+        AppendDebugLog("run1", "H2", "CompanyChatPanel.razor:OnParametersSetAsync", "Parameters set", new
+        {
+            targetRoomId = TargetRoomId,
+            targetUserId = TargetUserId,
+            lastHandledTargetRoomId = _lastHandledTargetRoomId,
+            lastHandledTargetUserId = _lastHandledTargetUserId,
+            activeRoomId = _activeRoomId,
+            activeRoomKind = _activeRoomKind
+        });
+        // #endregion
+
+        if (TargetRoomId.HasValue && TargetRoomId.Value > 0)
+        {
+            if (_lastHandledTargetRoomId == TargetRoomId.Value)
+                return;
+
+            await OpenRoomAsync(TargetRoomId.Value);
+            _lastHandledTargetRoomId = TargetRoomId.Value;
+            return;
+        }
+
+        if (!TargetUserId.HasValue || TargetUserId.Value <= 0)
             return;
         if (_lastHandledTargetUserId == TargetUserId.Value)
             return;
 
-        await OpenDirectChatWithUserAsync(TargetUserId.Value);
+        _pendingDirectPeerUserId = TargetUserId.Value;
+        await TryOpenDirectChatWithUserAsync(TargetUserId.Value, showError: false);
         _lastHandledTargetUserId = TargetUserId.Value;
     }
 
@@ -331,9 +403,18 @@
     private async Task OpenRoomAsync(int roomId)
     {
         if (roomId <= 0) return;
+        // #region agent log
+        AppendDebugLog("run1", "H5", "CompanyChatPanel.razor:OpenRoomAsync:start", "OpenRoomAsync called", new
+        {
+            roomId,
+            activeRoomIdBefore = _activeRoomId,
+            activeRoomKindBefore = _activeRoomKind
+        });
+        // #endregion
 
         if (roomId == _activeRoomId)
         {
+            _mobileChatOpen = true;
             await MarkActiveRoomAsReadAsync();
             await ReloadRoomsAsync();
             await ChatUnreadState.RefreshAsync();
@@ -352,6 +433,15 @@
         await MarkActiveRoomAsReadAsync();
         await ReloadRoomsAsync();
         await ChatUnreadState.RefreshAsync();
+        _mobileChatOpen = true;
+        // #region agent log
+        AppendDebugLog("run1", "H5", "CompanyChatPanel.razor:OpenRoomAsync:done", "OpenRoomAsync completed", new
+        {
+            roomIdOpened = roomId,
+            activeRoomIdAfter = _activeRoomId,
+            activeRoomKindAfter = _activeRoomKind
+        });
+        // #endregion
     }
 
     private async Task LoadHistoryAsync(int roomId)
@@ -367,28 +457,84 @@
     }
 
     private async Task OpenDirectChatWithUserAsync(int userId)
+        => await TryOpenDirectChatWithUserAsync(userId, showError: true);
+
+    private async Task<bool> TryOpenDirectChatWithUserAsync(int userId, bool showError)
     {
         if (userId <= 0)
-            return;
+            return false;
+        // #region agent log
+        AppendDebugLog("run1", "H3", "CompanyChatPanel.razor:TryOpenDirectChatWithUserAsync:start", "Trying open direct chat", new
+        {
+            userId,
+            showError,
+            activeRoomIdBefore = _activeRoomId,
+            activeRoomKindBefore = _activeRoomKind
+        });
+        // #endregion
         var created = await ChatApi.CreateOrGetDirectRoomAsync(userId);
+        // #region agent log
+        AppendDebugLog("run1", "H3", "CompanyChatPanel.razor:TryOpenDirectChatWithUserAsync:result", "CreateOrGetDirectRoomAsync returned", new
+        {
+            userId,
+            ok = created.ok,
+            roomId = created.roomId
+        });
+        // #endregion
         if (!created.ok || created.roomId <= 0)
         {
-            Notify.ShowError("Не удалось открыть личный чат.");
-            return;
+            if (showError)
+                Notify.ShowError("Не удалось открыть личный чат.");
+            return false;
         }
         await ReloadRoomsAsync();
         _chatSearch = string.Empty;
         await OpenRoomAsync(created.roomId);
+        _pendingDirectPeerUserId = null;
+        return true;
+    }
+
+    private void BackToRoomList()
+    {
+        _mobileChatOpen = false;
     }
 
     private async Task SendMessageAsync()
     {
-        if (!_initialized || _activeRoomId <= 0) return;
+        if (!_initialized) return;
+        // #region agent log
+        AppendDebugLog("run1", "H4", "CompanyChatPanel.razor:SendMessageAsync:start", "SendMessageAsync called", new
+        {
+            activeRoomId = _activeRoomId,
+            activeRoomKind = _activeRoomKind,
+            pendingDirectPeerUserId = _pendingDirectPeerUserId,
+            hasText = !string.IsNullOrWhiteSpace(_newMessage),
+            hasAttachment = !string.IsNullOrWhiteSpace(_attachmentUrl)
+        });
+        // #endregion
+        if (_pendingDirectPeerUserId.HasValue)
+        {
+            var opened = await TryOpenDirectChatWithUserAsync(_pendingDirectPeerUserId.Value, showError: false);
+            if (!opened)
+            {
+                Notify.ShowError("Не удалось открыть личный чат.");
+                return;
+            }
+        }
+        if (_activeRoomId <= 0) return;
         var text = _newMessage.Trim();
         if (string.IsNullOrEmpty(text) && string.IsNullOrWhiteSpace(_attachmentUrl))
             return;
 
         var ok = await ChatApi.SendMessageAsync(_activeRoomId, text, _attachmentUrl);
+        // #region agent log
+        AppendDebugLog("run1", "H4", "CompanyChatPanel.razor:SendMessageAsync:sendResult", "SendMessageAsync result", new
+        {
+            activeRoomId = _activeRoomId,
+            activeRoomKind = _activeRoomKind,
+            ok
+        });
+        // #endregion
         if (!ok)
         {
             Notify.ShowError("Сообщение не отправлено.");
@@ -695,4 +841,25 @@
     {
         public int messageId { get; set; }
     }
+
+    // #region agent log
+    private static void AppendDebugLog(string runId, string hypothesisId, string location, string message, object data)
+    {
+        try
+        {
+            var line = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                sessionId = "7b40bb",
+                runId,
+                hypothesisId,
+                location,
+                message,
+                data,
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+            System.IO.File.AppendAllText(@"c:\Users\zarip\source\repos\DeliveryCRM\debug-7b40bb.log", line + Environment.NewLine);
+        }
+        catch { }
+    }
+    // #endregion
 }

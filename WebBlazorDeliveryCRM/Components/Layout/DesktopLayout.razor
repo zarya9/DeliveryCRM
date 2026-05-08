@@ -27,8 +27,9 @@
     <nav class="mobile-nav dms-mobile-nav">
         @foreach (var item in _mobileNavItems)
         {
-            <NavLink href="@item.Href" class="mobile-nav-item" Match="@(item.Exact ? NavLinkMatch.All : NavLinkMatch.Prefix)">
-                <span>@item.Text</span>
+            <NavLink href="@item.Href" class="mobile-nav-item" Match="@(item.Exact ? NavLinkMatch.All : NavLinkMatch.Prefix)" title="@item.Text" aria-label="@item.Text">
+                <HugeIcon Name="@item.Icon" CssClass="mobile-nav-icon" />
+                <span class="visually-hidden">@item.Text</span>
             </NavLink>
         }
     </nav>
@@ -81,43 +82,43 @@
         if (path.StartsWith("courier"))
             return
             [
-                new("/courier/shift", "Смена", true),
-                new("/courier/orders", "Заказы", false),
-                new("/courier/chat", "Чат", false),
-                new("/courier/notifications", "Уведомл.", false),
-                new("/courier/profile", "Профиль", false)
+                new("/courier/shift", "calendar-03", "Смена", true),
+                new("/courier/orders", "invoice-01", "Заказы", false),
+                new("/courier/chat", "message-01", "Чат", false),
+                new("/courier/notifications", "notification-01", "Уведомления", false),
+                new("/courier/profile", "user-03", "Профиль", false)
             ];
         if (path.StartsWith("logistician"))
             return
             [
-                new("/logistician", "Главная", true),
-                new("/logistician/shifts", "Смены", false),
-                new("/logistician/monitoring", "Карта", false),
-                new("/logistician/chat", "Чат", false),
-                new("/logistician/profile", "Профиль", false)
+                new("/logistician", "dashboard-square-03", "Главная", true),
+                new("/logistician/shifts", "calendar-03", "Смены", false),
+                new("/logistician/monitoring", "maps-location-01", "Карта", false),
+                new("/logistician/chat", "message-01", "Чат", false),
+                new("/logistician/profile", "user-03", "Профиль", false)
             ];
         if (path.StartsWith("manager") || role is "Менеджер" or "Админ" or "Администратор")
             return
             [
-                new("/manager", "Главная", true),
-                new("/manager/orders", "Заказы", false),
-                new("/manager/employees", "Команда", false),
-                new("/manager/chat", "Чат", false),
-                new("/manager/profile", "Профиль", false)
+                new("/manager", "dashboard-square-03", "Главная", true),
+                new("/manager/orders", "invoice-01", "Заказы", false),
+                new("/manager/employees", "user-group", "Команда", false),
+                new("/manager/chat", "message-01", "Чат", false),
+                new("/manager/profile", "user-03", "Профиль", false)
             ];
         if (path.StartsWith("customer") || role == "Клиент")
             return
             [
-                new("/customer", "Главная", true),
-                new("/customer/orders", "Заказы", false),
-                new("/customer/tracking", "Трекинг", false),
-                new("/customer/chat", "Чат", false),
-                new("/customer/profile", "Профиль", false)
+                new("/customer", "home-09", "Главная", true),
+                new("/customer/orders", "invoice-01", "Заказы", false),
+                new("/customer/tracking", "maps-location-01", "Трекинг", false),
+                new("/customer/chat", "message-01", "Чат", false),
+                new("/customer/profile", "user-03", "Профиль", false)
             ];
         return new List<MobileNavItem>();
     }
 
-    private sealed record MobileNavItem(string Href, string Text, bool Exact);
+    private sealed record MobileNavItem(string Href, string Icon, string Text, bool Exact);
 
     public void Dispose()
     {

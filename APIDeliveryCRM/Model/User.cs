@@ -19,7 +19,7 @@ namespace APIDeliveryCRM.Model
         public string Theme { get; set; } = "light";
 
         [MaxLength(500)]
-        public string Avatar { get; set; } = "/avatars/default.png";
+        public string? Avatar { get; set; }
 
         [Required]
         [ForeignKey(nameof(Company))]

@@ -108,6 +108,26 @@ namespace APIDeliveryCRM.Controllers
             return await _billingService.GetInvoicesAsync(companyId.Value);
         }
 
+        [Authorize(Roles = "Менеджер,Администратор,Админ")]
+        [HttpPost("invoices/{invoiceId:int}/pay")]
+        public async Task<IActionResult> PayPendingInvoice([FromRoute] int invoiceId)
+        {
+            var companyId = GetCompanyId();
+            if (!companyId.HasValue)
+                return Unauthorized(new { message = "Не указана компания в токене." });
+            return await _billingService.PayPendingInvoiceAsync(companyId.Value, invoiceId);
+        }
+
+        [Authorize(Roles = "Менеджер,Администратор,Админ")]
+        [HttpPost("invoices/{invoiceId:int}/cancel")]
+        public async Task<IActionResult> CancelPendingInvoice([FromRoute] int invoiceId)
+        {
+            var companyId = GetCompanyId();
+            if (!companyId.HasValue)
+                return Unauthorized(new { message = "Не указана компания в токене." });
+            return await _billingService.CancelPendingInvoiceAsync(companyId.Value, invoiceId);
+        }
+
         private int? GetCompanyId()
         {
             var raw = User.FindFirst("companyId")?.Value
