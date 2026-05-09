@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace WebBlazorDeliveryCRM.Services;
 
@@ -14,8 +15,12 @@ public class HubOrderOnSiteDto
 
 public class LogisticsHubListItemDto
 {
+    [JsonPropertyName("id")]
     public int Id { get; set; }
+
     public string? Name { get; set; }
+
+    [JsonPropertyName("addressId")]
     public int AddressId { get; set; }
     public string? City { get; set; }
     public string? Street { get; set; }
@@ -26,6 +31,25 @@ public class LogisticsHubListItemDto
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
     public List<HubOrderOnSiteDto> OrdersOnSite { get; set; } = new();
+
+    // Legacy/alternate payload aliases
+    [JsonPropertyName("ID_LogisticsHub")]
+    public int LegacyHubId
+    {
+        set
+        {
+            if (Id <= 0) Id = value;
+        }
+    }
+
+    [JsonPropertyName("ID_Address")]
+    public int LegacyAddressId
+    {
+        set
+        {
+            if (AddressId <= 0) AddressId = value;
+        }
+    }
 }
 
 public class CreateLogisticsHubApiRequest
@@ -61,5 +85,31 @@ public class LogisticsHubsApiService
     {
         var res = await _http.PostAsJsonAsync("/api/LogisticsHubs", body);
         return res.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> UpdateAsync(int hubId, CreateLogisticsHubApiRequest body)
+    {
+        var res = await _http.PutAsJsonAsync($"/api/LogisticsHubs/{hubId}", body);
+        return res.IsSuccessStatusCode;
+    }
+
+    public async Task<(bool ok, string? error)> DeleteAsync(int hubId)
+    {
+        var res = await _http.DeleteAsync($"/api/LogisticsHubs/{hubId}");
+        if (res.IsSuccessStatusCode)
+            return (true, null);
+
+        try
+        {
+            await using var stream = await res.Content.ReadAsStreamAsync();
+            using var doc = await JsonDocument.ParseAsync(stream);
+            if (doc.RootElement.TryGetProperty("message", out var message))
+                return (false, message.GetString());
+        }
+        catch
+        {
+        }
+
+        return (false, $"Ошибка {(int)res.StatusCode}");
     }
 }

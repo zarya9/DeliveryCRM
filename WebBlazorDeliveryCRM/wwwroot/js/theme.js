@@ -17,6 +17,9 @@ window.dmsTheme = {
         if (window.leafletMap && typeof window.leafletMap.setTheme === "function") {
             window.leafletMap.setTheme(normalized);
         }
+        if (window.courierManualMap && typeof window.courierManualMap.setTheme === "function") {
+            window.courierManualMap.setTheme(normalized);
+        }
         return normalized;
     },
 

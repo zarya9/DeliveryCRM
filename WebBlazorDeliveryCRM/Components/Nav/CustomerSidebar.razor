@@ -1,4 +1,7 @@
 @using WebBlazorDeliveryCRM.Components.Shared
+@inject CustomAuthenticationStateProvider AuthState
+@inject ChatHubClientService ChatHub
+@inject NavigationManager Navigation
 
 <div class="sidebar-header">
     <h2 class="sidebar-title">Клиент</h2>
@@ -29,3 +32,24 @@
         <HugeIcon Name="message-01" CssClass="icon" /> <span class="sidebar-label">Чат</span>
     </NavLink>
 </nav>
+<div class="sidebar-footer">
+    <button type="button" class="sidebar-link sidebar-link-button sidebar-link-logout" @onclick="LogoutAsync" title="Выйти">
+        <HugeIcon Name="logout-01" CssClass="icon" /> <span class="sidebar-label">Выйти</span>
+    </button>
+</div>
+
+@code {
+    private async Task LogoutAsync()
+    {
+        try
+        {
+            await ChatHub.StopAsync();
+        }
+        catch
+        {
+        }
+
+        await AuthState.MarkUserAsLoggedOutAsync();
+        Navigation.NavigateTo("/login", forceLoad: true, replace: true);
+    }
+}

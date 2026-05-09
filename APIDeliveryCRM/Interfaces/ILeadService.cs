@@ -9,6 +9,8 @@ namespace APIDeliveryCRM.Interfaces
         Task<IActionResult> GetByCompanyAsync(int companyId);
         Task<IActionResult> GetMetaAsync();
         Task<IActionResult> CreateAsync(CreateLeadRequest request, int companyId, int managerUserId);
+        Task<IActionResult> UpdateAsync(int leadId, CreateLeadRequest request, int companyId, int managerUserId);
+        Task<IActionResult> DeleteAsync(int leadId, int companyId);
         Task<IActionResult> UpdateStageAsync(int leadId, int stageId);
         Task<IActionResult> MarkLostAsync(int leadId, string reason);
         Task<IActionResult> MarkWonAsync(int leadId);

@@ -2,10 +2,13 @@
 @using System.Security.Claims
 @using Microsoft.AspNetCore.SignalR.Client
 @using Microsoft.AspNetCore.Components.Web
+@using System.Globalization
+@using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Components.Shared
 @inject ChatHubClientService ChatHubClient
 @inject ChatApiService ChatApi
 @inject EmployeesApiService EmployeesApi
+@inject UserPresenceApiService PresenceApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject AppNotificationService Notify
 @inject ChatUnreadStateService ChatUnreadState
@@ -37,7 +40,19 @@
             {
                 <button type="button" class="chat-item @(room.ChatRoomId == _activeRoomId ? "active" : "")"
                         @onclick="() => OpenRoomAsync(room.ChatRoomId)">
-                    <span class="chat-avatar">@GetInitials(GetRoomDisplayName(room))</span>
+                    <span class="chat-avatar">
+                        @if (TryGetRoomAvatarUrl(room, out var roomAvatarUrl))
+                        {
+                            <img src="@roomAvatarUrl"
+                                 alt="@GetRoomDisplayName(room)"
+                                 class="chat-avatar-img"
+                                 @onerror="() => OnRoomAvatarError(room.ChatRoomId)" />
+                        }
+                        else
+                        {
+                            <span class="chat-avatar-initials">@GetInitials(GetRoomDisplayName(room))</span>
+                        }
+                    </span>
                     <span class="chat-item-content">
                         <span class="chat-item-top">
                             <span class="chat-item-name">@GetRoomDisplayName(room)</span>
@@ -60,6 +75,23 @@
                 Назад
             </button>
             <div class="chat-mobile-title">@ActiveRoomTitle</div>
+        </div>
+        <div class="chat-peer-header @(IsDirectActiveRoom ? "chat-peer-header-clickable" : "")"
+             @onclick="OpenPeerProfile">
+            <div class="chat-peer-header-main">
+                <div class="chat-peer-title">@ActiveRoomTitle</div>
+                @if (IsDirectActiveRoom)
+                {
+                    <div class="chat-peer-status">@ActivePeerStatusText</div>
+                }
+            </div>
+            <div class="chat-peer-search" @onclick:stopPropagation="true">
+                <span class="chat-peer-search-icon" aria-hidden="true">🔎</span>
+                <input class="chat-peer-search-input"
+                       placeholder="Поиск по сообщениям"
+                       @bind="_messageSearch"
+                       @bind:event="oninput" />
+            </div>
         </div>
         <div id="company-chat-messages" class="company-chat-messages flex-grow-1 overflow-auto mb-2 chat-messages">
             @if (FilteredMessages.Count == 0)
@@ -164,6 +196,57 @@
     </section>
 </div>
 
+@if (_showPeerProfile && ActivePeer is not null)
+{
+    <div class="employee-modal-backdrop" @onclick="ClosePeerProfile">
+        <div class="employee-modal employee-modal--employee-detail" @onclick:stopPropagation="true">
+            <div class="employee-detail-header d-flex justify-content-between align-items-start">
+                <h2 class="h5 mb-0">Профиль собеседника</h2>
+                <button type="button" class="btn-close" aria-label="Закрыть" @onclick="ClosePeerProfile"></button>
+            </div>
+
+            <div class="employee-detail-body">
+                <div class="employee-detail-avatar-wrap">
+                    <div class="chat-peer-profile-avatar">@GetInitials(ActivePeer.FullName)</div>
+                </div>
+                <div class="employee-detail-fields">
+                    <div class="employee-detail-row">
+                        <div class="employee-detail-row-text">
+                            <span class="employee-detail-label">ФИО</span>
+                            <span class="employee-detail-value">@ActivePeer.FullName</span>
+                        </div>
+                        <HugeIcon Name="user-03" CssClass="employee-detail-row-icon" />
+                    </div>
+                    <div class="employee-detail-row">
+                        <div class="employee-detail-row-text">
+                            <span class="employee-detail-label">Статус</span>
+                            <span class="employee-detail-value">@ActivePeerStatusText</span>
+                        </div>
+                        <HugeIcon Name="time-01" CssClass="employee-detail-row-icon" />
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(ActivePeer.Email))
+                    {
+                        <div class="employee-detail-row">
+                            <div class="employee-detail-row-text">
+                                <span class="employee-detail-label">Почта</span>
+                                <span class="employee-detail-value">@ActivePeer.Email</span>
+                            </div>
+                            <HugeIcon Name="mail-01" CssClass="employee-detail-row-icon" />
+                        </div>
+                    }
+                    <div class="employee-detail-row">
+                        <div class="employee-detail-row-text">
+                            <span class="employee-detail-label">Должность</span>
+                            <span class="employee-detail-value">@ActivePeer.Role</span>
+                        </div>
+                        <HugeIcon Name="briefcase-01" CssClass="employee-detail-row-icon" />
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     [Parameter]
     public int? TargetUserId { get; set; }
@@ -175,8 +258,10 @@
     private readonly List<ChatRoomListItemDto> _rooms = new();
     private readonly Dictionary<int, string> _roomKinds = new();
     private readonly Dictionary<int, string> _employeeNames = new();
+    private readonly HashSet<int> _roomsWithAvatarError = new();
     private readonly List<EmployeesApiService.EmployeeDto> _employees = new();
     private string _chatSearch = string.Empty;
+    private string _messageSearch = string.Empty;
     private string _newMessage = string.Empty;
     private int _currentUserId;
     private int _companyId;
@@ -187,6 +272,8 @@
     private int? _lastHandledTargetUserId;
     private int? _lastHandledTargetRoomId;
     private int? _pendingDirectPeerUserId;
+    private bool _showPeerProfile;
+    private HashSet<int> _onlineUserIds = new();
     private int? _editingMessageId;
     private string _editingText = string.Empty;
     private bool _uploadingAttachment;
@@ -205,6 +292,24 @@
     };
 
     private bool CanSendMessage => _activeRoomId > 0 && (!string.IsNullOrWhiteSpace(_newMessage) || !string.IsNullOrWhiteSpace(_attachmentUrl));
+    private ChatRoomListItemDto? ActiveRoom => _rooms.FirstOrDefault(r => r.ChatRoomId == _activeRoomId);
+    private bool IsDirectActiveRoom => string.Equals(_activeRoomKind, "direct", StringComparison.OrdinalIgnoreCase);
+    private int? ActivePeerUserId => IsDirectActiveRoom ? ActiveRoom?.PeerUserId : null;
+    private EmployeesApiService.EmployeeDto? ActivePeer
+        => ActivePeerUserId.HasValue ? _employees.FirstOrDefault(e => e.Id == ActivePeerUserId.Value) : null;
+    private string ActivePeerStatusText
+    {
+        get
+        {
+            if (!ActivePeerUserId.HasValue)
+                return string.Empty;
+            if (_onlineUserIds.Contains(ActivePeerUserId.Value))
+                return "онлайн";
+            if (TryGetPeerLastSeen(ActivePeerUserId.Value, out var lastSeen))
+                return FormatPeerLastSeen(lastSeen);
+            return "был(а) недавно";
+        }
+    }
     private string ActiveRoomTitle
     {
         get
@@ -234,7 +339,14 @@
                 || t.Content.Contains(_templateSearch, StringComparison.OrdinalIgnoreCase))
             .Select(t => t.Content)
             .Distinct());
-    private List<ChatMessageVm> FilteredMessages => _messages.OrderBy(m => m.SentAt).ToList();
+    private List<ChatMessageVm> FilteredMessages
+        => _messages
+            .Where(m =>
+                string.IsNullOrWhiteSpace(_messageSearch) ||
+                m.Text.Contains(_messageSearch, StringComparison.OrdinalIgnoreCase) ||
+                (m.SenderName?.Contains(_messageSearch, StringComparison.OrdinalIgnoreCase) ?? false))
+            .OrderBy(m => m.SentAt)
+            .ToList();
 
     // В выпадающем поиске — только фамилия и имя (одна строка).
     private static string FormatChatEmployeeDisplay(EmployeesApiService.EmployeeDto e)
@@ -259,6 +371,7 @@
             _ = int.TryParse(user.FindFirst("companyId")?.Value, out _companyId);
 
             _employees.AddRange(await EmployeesApi.GetByCompanyAsync(_companyId));
+            _onlineUserIds = await PresenceApi.GetOnlineUserIdsAsync(_companyId);
             foreach (var employee in _employees)
             {
                 _employeeNames[employee.Id] = employee.FullName;
@@ -307,6 +420,17 @@
             {
                 _messages.RemoveAll(x => x.Id == msg.messageId);
                 InvokeAsync(StateHasChanged);
+            });
+            connection.On<UserPresenceChangedDto>("UserPresenceChanged", payload =>
+            {
+                return InvokeAsync(() =>
+                {
+                    if (payload.Online)
+                        _onlineUserIds.Add(payload.UserId);
+                    else
+                        _onlineUserIds.Remove(payload.UserId);
+                    StateHasChanged();
+                });
             });
 
             await ChatHubClient.StartAsync();
@@ -426,6 +550,7 @@
             await conn.SendAsync("LeaveRoom", _activeRoomId);
         _activeRoomId = roomId;
         _activeRoomKind = _roomKinds.GetValueOrDefault(roomId, "company");
+        _showPeerProfile = false;
         _messages.Clear();
         if (conn != null)
             await conn.SendAsync("JoinRoom", _activeRoomId);
@@ -497,6 +622,18 @@
     private void BackToRoomList()
     {
         _mobileChatOpen = false;
+    }
+
+    private void OpenPeerProfile()
+    {
+        if (!IsDirectActiveRoom || ActivePeer is null)
+            return;
+        _showPeerProfile = true;
+    }
+
+    private void ClosePeerProfile()
+    {
+        _showPeerProfile = false;
     }
 
     private async Task SendMessageAsync()
@@ -703,7 +840,16 @@
     {
         if (!dt.HasValue)
             return string.Empty;
-        return dt.Value.ToLocalTime().ToString("HH:mm");
+        var local = dt.Value.ToLocalTime();
+        var today = DateTime.Now.Date;
+
+        if (local.Date == today)
+            return local.ToString("HH:mm");
+
+        if (local.Date >= today.AddDays(-6))
+            return CultureInfo.GetCultureInfo("ru-RU").TextInfo.ToTitleCase(local.ToString("ddd", CultureInfo.GetCultureInfo("ru-RU")));
+
+        return local.ToString("dd/MM");
     }
 
     private static string GetInitials(string? name)
@@ -725,15 +871,33 @@
         {
             if (_employeeNames.TryGetValue(room.PeerUserId.Value, out var fio) && !string.IsNullOrWhiteSpace(fio))
                 return fio;
+            return $"Пользователь #{room.PeerUserId.Value}";
         }
 
         var fallback = room.Name?.Trim();
         if (!string.IsNullOrWhiteSpace(fallback) &&
             (fallback.StartsWith("ЛС", StringComparison.OrdinalIgnoreCase) || fallback.StartsWith("DM", StringComparison.OrdinalIgnoreCase)))
-            return "Личный чат";
+            return "Пользователь";
 
         return string.IsNullOrWhiteSpace(fallback) ? "Чат" : fallback;
     }
+
+    private bool TryGetRoomAvatarUrl(ChatRoomListItemDto room, out string avatarUrl)
+    {
+        avatarUrl = string.Empty;
+        if (_roomsWithAvatarError.Contains(room.ChatRoomId))
+            return false;
+        if (!string.Equals(room.RoomKind, "direct", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!room.PeerUserId.HasValue || room.PeerUserId.Value <= 0)
+            return false;
+
+        avatarUrl = ChatApi.BuildAvatarUrl(room.PeerUserId.Value);
+        return true;
+    }
+
+    private void OnRoomAvatarError(int roomId)
+        => _roomsWithAvatarError.Add(roomId);
 
     private bool ShouldShowSenderName(ChatMessageVm message)
         => !message.IsMine && !string.Equals(_activeRoomKind, "direct", StringComparison.OrdinalIgnoreCase);
@@ -745,6 +909,32 @@
         if (_employeeNames.TryGetValue(message.SenderId, out var name) && !string.IsNullOrWhiteSpace(name))
             return name;
         return $"Пользователь #{message.SenderId}";
+    }
+
+    private bool TryGetPeerLastSeen(int peerUserId, out DateTime localTime)
+    {
+        localTime = default;
+        var dt = _rooms
+            .Where(r => string.Equals(r.RoomKind, "direct", StringComparison.OrdinalIgnoreCase) && r.PeerUserId == peerUserId)
+            .Select(r => r.LastMessageAt)
+            .Where(v => v.HasValue)
+            .Select(v => v!.Value)
+            .OrderByDescending(v => v)
+            .FirstOrDefault();
+        if (dt == default)
+            return false;
+        localTime = dt.ToLocalTime();
+        return true;
+    }
+
+    private static string FormatPeerLastSeen(DateTime localTime)
+    {
+        var today = DateTime.Now.Date;
+        if (localTime.Date == today)
+            return $"был(а) в {localTime:HH:mm}";
+        if (localTime.Date == today.AddDays(-1))
+            return $"был(а) вчера в {localTime:HH:mm}";
+        return $"был(а) в сети {localTime:dd/MM}";
     }
 
     private async Task MarkActiveRoomAsReadAsync()

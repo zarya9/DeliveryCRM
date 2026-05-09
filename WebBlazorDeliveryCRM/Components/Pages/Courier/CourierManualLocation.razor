@@ -1,0 +1,362 @@
+@page "/courier/manual-location"
+@layout CourierLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Курьер")]
+@using System.Globalization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@using WebBlazorDeliveryCRM.Services
+@implements IAsyncDisposable
+@inject AuthenticationStateProvider AuthState
+@inject CouriersApiService CouriersApi
+@inject IJSRuntime JS
+
+<PageTitle>Позиция на карте — Курьер</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Позиция на карте</h1>
+    <p class="subtitle">
+        Здесь не подменяется GPS устройства: вы задаёте точку сами и она отправляется на сервер так же, как координаты с геолокации.
+        Удобно для тестов и демо. Для отображения на мониторинге логиста будьте <strong>на смене</strong> и по возможности <strong>в сети</strong> (как на странице «Смена»).
+    </p>
+</div>
+
+@if (_loading)
+{
+    <p class="text-muted">Загрузка…</p>
+}
+else if (_profileId is null)
+{
+    <div class="alert alert-warning">Профиль курьера не найден.</div>
+}
+else if (!_shiftActive)
+{
+    <div class="alert alert-info mb-3">Сервер принимает координаты только при <strong>активной смене</strong>. Сначала откройте «Смена и геолокация» и начните смену.</div>
+    <a class="btn btn-outline-primary" href="/courier/shift">Перейти к смене</a>
+}
+else
+{
+    <div class="dms-card mb-3">
+        <div class="row g-3 align-items-start">
+            <div class="col-lg-8">
+                <h2 class="dms-card-title">Карта</h2>
+                <p class="small text-muted mb-2">Перетащите синюю точку или кликните по карте. Кнопки — сдвиг на выбранное число метров.</p>
+                <div id="courier-manual-map" class="courier-manual-map-wrap"></div>
+            </div>
+            <div class="col-lg-4">
+                <h2 class="dms-card-title">Джойстик</h2>
+                <p class="small text-muted mb-2">Зажмите кнопку направления — шаг будет повторяться.</p>
+                <div class="mb-3">
+                    <label class="form-label small mb-1">Шаг, метры (@_stepMeters.ToString("0", CultureInfo.InvariantCulture))</label>
+                    <input type="range" class="form-range" min="15" max="250" step="5" @bind="_stepMeters" @bind:event="oninput" disabled="@_pushing" />
+                </div>
+                <div class="courier-manual-joystick mb-3" @onpointerup="JoyUpAsync" @onpointerleave="JoyUpAsync" @onpointercancel="JoyUpAsync">
+                    <span class="courier-manual-joy-cell"></span>
+                    <div class="courier-manual-joy-cell">
+                        <button type="button" class="courier-manual-joy-btn" title="Север"
+                                disabled="@_pushing"
+                                @onpointerdown="e => JoyDownAsync(e, 0, 1)">↑</button>
+                    </div>
+                    <span class="courier-manual-joy-cell"></span>
+                    <div class="courier-manual-joy-cell">
+                        <button type="button" class="courier-manual-joy-btn" title="Запад"
+                                disabled="@_pushing"
+                                @onpointerdown="e => JoyDownAsync(e, -1, 0)">←</button>
+                    </div>
+                    <div class="courier-manual-joy-cell d-flex align-items-center justify-content-center small text-muted">·</div>
+                    <div class="courier-manual-joy-cell">
+                        <button type="button" class="courier-manual-joy-btn" title="Восток"
+                                disabled="@_pushing"
+                                @onpointerdown="e => JoyDownAsync(e, 1, 0)">→</button>
+                    </div>
+                    <span class="courier-manual-joy-cell"></span>
+                    <div class="courier-manual-joy-cell">
+                        <button type="button" class="courier-manual-joy-btn" title="Юг"
+                                disabled="@_pushing"
+                                @onpointerdown="e => JoyDownAsync(e, 0, -1)">↓</button>
+                    </div>
+                    <span class="courier-manual-joy-cell"></span>
+                </div>
+                <dl class="row small mb-2">
+                    <dt class="col-4 text-muted">Широта</dt>
+                    <dd class="col-8 mb-1 font-monospace">@FormatCoord(_manualLat)</dd>
+                    <dt class="col-4 text-muted">Долгота</dt>
+                    <dd class="col-8 mb-0 font-monospace">@FormatCoord(_manualLon)</dd>
+                </dl>
+                @if (!string.IsNullOrEmpty(_lastError))
+                {
+                    <div class="alert alert-warning py-2 small mb-2">@_lastError</div>
+                }
+                @if (!string.IsNullOrEmpty(_lastOk))
+                {
+                    <div class="text-success small mb-0">@_lastOk</div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private const double DefaultLat = 55.7558;
+    private const double DefaultLon = 37.6173;
+
+    private int? _profileId;
+    private bool _shiftActive;
+    private bool _isOnline;
+    private bool _loading = true;
+    private bool _mapReady;
+    private bool _pushing;
+    private double _stepMeters = 75;
+
+    private decimal _manualLat;
+    private decimal _manualLon;
+
+    private string? _lastError;
+    private string? _lastOk;
+    private DotNetObjectReference<CourierManualLocation>? _dotNetRef;
+
+    private CancellationTokenSource? _repeatCts;
+    private CancellationTokenSource? _debouncePushCts;
+
+    private int _joyEw;
+    private int _joyNs;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProfileAsync();
+    }
+
+    private async Task LoadProfileAsync()
+    {
+        _loading = true;
+        try
+        {
+            var state = await AuthState.GetAuthenticationStateAsync();
+            var uidClaim = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                           ?? state.User.FindFirst("sub")?.Value;
+            if (!int.TryParse(uidClaim, CultureInfo.InvariantCulture, out var uid))
+                return;
+
+            var profile = await CouriersApi.GetByUserIdAsync(uid);
+            if (profile != null)
+            {
+                _profileId = profile.ID_CourierProfile;
+                _isOnline = profile.Is_online;
+                var lat = (double)profile.Current_lat;
+                var lon = (double)profile.Current_lon;
+                if (Math.Abs(lat) < 0.001 && Math.Abs(lon) < 0.001)
+                {
+                    lat = DefaultLat;
+                    lon = DefaultLon;
+                }
+
+                _manualLat = (decimal)lat;
+                _manualLon = (decimal)lon;
+
+                var (shiftA, _, _) = await CouriersApi.GetActiveShiftAsync(_profileId.Value);
+                _shiftActive = shiftA;
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_loading || _profileId is null || !_shiftActive || _mapReady)
+            return;
+        await TryInitMapAsync();
+    }
+
+    private async Task TryInitMapAsync()
+    {
+        if (_mapReady || _profileId is null || !_shiftActive) return;
+        try
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync(
+                "courierManualMap.init",
+                "courier-manual-map",
+                (double)_manualLat,
+                (double)_manualLon,
+                15,
+                _dotNetRef);
+            _mapReady = true;
+        }
+        catch
+        {
+            // пререндер
+        }
+    }
+
+    [JSInvokable]
+    public Task OnMapMarkerMoved(double lat, double lng)
+    {
+        _manualLat = ClampLat((decimal)lat);
+        _manualLon = ClampLon((decimal)lng);
+        _ = DebouncedPushAsync();
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private static string FormatCoord(decimal v) =>
+        v.ToString("0.######", CultureInfo.InvariantCulture);
+
+    private static decimal ClampLat(decimal v) => v < -90 ? -90 : v > 90 ? 90 : v;
+
+    private static decimal ClampLon(decimal v) => v < -180 ? -180 : v > 180 ? 180 : v;
+
+    private void ApplyMeterOffset(double eastMeters, double northMeters)
+    {
+        var latRad = (double)_manualLat * Math.PI / 180.0;
+        var dLat = northMeters / 111_320.0;
+        var dLon = eastMeters / (111_320.0 * Math.Cos(latRad));
+        if (double.IsNaN(dLon) || double.IsInfinity(dLon))
+            dLon = eastMeters / 111_320.0;
+
+        _manualLat = ClampLat(_manualLat + (decimal)dLat);
+        _manualLon = ClampLon(_manualLon + (decimal)dLon);
+    }
+
+    private async Task NudgeVisualAsync(bool panMap)
+    {
+        if (!_mapReady) return;
+        try
+        {
+            await JS.InvokeVoidAsync("courierManualMap.setMarker", (double)_manualLat, (double)_manualLon, panMap);
+        }
+        catch
+        {
+            // ignored
+        }
+    }
+
+    private async Task DebouncedPushAsync()
+    {
+        _debouncePushCts?.Cancel();
+        _debouncePushCts?.Dispose();
+        _debouncePushCts = new CancellationTokenSource();
+        var ct = _debouncePushCts.Token;
+        try
+        {
+            await Task.Delay(380, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        await PushNowAsync();
+    }
+
+    private async Task PushNowAsync()
+    {
+        if (!_profileId.HasValue || !_shiftActive) return;
+        _pushing = true;
+        _lastError = null;
+        try
+        {
+            var (ok, err) = await CouriersApi.UpdateLocationAsync(_profileId.Value, _manualLat, _manualLon);
+            if (ok)
+            {
+                _lastOk = _isOnline
+                    ? "Точка отправлена. Логист увидит вас на мониторинге (при открытой вкладке карты)."
+                    : "Точка на сервере сохранена. Чтобы статус совпадал с мониторингом, включите «В сеть» на странице смены.";
+            }
+            else
+                _lastError = string.IsNullOrWhiteSpace(err) ? "Не удалось сохранить координаты." : err;
+        }
+        catch
+        {
+            _lastError = "Ошибка сети при сохранении.";
+        }
+        finally
+        {
+            _pushing = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task JoyDownAsync(PointerEventArgs e, int ew, int ns)
+    {
+        if (!_profileId.HasValue || !_shiftActive || e.Button != 0) return;
+        _joyEw = ew;
+        _joyNs = ns;
+        _repeatCts?.Cancel();
+        _repeatCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _repeatCts = cts;
+        await NudgeJoyStepAsync(panMap: true);
+        // Пока ждали дебаунс/HTTP, пользователь мог отпустить кнопку — JoyUpAsync обнуляет _repeatCts.
+        if (!ReferenceEquals(_repeatCts, cts))
+            return;
+        _ = RepeatJoyAsync(cts.Token);
+    }
+
+    private async Task RepeatJoyAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(130, ct);
+                await InvokeAsync(async () =>
+                {
+                    await NudgeJoyStepAsync(panMap: false);
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // normal
+        }
+    }
+
+    private async Task JoyUpAsync()
+    {
+        _repeatCts?.Cancel();
+        _repeatCts?.Dispose();
+        _repeatCts = null;
+        await DebouncedPushAsync();
+    }
+
+    private async Task NudgeJoyStepAsync(bool panMap)
+    {
+        if (!_profileId.HasValue) return;
+        var step = _stepMeters;
+        ApplyMeterOffset(_joyEw * step, _joyNs * step);
+        await NudgeVisualAsync(panMap);
+        _lastOk = null;
+        await InvokeAsync(StateHasChanged);
+        await DebouncedPushAsync();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        _repeatCts?.Cancel();
+        _repeatCts?.Dispose();
+        _debouncePushCts?.Cancel();
+        _debouncePushCts?.Dispose();
+        if (_dotNetRef != null)
+        {
+            try
+            {
+                _dotNetRef.Dispose();
+            }
+            catch { }
+
+            _dotNetRef = null;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("courierManualMap.dispose");
+        }
+        catch
+        {
+            // circuit gone
+        }
+    }
+}

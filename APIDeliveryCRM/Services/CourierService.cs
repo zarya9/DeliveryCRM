@@ -1,12 +1,14 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
+using APIDeliveryCRM.Hubs;
 using APIDeliveryCRM.Helpers;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using System.Text.RegularExpressions;
 
@@ -17,12 +19,14 @@ namespace APIDeliveryCRM.Services
         private readonly ContextDB _context;
         private readonly IAuditService _audit;
         private readonly IShiftService _shifts;
+        private readonly IHubContext<TrackingHub> _trackingHub;
 
-        public CourierService(ContextDB context, IAuditService audit, IShiftService shifts)
+        public CourierService(ContextDB context, IAuditService audit, IShiftService shifts, IHubContext<TrackingHub> trackingHub)
         {
             _context = context;
             _audit = audit;
             _shifts = shifts;
+            _trackingHub = trackingHub;
         }
 
         public async Task<CourierProfile> GetProfileAsync(int courierProfileId)
@@ -196,6 +200,7 @@ namespace APIDeliveryCRM.Services
                 throw new InvalidOperationException("Передача координат доступна только во время активной смены.");
 
             var courier = await _context.CourierProfiles
+                .Include(c => c.User)
                 .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId);
             if (courier == null)
             {
@@ -206,6 +211,21 @@ namespace APIDeliveryCRM.Services
             courier.Current_lon = lon;
             courier.LastActivity_at = System.DateTime.UtcNow;
             await _context.SaveChangesAsync();
+
+            var name = $"{courier.User?.FName} {courier.User?.Name}".Trim();
+            if (string.IsNullOrWhiteSpace(name))
+                name = $"Курьер #{courierProfileId}";
+
+            await _trackingHub.Clients
+                .Group(TrackingHub.CompanyGroup(courier.Company_id))
+                .SendAsync("CourierLocationUpdated", new
+                {
+                    courierProfileId,
+                    lat = (double)lat,
+                    lon = (double)lon,
+                    online = courier.Is_online,
+                    title = $"{name} · {(courier.Is_online ? "онлайн" : "офлайн")}"
+                });
         }
 
         public async Task SetOnlineStatusAsync(int courierProfileId, bool isOnline)

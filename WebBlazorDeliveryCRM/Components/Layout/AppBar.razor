@@ -1,10 +1,8 @@
 @inject AuthenticationStateProvider AuthStateProvider
-@inject CustomAuthenticationStateProvider AuthState
 @inject ChatHubClientService ChatHub
 @inject ChatApiService ChatApi
 @inject ChatUnreadStateService ChatUnreadState
 @inject AppNotificationService Notify
-@inject NavigationManager Navigation
 @inject IJSRuntime JS
 @using WebBlazorDeliveryCRM.Components.Shared
 @using System.Security.Claims
@@ -51,16 +49,9 @@
         </button>
         @if (_isAuthenticated)
         {
-            <a href="@ProfileHref" class="dms-btn-outline dms-icon-btn" title="Профиль" aria-label="Профиль">
-                <HugeIcon Name="user-03" CssClass="dms-icon" />
-            </a>
             <a href="@NotificationsHref" class="dms-btn-outline dms-icon-btn" title="Уведомления" aria-label="Уведомления">
                 <HugeIcon Name="notification-01" CssClass="dms-icon" />
             </a>
-            <button type="button" class="dms-btn-outline" @onclick="Logout" title="Выйти" aria-label="Выйти">
-                <HugeIcon Name="logout-01" CssClass="dms-icon me-1" />
-                <span class="dms-btn-text">Выйти</span>
-            </button>
         }
         else
         {
@@ -85,15 +76,6 @@
         "Клиент" => "/customer/notifications",
         "Курьер" => "/courier/notifications",
         _ => "/manager/notifications"
-    };
-    private string ProfileHref => _role switch
-    {
-        "Клиент" => "/customer/profile",
-        "Курьер" => "/courier/profile",
-        "Логист" => "/logistician/profile",
-        "Менеджер" => "/manager/profile",
-        "Админ" or "Администратор" => "/manager/profile",
-        _ => "/customer/profile"
     };
     private bool _showUiSettings;
     private string _uiAccent = "#008b8b";
@@ -195,18 +177,6 @@
         {
             // ignore JS settings errors
         }
-    }
-
-    private async Task Logout()
-    {
-        try
-        {
-            await ChatHub.StopAsync();
-        }
-        catch { /* ignore */ }
-
-        await AuthState.MarkUserAsLoggedOutAsync();
-        Navigation.NavigateTo("/login", forceLoad: true, replace: true);
     }
 
     private void AttachChatHandlers()

@@ -48,7 +48,22 @@
 
     --dms-text: #eaffff;
     --dms-text-muted: #b8d7d7;
-    --dms-text-light: #8fb6b6;
+    --dms-text-light: #8fb6b6; 
+}
+
+[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: brightness(0) invert(1);
+    opacity: 1;
+}
+
+[data-theme="dark"] input[type="password"]::-ms-reveal,
+[data-theme="dark"] input[type="password"]::-ms-clear {
+    filter: brightness(0) invert(1);
+}
+
+[data-theme="dark"] .btn-close {
+    filter: invert(1) grayscale(100%) brightness(180%);
+    opacity: 0.95;
 }
 
 html, body {

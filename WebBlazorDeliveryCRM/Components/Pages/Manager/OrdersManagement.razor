@@ -2,85 +2,516 @@
 @layout ManagerLayout
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
 @inject OrdersApiService OrdersApi
+@inject CouriersApiService CouriersApi
+@inject AppNotificationService Notify
 
 <PageTitle>Заказы — Менеджер</PageTitle>
 
 <div class="dms-page-header">
     <h1>Управление заказами</h1>
-    <p class="subtitle">Все заказы, фильтры и действия</p>
+    <p class="subtitle">Все заказы, фильтры и назначения</p>
 </div>
 
-<div class="dms-card">
-    <h2 class="dms-card-title">Список заказов</h2>
-    @if (_orders != null && _orders.Count > 0)
-    {
-        <table class="table table-hover align-middle">
-            <thead>
-                <tr>
-                    <th>№</th>
-                    <th>Название</th>
-                    <th>Клиент</th>
-                    <th>Статус</th>
-                    <th>SLA</th>
-                    <th>Курьер</th>
-                    <th>Сумма</th>
-                    <th>Дата</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var o in _orders)
+<div class="dms-stat-grid">
+    <KpiCard Title="Всего заказов" Value="@_orders.Count.ToString()" Meta="@($"в выборке: {FilteredOrders.Count}")" />
+    <KpiCard Title="Новые" Value="@CountByPredicate(o => IsNewStatus(o.OrderStatus?.Name)).ToString()" Meta="ожидают назначения" />
+    <KpiCard Title="Риск SLA" Value="@CountByPredicate(IsSlaRisk).ToString()" Meta="ETA позже SLA" />
+    <KpiCard Title="Просрочены" Value="@CountByPredicate(o => o.Sla_breached_at.HasValue).ToString()" Meta="нарушение SLA" />
+</div>
+
+<div class="dms-card orders-filters mb-3">
+    <div class="orders-filters-header">
+        <h2 class="dms-card-title mb-0">Фильтры</h2>
+        @if (HasActiveFilters)
+        {
+            <button type="button" class="btn btn-sm btn-link orders-filters-reset" @onclick="ResetFilters">
+                Сбросить
+            </button>
+        }
+    </div>
+    <div class="orders-filters-grid">
+        <label class="orders-filter-field">
+            <span class="orders-filter-label">Поиск</span>
+            <input class="form-control form-control-sm"
+                   placeholder="Название, № или клиент"
+                   @bind="_searchText" @bind:event="oninput" />
+        </label>
+        <label class="orders-filter-field">
+            <span class="orders-filter-label">Статус</span>
+            <select class="form-select form-select-sm" @bind="_statusFilter">
+                <option value="">Все</option>
+                @foreach (var st in _statuses)
                 {
-                    <tr>
-                        <td>@o.Order_Number</td>
-                        <td>@o.Name</td>
-                        <td>@(o.ClientProfile?.User != null ? $"{o.ClientProfile.User.FName} {o.ClientProfile.User.Name}" : "—")</td>
-                        <td>
-                            <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@GetOrderStatusTone(o.OrderStatus?.Name)" />
-                        </td>
-                        <td>
-                            @if (IsSlaRisk(o))
-                            {
-                                <StatusBadge Text="Риск" Tone="danger" />
-                            }
-                            else if (o.Sla_breached_at.HasValue)
-                            {
-                                <StatusBadge Text="Просрочен" Tone="danger" />
-                            }
-                            else
-                            {
-                                <StatusBadge Text="OK" Tone="success" />
-                            }
-                        </td>
-                        <td>@(o.CourierProfile != null ? $"{o.CourierProfile.User?.FName} {o.CourierProfile.User?.Name}" : "—")</td>
-                        <td>@(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost) ₽</td>
-                        <td>@o.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
-                    </tr>
+                    <option value="@st.Id">@st.Name</option>
                 }
-            </tbody>
-        </table>
+            </select>
+        </label>
+        <label class="orders-filter-field">
+            <span class="orders-filter-label">SLA</span>
+            <select class="form-select form-select-sm" @bind="_slaFilter">
+                <option value="">Любой</option>
+                <option value="ok">OK</option>
+                <option value="risk">Риск</option>
+                <option value="breached">Просрочен</option>
+            </select>
+        </label>
+        <label class="orders-filter-field">
+            <span class="orders-filter-label">Курьер</span>
+            <select class="form-select form-select-sm" @bind="_courierFilter">
+                <option value="">Все</option>
+                <option value="-1">Без назначения</option>
+                @foreach (var c in _couriers.OrderBy(c => c.User?.FName ?? string.Empty))
+                {
+                    <option value="@c.User_id">@FormatCourierName(c)</option>
+                }
+            </select>
+        </label>
+        <label class="orders-filter-field">
+            <span class="orders-filter-label">С даты</span>
+            <input type="date" class="form-control form-control-sm" @bind="_dateFrom" />
+        </label>
+        <label class="orders-filter-field">
+            <span class="orders-filter-label">По дату</span>
+            <input type="date" class="form-control form-control-sm" @bind="_dateTo" />
+        </label>
+    </div>
+</div>
+
+<div class="dms-card mb-3">
+    <div class="orders-toolbar">
+        <h2 class="dms-card-title mb-0">Список заказов</h2>
+        <div class="orders-toolbar-actions">
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ReloadAsync" disabled="@_isLoading">
+                <HugeIcon Name="activity-01" CssClass="dms-icon-sm" />
+                <span class="ms-1">Обновить</span>
+            </button>
+        </div>
+    </div>
+
+    @if (_selectedIds.Count > 0)
+    {
+        <div class="orders-bulk-bar">
+            <div class="orders-bulk-info">
+                <HugeIcon Name="task-01" CssClass="dms-icon-sm" />
+                <span class="ms-1">Выбрано: <b>@_selectedIds.Count</b></span>
+            </div>
+            <div class="orders-bulk-controls">
+                <select class="form-select form-select-sm" @bind="_bulkCourierProfileId">
+                    <option value="0">— Назначить курьера —</option>
+                    @foreach (var c in _couriers.OrderBy(c => c.User?.FName ?? string.Empty))
+                    {
+                        <option value="@c.ID_CourierProfile">@FormatCourierName(c)@(c.Is_online ? " · в сети" : "")</option>
+                    }
+                </select>
+                <button type="button" class="btn btn-sm btn-primary"
+                        disabled="@(_bulkCourierProfileId <= 0 || _isBulkBusy)"
+                        @onclick="ApplyBulkAssignAsync">
+                    <HugeIcon Name="delivery-truck-01" CssClass="dms-icon-sm" />
+                    <span class="ms-1">Назначить</span>
+                </button>
+
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ClearSelection" disabled="@_isBulkBusy">
+                    Очистить
+                </button>
+            </div>
+        </div>
+    }
+
+    @if (_isLoading)
+    {
+        <p class="text-muted mb-0">Загрузка...</p>
+    }
+    else if (FilteredOrders.Count == 0)
+    {
+        <p class="text-muted mb-0">@(_orders.Count == 0 ? "Заказов нет." : "По выбранным фильтрам ничего не найдено.")</p>
     }
     else
     {
-        <p class="text-muted">Заказов нет.</p>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle orders-table">
+                <thead>
+                    <tr>
+                        <th class="orders-th-check">
+                            <input type="checkbox"
+                                   class="form-check-input"
+                                   checked="@AllVisibleSelected"
+                                   @onchange="ToggleSelectAllVisible" />
+                        </th>
+                        <th><span class="orders-th"><span>№</span><HugeIcon Name="invoice-01" CssClass="orders-th-icon" /></span></th>
+                        <th><span class="orders-th"><span>Название</span><HugeIcon Name="package-moving" CssClass="orders-th-icon" /></span></th>
+                        <th><span class="orders-th"><span>Клиент</span><HugeIcon Name="user-03" CssClass="orders-th-icon" /></span></th>
+                        <th><span class="orders-th"><span>Статус</span><HugeIcon Name="activity-01" CssClass="orders-th-icon" /></span></th>
+                        <th><span class="orders-th"><span>SLA</span><HugeIcon Name="notification-01" CssClass="orders-th-icon" /></span></th>
+                        <th><span class="orders-th"><span>Курьер</span><HugeIcon Name="delivery-truck-01" CssClass="orders-th-icon" /></span></th>
+                        <th><span class="orders-th"><span>Стоимость</span><HugeIcon Name="wallet-01" CssClass="orders-th-icon" /></span></th>
+                        <th><span class="orders-th"><span>Дата</span><HugeIcon Name="calendar-03" CssClass="orders-th-icon" /></span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var o in FilteredOrders)
+                    {
+                        <tr class="@(_selectedIds.Contains(o.ID_Order) ? "orders-row-selected" : "")">
+                            <td class="orders-td-check">
+                                <input type="checkbox"
+                                       class="form-check-input"
+                                       checked="@_selectedIds.Contains(o.ID_Order)"
+                                       @onchange="(args) => ToggleRowSelection(o.ID_Order, args)" />
+                            </td>
+                            <td>@o.Order_Number</td>
+                            <td>@o.Name</td>
+                            <td>@FormatClientName(o)</td>
+                            <td>
+                                <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@GetOrderStatusTone(o.OrderStatus?.Name)" />
+                            </td>
+                            <td>
+                                @if (o.Sla_breached_at.HasValue)
+                                {
+                                    <StatusBadge Text="Просрочен" Tone="danger" />
+                                }
+                                else if (IsSlaRisk(o))
+                                {
+                                    <StatusBadge Text="Риск" Tone="danger" />
+                                }
+                                else
+                                {
+                                    <StatusBadge Text="OK" Tone="success" />
+                                }
+                            </td>
+                            <td>@FormatCourierName(o)</td>
+                            <td>@FormatMoney(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost)</td>
+                            <td>@o.Created_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<div class="dms-card">
+    <div class="orders-timeline-header">
+        <h2 class="dms-card-title mb-0">Лента изменений</h2>
+        <span class="text-muted small">последние события из выбранных заказов</span>
+    </div>
+    @if (TimelineEvents.Count == 0)
+    {
+        <p class="text-muted mb-0">Событий пока нет.</p>
+    }
+    else
+    {
+        <ul class="orders-timeline">
+            @foreach (var ev in TimelineEvents)
+            {
+                <li class="orders-timeline-item">
+                    <span class="orders-timeline-icon orders-timeline-icon-@ev.Tone">
+                        <HugeIcon Name="@ev.Icon" CssClass="dms-icon-sm" />
+                    </span>
+                    <div class="orders-timeline-body">
+                        <div class="orders-timeline-title">@ev.Title</div>
+                        <div class="orders-timeline-meta">
+                            <span>Заказ №@ev.OrderNumber</span>
+                            <span>·</span>
+                            <span>@ev.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                        </div>
+                    </div>
+                </li>
+            }
+        </ul>
     }
 </div>
 
 @code {
-    private List<OrderDto>? _orders;
+    private readonly List<OrderDto> _orders = new();
+    private readonly List<OrderStatusOptionDto> _statuses = new();
+    private readonly List<CourierProfileDto> _couriers = new();
+    private readonly HashSet<int> _selectedIds = new();
+    private bool _isLoading = true;
+    private bool _isBulkBusy;
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    private string _searchText = string.Empty;
+    private string _statusFilter = string.Empty;
+    private string _slaFilter = string.Empty;
+    private string _courierFilter = string.Empty;
+    private DateTime? _dateFrom;
+    private DateTime? _dateTo;
+
+    private int _bulkCourierProfileId;
+
+    private bool HasActiveFilters =>
+        !string.IsNullOrWhiteSpace(_searchText)
+        || !string.IsNullOrWhiteSpace(_statusFilter)
+        || !string.IsNullOrWhiteSpace(_slaFilter)
+        || !string.IsNullOrWhiteSpace(_courierFilter)
+        || _dateFrom.HasValue
+        || _dateTo.HasValue;
+
+    private List<OrderDto> FilteredOrders
+        => _orders.Where(MatchesFilters)
+            .OrderByDescending(o => o.Created_at)
+            .ToList();
+
+    private bool AllVisibleSelected
     {
-        if (!firstRender) return;
-        _orders = await OrdersApi.GetAllAsync(null);
-        StateHasChanged();
+        get
+        {
+            var visible = FilteredOrders;
+            return visible.Count > 0 && visible.All(o => _selectedIds.Contains(o.ID_Order));
+        }
     }
+
+    private List<TimelineVm> TimelineEvents
+    {
+        get
+        {
+            var events = new List<TimelineVm>();
+            foreach (var o in _orders)
+            {
+                events.Add(new TimelineVm
+                {
+                    OrderId = o.ID_Order,
+                    OrderNumber = o.Order_Number,
+                    Title = $"Создан заказ «{o.Name}»",
+                    At = o.Created_at,
+                    Icon = "plus-sign",
+                    Tone = "info"
+                });
+                if (o.Pickup_started_at.HasValue)
+                {
+                    events.Add(new TimelineVm
+                    {
+                        OrderId = o.ID_Order,
+                        OrderNumber = o.Order_Number,
+                        Title = "Курьер забрал отправление",
+                        At = o.Pickup_started_at.Value,
+                        Icon = "package-moving",
+                        Tone = "info"
+                    });
+                }
+                if (o.In_transit_at.HasValue)
+                {
+                    events.Add(new TimelineVm
+                    {
+                        OrderId = o.ID_Order,
+                        OrderNumber = o.Order_Number,
+                        Title = "Заказ в пути",
+                        At = o.In_transit_at.Value,
+                        Icon = "delivery-truck-01",
+                        Tone = "primary"
+                    });
+                }
+                if (o.Arrived_at.HasValue)
+                {
+                    events.Add(new TimelineVm
+                    {
+                        OrderId = o.ID_Order,
+                        OrderNumber = o.Order_Number,
+                        Title = "Курьер на адресе доставки",
+                        At = o.Arrived_at.Value,
+                        Icon = "location-01",
+                        Tone = "primary"
+                    });
+                }
+                if (o.Sla_breached_at.HasValue)
+                {
+                    events.Add(new TimelineVm
+                    {
+                        OrderId = o.ID_Order,
+                        OrderNumber = o.Order_Number,
+                        Title = "Нарушение SLA",
+                        At = o.Sla_breached_at.Value,
+                        Icon = "notification-01",
+                        Tone = "danger"
+                    });
+                }
+                if (o.Delivered_at.HasValue)
+                {
+                    events.Add(new TimelineVm
+                    {
+                        OrderId = o.ID_Order,
+                        OrderNumber = o.Order_Number,
+                        Title = "Заказ доставлен",
+                        At = o.Delivered_at.Value,
+                        Icon = "activity-01",
+                        Tone = "success"
+                    });
+                }
+            }
+            return events
+                .OrderByDescending(x => x.At)
+                .Take(12)
+                .ToList();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAuxiliaryAsync();
+        await ReloadAsync();
+    }
+
+    private async Task LoadAuxiliaryAsync()
+    {
+        var statuses = await OrdersApi.GetOrderStatusesAsync();
+        _statuses.Clear();
+        _statuses.AddRange(statuses);
+
+        var couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
+        _couriers.Clear();
+        _couriers.AddRange(couriers);
+    }
+
+    private async Task ReloadAsync()
+    {
+        _isLoading = true;
+        StateHasChanged();
+        try
+        {
+            var list = await OrdersApi.GetAllAsync(null) ?? new List<OrderDto>();
+            _orders.Clear();
+            _orders.AddRange(list);
+            _selectedIds.RemoveWhere(id => _orders.All(o => o.ID_Order != id));
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private bool MatchesFilters(OrderDto o)
+    {
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var q = _searchText.Trim().ToLowerInvariant();
+            var name = (o.Name ?? string.Empty).ToLowerInvariant();
+            var num = o.Order_Number.ToString();
+            var client = FormatClientName(o).ToLowerInvariant();
+            if (!name.Contains(q) && !num.Contains(q) && !client.Contains(q))
+                return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_statusFilter) && int.TryParse(_statusFilter, out var statusId))
+        {
+            if (o.Status_id != statusId)
+                return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_slaFilter))
+        {
+            var breached = o.Sla_breached_at.HasValue;
+            var risk = !breached && IsSlaRisk(o);
+            switch (_slaFilter)
+            {
+                case "breached" when !breached: return false;
+                case "risk" when !risk: return false;
+                case "ok" when (breached || risk): return false;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_courierFilter) && int.TryParse(_courierFilter, out var courierFilterValue))
+        {
+            if (courierFilterValue == -1)
+            {
+                if (o.Courier_id.HasValue) return false;
+            }
+            else
+            {
+                var ownerUserId = o.CourierProfile?.User_id ?? 0;
+                if (ownerUserId != courierFilterValue) return false;
+            }
+        }
+
+        if (_dateFrom.HasValue && o.Created_at.ToLocalTime().Date < _dateFrom.Value.Date)
+            return false;
+        if (_dateTo.HasValue && o.Created_at.ToLocalTime().Date > _dateTo.Value.Date)
+            return false;
+
+        return true;
+    }
+
+    private void ResetFilters()
+    {
+        _searchText = string.Empty;
+        _statusFilter = string.Empty;
+        _slaFilter = string.Empty;
+        _courierFilter = string.Empty;
+        _dateFrom = null;
+        _dateTo = null;
+    }
+
+    private void ToggleRowSelection(int orderId, ChangeEventArgs e)
+    {
+        var on = e.Value is bool b && b;
+        if (on) _selectedIds.Add(orderId);
+        else _selectedIds.Remove(orderId);
+    }
+
+    private void ToggleSelectAllVisible(ChangeEventArgs e)
+    {
+        var on = e.Value is bool b && b;
+        var ids = FilteredOrders.Select(o => o.ID_Order).ToList();
+        if (on)
+        {
+            foreach (var id in ids) _selectedIds.Add(id);
+        }
+        else
+        {
+            foreach (var id in ids) _selectedIds.Remove(id);
+        }
+    }
+
+    private void ClearSelection()
+    {
+        _selectedIds.Clear();
+    }
+
+    private async Task ApplyBulkAssignAsync()
+    {
+        if (_bulkCourierProfileId <= 0 || _selectedIds.Count == 0) return;
+        _isBulkBusy = true;
+        try
+        {
+            var ids = _selectedIds.ToList();
+            var ok = 0;
+            var fail = 0;
+            foreach (var id in ids)
+            {
+                var success = await OrdersApi.AssignCourierAsync(id, _bulkCourierProfileId);
+                if (success) ok++;
+                else fail++;
+            }
+
+            if (ok > 0)
+                Notify.ShowSuccess($"Курьер назначен: {ok}{(fail > 0 ? $", ошибок: {fail}" : string.Empty)}.");
+            else
+                Notify.ShowError($"Не удалось назначить курьера ({fail}).");
+
+            _bulkCourierProfileId = 0;
+            await ReloadAsync();
+        }
+        finally
+        {
+            _isBulkBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private int CountByPredicate(Func<OrderDto, bool> predicate)
+        => _orders.Count(predicate);
 
     private static bool IsSlaRisk(OrderDto o)
     {
         if (!o.Sla_due_at.HasValue || !o.Eta_at.HasValue)
             return false;
         return o.Eta_at.Value > o.Sla_due_at.Value && !o.Sla_breached_at.HasValue;
+    }
+
+    private static bool IsNewStatus(string? statusName)
+    {
+        var s = (statusName ?? string.Empty).ToLowerInvariant();
+        return s.Contains("нов");
     }
 
     private static string GetOrderStatusTone(string? status)
@@ -91,5 +522,45 @@
         if (s.Contains("в пути") || s.Contains("назнач")) return "primary";
         if (s.Contains("нов")) return "warning";
         return "neutral";
+    }
+
+    private static string FormatClientName(OrderDto o)
+    {
+        var u = o.ClientProfile?.User;
+        if (u == null) return "—";
+        var fio = $"{u.FName} {u.Name}".Trim();
+        return string.IsNullOrWhiteSpace(fio) ? "—" : fio;
+    }
+
+    private static string FormatCourierName(OrderDto o)
+    {
+        var u = o.CourierProfile?.User;
+        if (u == null) return "—";
+        var fio = $"{u.FName} {u.Name}".Trim();
+        return string.IsNullOrWhiteSpace(fio) ? "—" : fio;
+    }
+
+    private static string FormatCourierName(CourierProfileDto c)
+    {
+        var u = c.User;
+        if (u == null) return $"#{c.ID_CourierProfile}";
+        var fio = $"{u.FName} {u.Name}".Trim();
+        return string.IsNullOrWhiteSpace(fio) ? $"#{c.ID_CourierProfile}" : fio;
+    }
+
+    private static string FormatMoney(decimal value)
+    {
+        var roundedUp = Math.Ceiling(value);
+        return $"{roundedUp:N0} ₽";
+    }
+
+    private sealed class TimelineVm
+    {
+        public int OrderId { get; init; }
+        public int OrderNumber { get; init; }
+        public string Title { get; init; } = string.Empty;
+        public DateTime At { get; init; }
+        public string Icon { get; init; } = "activity-01";
+        public string Tone { get; init; } = "info";
     }
 }

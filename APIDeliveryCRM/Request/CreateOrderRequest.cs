@@ -56,6 +56,8 @@ namespace APIDeliveryCRM.Request
 
         public int? OriginHub_id { get; set; }
         public int? DestinationHub_id { get; set; }
+
+        public bool AutoSelectRouteKind { get; set; } = true;
     }
 }
 

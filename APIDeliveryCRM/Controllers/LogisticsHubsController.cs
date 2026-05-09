@@ -87,6 +87,40 @@ public class LogisticsHubsController : Controller
         return Ok(new { id = hub.ID_LogisticsHub });
     }
 
+    [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+    [HttpPut("{id:int}")]
+    public async Task<IActionResult> Update(int id, [FromBody] CreateLogisticsHubRequest request)
+    {
+        var companyId = GetCompanyId();
+        if (!companyId.HasValue)
+            return Unauthorized(new { message = "Не указана компания в токене." });
+
+        var updated = await _hubService.UpdateAsync(companyId.Value, id, request);
+        if (updated == null)
+            return NotFound();
+
+        return Ok(new { id = updated.ID_LogisticsHub });
+    }
+
+    [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id)
+    {
+        var companyId = GetCompanyId();
+        if (!companyId.HasValue)
+            return Unauthorized(new { message = "Не указана компания в токене." });
+
+        var (ok, error) = await _hubService.DeleteAsync(companyId.Value, id);
+        if (!ok)
+        {
+            if (!string.IsNullOrWhiteSpace(error))
+                return BadRequest(new { message = error });
+            return NotFound();
+        }
+
+        return Ok(new { deleted = true });
+    }
+
     private int? GetCompanyId()
     {
         var v = User.FindFirst("companyId")?.Value;

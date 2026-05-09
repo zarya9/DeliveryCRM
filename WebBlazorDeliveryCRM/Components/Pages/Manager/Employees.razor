@@ -94,7 +94,7 @@
                             }
                         </td>
                         <td>
-                            <span class="employees-role-cell text-body">
+                            <span class="employees-role-cell">
                                 <HugeIcon Name="@GetRoleIconName(e.Role)" CssClass="employees-role-icon" />
                                 <span>@e.Role</span>
                             </span>
@@ -124,22 +124,31 @@
             <div class="row g-3">
                 <div class="col-md-4">
                     <label class="form-label">Фамилия</label>
-                    <input class="form-control" @bind="_fName" />
+                    <input class="form-control"
+                           maxlength="60"
+                           @bind="FNameInput"
+                           @bind:event="oninput" />
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">Имя</label>
-                    <input class="form-control" @bind="_name" />
+                    <input class="form-control"
+                           maxlength="60"
+                           @bind="NameInput"
+                           @bind:event="oninput" />
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">Отчество</label>
-                    <input class="form-control" @bind="_patronymic" />
+                    <input class="form-control"
+                           maxlength="60"
+                           @bind="PatronymicInput"
+                           @bind:event="oninput" />
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">Дата рождения</label>
-                    <input type="date" class="form-control" @bind="_birthDate" />
+                    <input type="date" class="form-control" @bind="_birthDate" max="@AdultBirthDateMax.ToString("yyyy-MM-dd")" />
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label">Email (логин)</label>
+                    <label class="form-label">Почта (логин)</label>
                     <input type="email" class="form-control" @bind="_email" />
                 </div>
                 <div class="col-md-4">
@@ -161,6 +170,10 @@
             @if (!string.IsNullOrEmpty(_error))
             {
                 <div class="alert alert-danger mt-3">@_error</div>
+            }
+            @if (!string.IsNullOrEmpty(_warning))
+            {
+                <div class="alert alert-warning mt-3">@_warning</div>
             }
             @if (!string.IsNullOrEmpty(_success))
             {
@@ -275,6 +288,7 @@
     private int _selectedRoleId;
     private bool _saving;
     private string? _error;
+    private string? _warning;
     private string? _success;
     private string _searchText = string.Empty;
     private string _roleFilter = string.Empty;
@@ -351,6 +365,7 @@
     private async Task SaveEmployee()
     {
         _error = null;
+        _warning = null;
         _success = null;
 
         if (string.IsNullOrWhiteSpace(_fName))
@@ -361,6 +376,17 @@
         if (string.IsNullOrWhiteSpace(_name))
         {
             _error = "Введите имя.";
+            return;
+        }
+        if (!_birthDate.HasValue)
+        {
+            _error = "Укажите дату рождения.";
+            return;
+        }
+        if (_birthDate.Value.Date > AdultBirthDateMax)
+        {
+            _warning = "Недостаточный возраст сотрудника.";
+            Notify.ShowWarning(_warning);
             return;
         }
         if (string.IsNullOrWhiteSpace(_email) || string.IsNullOrWhiteSpace(_password))
@@ -445,6 +471,36 @@
     private IEnumerable<RolesApiService.RoleDto> RolesForEmployees =>
         _roles.Where(r => !IsClientRole(r.Name));
 
+    private static string SanitizePersonName(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+            return string.Empty;
+
+        var filtered = new string(input.Where(ch => char.IsLetter(ch) || char.IsWhiteSpace(ch)).ToArray());
+        var compact = string.Join(' ', filtered.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        return compact;
+    }
+
+    private string FNameInput
+    {
+        get => _fName;
+        set => _fName = SanitizePersonName(value);
+    }
+
+    private string NameInput
+    {
+        get => _name;
+        set => _name = SanitizePersonName(value);
+    }
+
+    private string PatronymicInput
+    {
+        get => _patronymic ?? string.Empty;
+        set => _patronymic = SanitizePersonName(value);
+    }
+
+    private static DateTime AdultBirthDateMax => DateTime.Today.AddYears(-18);
+
     private static bool IsClientRole(string? name) =>
         string.Equals(name?.Trim(), "Клиент", StringComparison.OrdinalIgnoreCase);
 
@@ -460,6 +516,7 @@
     private void OpenCreateEmployeeModal()
     {
         _error = null;
+        _warning = null;
         _success = null;
         _showCreateModal = true;
     }
@@ -678,6 +735,20 @@
         display: inline-flex;
         align-items: center;
         gap: 0.35em;
+        color: var(--dms-text);
+        font-weight: 500;
+    }
+
+    .employees-role-icon {
+        color: var(--dms-text-muted);
+    }
+
+    [data-theme="dark"] .employees-role-cell {
+        color: #e5e7eb;
+    }
+
+    [data-theme="dark"] .employees-role-icon {
+        color: #cbd5e1;
     }
 
     .employee-modal--employee-detail .employee-detail-body {

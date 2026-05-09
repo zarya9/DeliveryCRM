@@ -4,12 +4,13 @@
 @using System.Linq
 @using System.Security.Claims
 @using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.JSInterop
 @using WebBlazorDeliveryCRM.Services
 @inject AuthenticationStateProvider AuthState
 @inject CouriersApiService CouriersApi
 @inject AppNotificationService Notify
 @inject IJSRuntime JS
-@implements IDisposable
+@implements IAsyncDisposable
 
 <PageTitle>Смена и геолокация — Курьер</PageTitle>
 
@@ -17,6 +18,7 @@
     <h1>Смена и координаты</h1>
     <p class="subtitle">
         Сначала начните смену. В сеть и передача координат доступны только при активной смене. Разрешите доступ к геолокации в браузере.
+        Позиция обновляется непрерывно (GPS watch) и отправляется на сервер каждые несколько секунд при движении.
     </p>
 </div>
 
@@ -56,7 +58,7 @@ else
                 @if (_online)
                 {
                     <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="GoOfflineAsync">Выйти из сети</button>
-                    <span class="text-success small">Координаты отправляются автоматически.</span>
+                    <span class="text-success small">Координаты отправляются в реальном времени при движении.</span>
                 }
                 else
                 {
@@ -67,6 +69,10 @@ else
             {
                 <div class="alert alert-warning py-2 small mb-0">@_lastGeoError</div>
             }
+            <p class="small text-muted mb-0 mt-2">
+                Нет GPS или нужен тест?
+                <a href="/courier/manual-location">Задать точку на карте вручную</a> (джойстик и перетаскивание).
+            </p>
         }
     </div>
 
@@ -91,7 +97,7 @@ else
     private bool _busy;
     private bool _loading = true;
     private string? _lastGeoError;
-    private CancellationTokenSource? _geoPollCts;
+    private DotNetObjectReference<CourierShift>? _geoDotNetRef;
     private string? _mapRouteUrl;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -217,7 +223,7 @@ else
                 _lastGeoError = "Координаты пока недоступны. Курьер уже в сети, повторим автоматически.";
             }
 
-            StartGeoPolling();
+            await StartGeoWatchAsync();
             Notify.ShowSuccess("Вы в сети. Передаём координаты.");
         }
         catch (Exception ex)
@@ -249,54 +255,47 @@ else
         }
     }
 
-    private void StartGeoPolling()
+    private async Task StartGeoWatchAsync()
     {
-        StopGeoPolling();
-        _geoPollCts = new CancellationTokenSource();
-        var pid = _profileId!.Value;
-        var ct = _geoPollCts.Token;
-        _ = PollGeoAsync(pid, ct);
+        await StopGeoWatchInternalAsync();
+        _geoDotNetRef = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("courierGeo.startWatch", _geoDotNetRef);
     }
 
-    private async Task PollGeoAsync(int profileId, CancellationToken ct)
+    /// <summary>Вызывается из courierGeo.watchPosition (throttle в JS).</summary>
+    [JSInvokable]
+    public async Task OnGeoPosition(double lat, double lon)
     {
+        if (!_profileId.HasValue || !_online)
+            return;
         try
         {
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    var pos = await TryGetPositionSafeAsync();
-                    if (pos.HasValue)
-                    {
-                        var lat = pos.Value.lat;
-                        var lon = pos.Value.lon;
-                        var (ok, err) = await CouriersApi.UpdateLocationAsync(profileId, lat, lon);
-                        if (!ok)
-                            _lastGeoError = err ?? "Ошибка отправки координат.";
-                        else
-                            _lastGeoError = null;
-                    }
-                }
-                catch
-                {
-                    _lastGeoError = "Не удалось обновить координаты. Повторим автоматически.";
-                }
-
-                await InvokeAsync(StateHasChanged);
-                try
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(22), ct);
-                }
-                catch (TaskCanceledException)
-                {
-                    break;
-                }
-            }
+            var (ok, err) = await CouriersApi.UpdateLocationAsync(_profileId.Value, (decimal)lat, (decimal)lon);
+            if (!ok)
+                _lastGeoError = err ?? "Ошибка отправки координат.";
+            else
+                _lastGeoError = null;
         }
-        catch (TaskCanceledException)
+        catch
         {
+            _lastGeoError = "Не удалось отправить координаты.";
         }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task OnGeoWatchError(string message)
+    {
+        if (message.Contains("GEO_1", StringComparison.OrdinalIgnoreCase))
+            _lastGeoError = "Нет доступа к геолокации. Разрешите доступ для сайта в настройках браузера.";
+        else if (message.Contains("GEO_2", StringComparison.OrdinalIgnoreCase))
+            _lastGeoError = "Не удалось вычислить место (код 2 — не про запрет браузера). На ПК: Параметры Windows → конфиденциальность → «Местоположение»: включено и для браузера; Wi‑Fi/сеть. На телефоне — включите службы локации и GPS.";
+        else if (message.Contains("GEO_3", StringComparison.OrdinalIgnoreCase))
+            _lastGeoError = "Не удалось определить координаты (таймаут).";
+        else
+            _lastGeoError = $"Геолокация: {message}";
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task<(decimal lat, decimal lon)?> TryGetPositionSafeAsync()
@@ -321,7 +320,7 @@ else
 
             if (message.Contains("GEO_2", StringComparison.OrdinalIgnoreCase))
             {
-                _lastGeoError = "Геопозиция недоступна (код 2). Проверьте службы геолокации Windows, сеть/Wi‑Fi и повторите попытку.";
+                _lastGeoError = "Не удалось вычислить место (код 2). Включите «Местоположение» в Windows и для вашего браузера, проверьте Wi‑Fi; на ПК без GPS точность ниже, чем у телефона.";
                 return null;
             }
 
@@ -357,21 +356,28 @@ else
         return null;
     }
 
-    private void StopGeoPolling()
+    private async Task StopGeoWatchInternalAsync()
     {
-        _geoPollCts?.Cancel();
-        _geoPollCts?.Dispose();
-        _geoPollCts = null;
+        try
+        {
+            await JS.InvokeVoidAsync("courierGeo.stopWatch");
+        }
+        catch
+        {
+            /* ignore */
+        }
+
+        _geoDotNetRef?.Dispose();
+        _geoDotNetRef = null;
     }
 
     private async Task StopGeoAsync()
     {
-        StopGeoPolling();
-        await Task.CompletedTask;
+        await StopGeoWatchInternalAsync();
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        StopGeoPolling();
+        await StopGeoWatchInternalAsync();
     }
 }

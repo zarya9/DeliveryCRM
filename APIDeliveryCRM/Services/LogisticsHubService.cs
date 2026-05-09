@@ -125,6 +125,69 @@ public class LogisticsHubService : ILogisticsHubService
             .FirstAsync(h => h.ID_LogisticsHub == hub.ID_LogisticsHub);
     }
 
+    public async Task<LogisticsHub?> UpdateAsync(int companyId, int hubId, CreateLogisticsHubRequest request)
+    {
+        var hub = await _context.LogisticsHubs
+            .Include(h => h.Address)
+            .FirstOrDefaultAsync(h => h.ID_LogisticsHub == hubId && h.Company_id == companyId);
+        if (hub == null)
+            return null;
+
+        hub.Name = request.Name.Trim();
+        var address = hub.Address;
+        address.Street = request.Street.Trim();
+        address.House = request.House.Trim();
+        address.Flat = request.Flat;
+        address.City = request.City;
+        address.Region = request.Region;
+        address.PostalCode = request.PostalCode;
+        address.Comment = request.Comment;
+
+        decimal? latitude = request.Latitude;
+        decimal? longitude = request.Longitude;
+        if (!latitude.HasValue || !longitude.HasValue)
+        {
+            var geo = await GeocodeAddressAsync(request.City, request.Street, request.House, request.Region, request.PostalCode);
+            if (geo.HasValue)
+            {
+                latitude = (decimal)geo.Value.lat;
+                longitude = (decimal)geo.Value.lon;
+            }
+        }
+        if (latitude.HasValue && longitude.HasValue)
+        {
+            address.Latitude = latitude;
+            address.Longitude = longitude;
+        }
+
+        await _context.SaveChangesAsync();
+        return hub;
+    }
+
+    public async Task<(bool ok, string? error)> DeleteAsync(int companyId, int hubId)
+    {
+        var hub = await _context.LogisticsHubs
+            .FirstOrDefaultAsync(h => h.ID_LogisticsHub == hubId && h.Company_id == companyId);
+        if (hub == null)
+            return (false, null);
+
+        var hasLinkedOrders = await _context.Orders
+            .AsNoTracking()
+            .AnyAsync(o => o.OriginHub_id == hubId || o.DestinationHub_id == hubId);
+        if (hasLinkedOrders)
+            return (false, "Нельзя удалить склад: есть заказы, связанные с этим складом.");
+
+        var hasRouteStops = await _context.OrderRouteStops
+            .AsNoTracking()
+            .AnyAsync(s => s.LogisticsHub_id == hubId);
+        if (hasRouteStops)
+            return (false, "Нельзя удалить склад: он используется в маршрутах.");
+
+        _context.LogisticsHubs.Remove(hub);
+        await _context.SaveChangesAsync();
+        return (true, null);
+    }
+
     private static string NormalizeAddressPart(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))

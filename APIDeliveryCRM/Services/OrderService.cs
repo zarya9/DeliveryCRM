@@ -135,11 +135,6 @@ namespace APIDeliveryCRM.Services
             if (monthlyOrders >= company.MaxOrdersPerMonth)
                 throw new InvalidOperationException("Достигнут лимит заказов по тарифу за текущий месяц.");
 
-            if (!Enum.IsDefined(typeof(DeliveryRouteKind), request.DeliveryRouteKind))
-                throw new InvalidOperationException("Некорректный тип маршрута доставки.");
-
-            var routeKind = (DeliveryRouteKind)request.DeliveryRouteKind;
-
             var pickup = await _context.Addresses.FirstOrDefaultAsync(a =>
                 a.ID_Address == request.PickupAddress_id && a.Company_id == client.Company_id);
             var delivery = await _context.Addresses.FirstOrDefaultAsync(a =>
@@ -147,24 +142,10 @@ namespace APIDeliveryCRM.Services
             if (pickup == null || delivery == null)
                 throw new InvalidOperationException("Адреса забора или доставки не найдены или не принадлежат компании клиента.");
 
-            LogisticsHub? originHub = null;
-            LogisticsHub? destHub = null;
-            if (routeKind == DeliveryRouteKind.ViaHub)
-            {
-                if (!request.OriginHub_id.HasValue || !request.DestinationHub_id.HasValue)
-                    throw new InvalidOperationException("Для доставки через хабы укажите склад отправления и склад назначения.");
-
-                originHub = await _context.LogisticsHubs
-                    .Include(h => h.Address)
-                    .FirstOrDefaultAsync(h =>
-                        h.ID_LogisticsHub == request.OriginHub_id && h.Company_id == client.Company_id);
-                destHub = await _context.LogisticsHubs
-                    .Include(h => h.Address)
-                    .FirstOrDefaultAsync(h =>
-                        h.ID_LogisticsHub == request.DestinationHub_id && h.Company_id == client.Company_id);
-                if (originHub == null || destHub == null)
-                    throw new InvalidOperationException("Один из складов не найден или принадлежит другой компании.");
-            }
+            var routeChoice = await ResolveRouteChoiceAsync(request, client.Company_id, pickup, delivery);
+            var routeKind = routeChoice.RouteKind;
+            var originHub = routeChoice.OriginHub;
+            var destHub = routeChoice.DestinationHub;
             var stops = OrderRoutePlanner.BuildStops(routeKind, pickup, delivery, originHub, destHub);
             var distanceKm = EstimateRouteDistanceKm(routeKind, pickup, delivery, originHub, destHub);
             var fuelCostRub = await EstimateFuelCostRubAsync(
@@ -233,7 +214,7 @@ namespace APIDeliveryCRM.Services
                 Order_id = order.ID_Order,
                 EventType = "ORDER_CREATED",
                 Title = "Заказ создан",
-                Message = $"Создан новый заказ. Ориентировочная доставка: {FormatDeliveryWindowRu(windowFromUtc, windowToUtc)}. Предварительная стоимость: {estimatedCost:0.##} ₽."
+                Message = $"Создан новый заказ. Маршрут: {BuildRouteLabel(routeKind, originHub, destHub)}. Ориентировочная доставка: {FormatDeliveryWindowRu(windowFromUtc, windowToUtc)}. Предварительная стоимость: {estimatedCost:0.##} ₽."
             });
             await _context.SaveChangesAsync();
             await PublishOrderEventAsync("order.created", order, new
@@ -412,9 +393,14 @@ namespace APIDeliveryCRM.Services
         {
             var order = await _context.Orders
                 .Include(o => o.PickupAddress)
+                .Include(o => o.DeliveryAddress)
                 .FirstOrDefaultAsync(o => o.ID_Order == orderId);
             if (order == null)
                 return null;
+
+            var requiredWeightKg = Math.Max(order.Weight, ComputeVolumetricWeightKg(order.Length, order.Width, order.Height));
+            var requiredVolumeM3 = ComputeVolumeM3(order.Length, order.Width, order.Height);
+            var isIntercity = !string.Equals(order.PickupAddress?.City?.Trim(), order.DeliveryAddress?.City?.Trim(), StringComparison.OrdinalIgnoreCase);
 
             var candidates = await _context.CourierProfiles
                 .AsNoTracking()
@@ -428,11 +414,30 @@ namespace APIDeliveryCRM.Services
                 })
                 .ToListAsync();
 
-            var filteredCandidates = new List<(int CourierId, decimal Lat, decimal Lon, int ActiveOrders)>();
+            var candidateCourierIds = candidates.Select(c => c.ID_CourierProfile).Distinct().ToArray();
+            var vehicles = await _context.Vehicles
+                .AsNoTracking()
+                .Where(v => v.Company_id == order.Company_id && v.CurrentCourier_id.HasValue && candidateCourierIds.Contains(v.CurrentCourier_id.Value))
+                .ToListAsync();
+            var vehicleByCourier = vehicles
+                .GroupBy(v => v.CurrentCourier_id!.Value)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.ID_Vehicle).First());
+
+            var filteredCandidates = new List<(int CourierId, decimal Lat, decimal Lon, int ActiveOrders, bool HasOperationalVehicle)>();
             foreach (var c in candidates)
             {
-                if (await IsCourierAllowedByZonesAsync(order, c.ID_CourierProfile))
-                    filteredCandidates.Add((c.ID_CourierProfile, c.Current_lat, c.Current_lon, c.ActiveOrders));
+                if (!await IsCourierAllowedByZonesAsync(order, c.ID_CourierProfile))
+                    continue;
+
+                vehicleByCourier.TryGetValue(c.ID_CourierProfile, out var vehicle);
+                var canHandleByVehicle = IsVehicleOperationalForDispatch(vehicle)
+                    ? requiredWeightKg <= Math.Max(1m, vehicle!.Max_cargo_weight) && requiredVolumeM3 <= Math.Max(0.05m, vehicle.Cargo_volume)
+                    : !isIntercity && requiredWeightKg <= 20m && requiredVolumeM3 <= 0.2m;
+
+                if (!canHandleByVehicle)
+                    continue;
+
+                filteredCandidates.Add((c.ID_CourierProfile, c.Current_lat, c.Current_lon, c.ActiveOrders, IsVehicleOperationalForDispatch(vehicle)));
             }
 
             if (filteredCandidates.Count == 0)
@@ -451,14 +456,16 @@ namespace APIDeliveryCRM.Services
                     var distanceScore = (double)(distance ?? 30m);
                     var loadScore = c.ActiveOrders * 4.0;
                     var urgentBoost = order.Priority == 2 ? -3.0 : order.Priority == 1 ? -1.5 : 0.0;
-                    var total = distanceScore + loadScore + urgentBoost;
+                    var vehicleBoost = c.HasOperationalVehicle ? -2.0 : 2.0;
+                    var total = distanceScore + loadScore + urgentBoost + vehicleBoost;
 
                     return new
                     {
                         ID_CourierProfile = c.CourierId,
                         c.ActiveOrders,
                         DistanceKm = distance,
-                        Score = total
+                        Score = total,
+                        c.HasOperationalVehicle
                     };
                 })
                 .OrderBy(x => x.Score)
@@ -475,7 +482,7 @@ namespace APIDeliveryCRM.Services
                 Order_id = order.ID_Order,
                 EventType = "AUTO_DISPATCH",
                 Title = "Авто-диспетчеризация",
-                Message = $"Автоназначение курьера {winner.ID_CourierProfile} (дистанция: {winner.DistanceKm?.ToString("0.0") ?? "n/a"} км, активных заказов: {winner.ActiveOrders}).",
+                Message = $"Автоназначение курьера {winner.ID_CourierProfile} (дистанция: {winner.DistanceKm?.ToString("0.0") ?? "n/a"} км, активных заказов: {winner.ActiveOrders}, ТС: {(winner.HasOperationalVehicle ? "доступно" : "без ТС")}).",
                 OldCourier_id = oldCourierId,
                 NewCourier_id = winner.ID_CourierProfile
             });
@@ -499,6 +506,7 @@ namespace APIDeliveryCRM.Services
                 newCourierId = winner.ID_CourierProfile,
                 winner.DistanceKm,
                 winner.ActiveOrders,
+                winner.HasOperationalVehicle,
                 isSlaRisk
             });
             await TryRebuildPlannerAsync(order.Company_id, "order.auto_dispatch");
@@ -511,7 +519,7 @@ namespace APIDeliveryCRM.Services
                 ActiveOrders = winner.ActiveOrders,
                 IsSlaRisk = isSlaRisk,
                 EtaAt = order.Eta_at,
-                DecisionReason = "Минимальный совокупный score: дистанция + текущая загрузка + приоритет SLA."
+                DecisionReason = "Минимальный совокупный score: дистанция + текущая загрузка + приоритет SLA + доступность ТС."
             };
         }
 
@@ -699,6 +707,256 @@ namespace APIDeliveryCRM.Services
             };
         }
 
+        private async Task<RouteChoice> ResolveRouteChoiceAsync(CreateOrderRequest request, int companyId, Address pickup, Address delivery)
+        {
+            if (!request.AutoSelectRouteKind)
+            {
+                if (!Enum.IsDefined(typeof(DeliveryRouteKind), request.DeliveryRouteKind))
+                    throw new InvalidOperationException("Некорректный тип маршрута доставки.");
+
+                var manualKind = (DeliveryRouteKind)request.DeliveryRouteKind;
+                var (originHub, destinationHub) = await ResolveManualHubsAsync(request, companyId, manualKind);
+                return new RouteChoice(manualKind, originHub, destinationHub);
+            }
+
+            var requiredWeightKg = Math.Max(request.Weight, ComputeVolumetricWeightKg(request.Length, request.Width, request.Height));
+            var requiredVolumeM3 = ComputeVolumeM3(request.Length, request.Width, request.Height);
+            var intercity = !string.Equals(pickup.City?.Trim(), delivery.City?.Trim(), StringComparison.OrdinalIgnoreCase);
+
+            var hubs = await _context.LogisticsHubs
+                .Include(h => h.Address)
+                .Where(h => h.Company_id == companyId)
+                .ToListAsync();
+            var (originHubAuto, destinationHubAuto) = ResolveBestHubsForRoute(hubs, pickup, delivery);
+            var resources = await BuildRouteResourceSnapshotAsync(companyId);
+            var demand = await BuildRouteDemandSnapshotAsync(companyId, pickup, delivery);
+
+            var candidates = new List<RouteChoiceScore>();
+
+            // Local city leg: cheap and fast for intra-city shipments.
+            candidates.Add(new RouteChoiceScore(
+                new RouteChoice(DeliveryRouteKind.LocalUrban, null, null),
+                ScoreRouteCandidate(DeliveryRouteKind.LocalUrban, pickup, delivery, null, null, requiredWeightKg, requiredVolumeM3, intercity, resources, demand)));
+
+            // Direct intercity: single-leg long haul without hub transfer.
+            candidates.Add(new RouteChoiceScore(
+                new RouteChoice(DeliveryRouteKind.DirectIntercity, null, null),
+                ScoreRouteCandidate(DeliveryRouteKind.DirectIntercity, pickup, delivery, null, null, requiredWeightKg, requiredVolumeM3, intercity, resources, demand)));
+
+            if (originHubAuto != null && destinationHubAuto != null)
+            {
+                candidates.Add(new RouteChoiceScore(
+                    new RouteChoice(DeliveryRouteKind.ViaHub, originHubAuto, destinationHubAuto),
+                    ScoreRouteCandidate(DeliveryRouteKind.ViaHub, pickup, delivery, originHubAuto, destinationHubAuto, requiredWeightKg, requiredVolumeM3, intercity, resources, demand)));
+            }
+
+            var winner = candidates
+                .OrderBy(c => c.Score)
+                .First()
+                .Choice;
+
+            return winner;
+        }
+
+        private async Task<(LogisticsHub? originHub, LogisticsHub? destinationHub)> ResolveManualHubsAsync(CreateOrderRequest request, int companyId, DeliveryRouteKind kind)
+        {
+            if (kind != DeliveryRouteKind.ViaHub)
+                return (null, null);
+
+            if (!request.OriginHub_id.HasValue || !request.DestinationHub_id.HasValue)
+                throw new InvalidOperationException("Для доставки через хабы укажите склад отправления и склад назначения.");
+
+            var originHub = await _context.LogisticsHubs
+                .Include(h => h.Address)
+                .FirstOrDefaultAsync(h => h.ID_LogisticsHub == request.OriginHub_id && h.Company_id == companyId);
+            var destinationHub = await _context.LogisticsHubs
+                .Include(h => h.Address)
+                .FirstOrDefaultAsync(h => h.ID_LogisticsHub == request.DestinationHub_id && h.Company_id == companyId);
+            if (originHub == null || destinationHub == null)
+                throw new InvalidOperationException("Один из складов не найден или принадлежит другой компании.");
+
+            return (originHub, destinationHub);
+        }
+
+        private static (LogisticsHub? originHub, LogisticsHub? destinationHub) ResolveBestHubsForRoute(List<LogisticsHub> hubs, Address pickup, Address delivery)
+        {
+            if (hubs.Count == 0)
+                return (null, null);
+
+            LogisticsHub? origin = null;
+            LogisticsHub? destination = null;
+            var pickupPoint = TryGetPoint(pickup);
+            var deliveryPoint = TryGetPoint(delivery);
+
+            if (pickupPoint.HasValue)
+                origin = hubs.OrderBy(h => DistPointToAddressKm(pickupPoint.Value, h.Address)).FirstOrDefault();
+            else
+                origin = hubs.FirstOrDefault();
+
+            if (deliveryPoint.HasValue)
+            {
+                destination = hubs
+                    .OrderBy(h => DistPointToAddressKm(deliveryPoint.Value, h.Address))
+                    .ThenBy(h => h.ID_LogisticsHub == origin?.ID_LogisticsHub ? 1 : 0)
+                    .FirstOrDefault();
+            }
+            else
+            {
+                destination = hubs.FirstOrDefault(h => h.ID_LogisticsHub != origin?.ID_LogisticsHub) ?? origin;
+            }
+
+            return (origin, destination ?? origin);
+        }
+
+        private static decimal ScoreRouteCandidate(
+            DeliveryRouteKind kind,
+            Address pickup,
+            Address delivery,
+            LogisticsHub? originHub,
+            LogisticsHub? destinationHub,
+            decimal requiredWeightKg,
+            decimal requiredVolumeM3,
+            bool intercity,
+            RouteResourceSnapshot resources,
+            RouteDemandSnapshot demand)
+        {
+            var distance = EstimateRouteDistanceKm(kind, pickup, delivery, originHub, destinationHub);
+            decimal score = distance;
+
+            var requiresVehicle = kind is DeliveryRouteKind.DirectIntercity or DeliveryRouteKind.ViaHub
+                                  || requiredWeightKg >= 80m
+                                  || requiredVolumeM3 >= 1.5m;
+
+            if (resources.OnlineCourierCount == 0)
+                score += 6000m;
+
+            if (requiresVehicle)
+            {
+                if (resources.OperationalVehicleCount == 0)
+                    score += 4500m;
+                else if (!resources.HasFittingOperationalVehicle(requiredWeightKg, requiredVolumeM3))
+                    score += 2600m;
+                else
+                    score += 90m / Math.Max(1, resources.OperationalVehicleCount);
+            }
+            else
+            {
+                score += 40m / Math.Max(1, resources.OnlineCourierCount);
+            }
+
+            if (intercity)
+            {
+                if (kind == DeliveryRouteKind.LocalUrban)
+                    score += 1200m;
+                if (kind == DeliveryRouteKind.ViaHub)
+                    score -= 35m;
+            }
+            else if (kind == DeliveryRouteKind.DirectIntercity)
+            {
+                score += 80m;
+            }
+
+            // Consolidation logic: when many active orders converge to same city,
+            // prefer hub-flow so first-mile and long-haul legs can be split among different couriers.
+            if (intercity)
+            {
+                if (kind == DeliveryRouteKind.ViaHub)
+                {
+                    score -= demand.DestinationCityBacklogCount * 18m;
+                    score -= demand.DestinationCityIntercityBacklogCount * 26m;
+                    score -= demand.OriginCityPickupBacklogCount * 8m;
+                }
+                else if (kind == DeliveryRouteKind.DirectIntercity)
+                {
+                    score += demand.DestinationCityBacklogCount * 7m;
+                    score += demand.DestinationCityIntercityBacklogCount * 12m;
+                }
+            }
+
+            if (kind == DeliveryRouteKind.ViaHub && (originHub == null || destinationHub == null))
+                score += 5000m;
+
+            return score;
+        }
+
+        private async Task<RouteResourceSnapshot> BuildRouteResourceSnapshotAsync(int companyId)
+        {
+            var onlineCouriers = await _context.CourierProfiles
+                .AsNoTracking()
+                .Where(c => c.Company_id == companyId && c.Is_online)
+                .Select(c => c.ID_CourierProfile)
+                .ToListAsync();
+
+            var vehicles = await _context.Vehicles
+                .AsNoTracking()
+                .Where(v => v.Company_id == companyId && v.CurrentCourier_id.HasValue && onlineCouriers.Contains(v.CurrentCourier_id.Value))
+                .ToListAsync();
+
+            var operational = vehicles.Where(IsVehicleOperationalForDispatch).ToList();
+
+            return new RouteResourceSnapshot(onlineCouriers.Count, operational);
+        }
+
+        private async Task<RouteDemandSnapshot> BuildRouteDemandSnapshotAsync(int companyId, Address pickup, Address delivery)
+        {
+            var targetDeliveryCity = NormalizeCity(delivery.City);
+            var targetPickupCity = NormalizeCity(pickup.City);
+            if (string.IsNullOrWhiteSpace(targetDeliveryCity))
+                return new RouteDemandSnapshot(0, 0, 0);
+
+            var activeOrders = await _context.Orders
+                .AsNoTracking()
+                .Include(o => o.PickupAddress)
+                .Include(o => o.DeliveryAddress)
+                .Where(o => o.Company_id == companyId && o.Delivered_at == null)
+                .ToListAsync();
+
+            var sameDestinationCity = activeOrders
+                .Where(o => string.Equals(NormalizeCity(o.DeliveryAddress?.City), targetDeliveryCity, StringComparison.Ordinal))
+                .ToList();
+
+            var intercityToDestination = sameDestinationCity
+                .Count(o => !string.Equals(NormalizeCity(o.PickupAddress?.City), targetDeliveryCity, StringComparison.Ordinal));
+
+            var sameOriginCity = string.IsNullOrWhiteSpace(targetPickupCity)
+                ? 0
+                : activeOrders.Count(o => string.Equals(NormalizeCity(o.PickupAddress?.City), targetPickupCity, StringComparison.Ordinal));
+
+            return new RouteDemandSnapshot(
+                DestinationCityBacklogCount: sameDestinationCity.Count,
+                DestinationCityIntercityBacklogCount: intercityToDestination,
+                OriginCityPickupBacklogCount: sameOriginCity);
+        }
+
+        private static string BuildRouteLabel(DeliveryRouteKind kind, LogisticsHub? originHub, LogisticsHub? destinationHub)
+        {
+            return kind switch
+            {
+                DeliveryRouteKind.LocalUrban => "Городской (LocalUrban)",
+                DeliveryRouteKind.DirectIntercity => "Прямой межгород (DirectIntercity)",
+                DeliveryRouteKind.ViaHub => $"Через хабы (ViaHub): {originHub?.Name ?? "—"} -> {destinationHub?.Name ?? "—"}",
+                _ => kind.ToString()
+            };
+        }
+
+        private static (double lat, double lon)? TryGetPoint(Address? address)
+        {
+            if (address?.Latitude is not { } lat || address.Longitude is not { } lon)
+                return null;
+            return ((double)lat, (double)lon);
+        }
+
+        private static decimal DistPointToAddressKm((double lat, double lon) point, Address? address)
+        {
+            var other = TryGetPoint(address);
+            if (!other.HasValue)
+                return 999m;
+            return (decimal)HaversineKm(point.lat, point.lon, other.Value.lat, other.Value.lon);
+        }
+
+        private static string NormalizeCity(string? city)
+            => string.IsNullOrWhiteSpace(city) ? string.Empty : city.Trim().ToLowerInvariant();
+
         private static string FormatDeliveryWindowRu(DateTime? fromUtc, DateTime? toUtc)
         {
             if (!fromUtc.HasValue && !toUtc.HasValue)
@@ -766,6 +1024,62 @@ namespace APIDeliveryCRM.Services
         }
 
         private static double DegreesToRadians(double deg) => deg * (Math.PI / 180.0);
+
+        private static decimal ComputeVolumetricWeightKg(decimal lengthCm, decimal widthCm, decimal heightCm)
+            => Math.Max(0m, (lengthCm * widthCm * heightCm) / 5000m);
+
+        private static decimal ComputeVolumeM3(decimal lengthCm, decimal widthCm, decimal heightCm)
+        {
+            var l = Math.Max(0m, lengthCm) / 100m;
+            var w = Math.Max(0m, widthCm) / 100m;
+            var h = Math.Max(0m, heightCm) / 100m;
+            return l * w * h;
+        }
+
+        private static bool IsVehicleOperationalForDispatch(Vehicle? vehicle)
+        {
+            if (vehicle == null || !vehicle.Is_available)
+                return false;
+
+            var now = DateTime.UtcNow;
+            if (vehicle.Maintenance_due_at.HasValue && vehicle.Maintenance_due_at.Value <= now)
+                return false;
+            if (vehicle.Insurance_expires_at.HasValue && vehicle.Insurance_expires_at.Value <= now)
+                return false;
+            if (vehicle.Registration_expires_at.HasValue && vehicle.Registration_expires_at.Value <= now)
+                return false;
+            return true;
+        }
+
+        private sealed record RouteChoice(DeliveryRouteKind RouteKind, LogisticsHub? OriginHub, LogisticsHub? DestinationHub);
+
+        private sealed record RouteChoiceScore(RouteChoice Choice, decimal Score);
+
+        private sealed class RouteResourceSnapshot
+        {
+            private readonly List<Vehicle> _operationalVehicles;
+
+            public RouteResourceSnapshot(int onlineCourierCount, List<Vehicle> operationalVehicles)
+            {
+                OnlineCourierCount = onlineCourierCount;
+                _operationalVehicles = operationalVehicles;
+            }
+
+            public int OnlineCourierCount { get; }
+            public int OperationalVehicleCount => _operationalVehicles.Count;
+
+            public bool HasFittingOperationalVehicle(decimal requiredWeightKg, decimal requiredVolumeM3)
+            {
+                return _operationalVehicles.Any(v =>
+                    Math.Max(1m, v.Max_cargo_weight) >= requiredWeightKg &&
+                    Math.Max(0.05m, v.Cargo_volume) >= requiredVolumeM3);
+            }
+        }
+
+        private sealed record RouteDemandSnapshot(
+            int DestinationCityBacklogCount,
+            int DestinationCityIntercityBacklogCount,
+            int OriginCityPickupBacklogCount);
 
         private static void ApplyMilestoneTimestamps(Order order, int statusId)
         {

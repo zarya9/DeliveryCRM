@@ -12,6 +12,9 @@ public class ShiftPlannerService : IShiftPlannerService
     private const decimal DefaultWeightKg = 450m;
     private const decimal AvgSpeedKmH = 28m;
     private const decimal StopServiceMinutes = 8m;
+    private const decimal NoVehiclePenalty = 6.0m;
+    private const decimal CriticalLoadPenaltyWeight = 8.0m;
+    private const decimal SlaLateMinutePenalty = 0.03m;
 
     private readonly ContextDB _context;
 
@@ -93,6 +96,9 @@ public class ShiftPlannerService : IShiftPlannerService
                 MaxVolumeM3 = v?.Cargo_volume > 0 ? v.Cargo_volume : DefaultVolumeM3,
                 CurrentLat = s.CourierProfile.Current_lat != 0 ? (double?)s.CourierProfile.Current_lat : null,
                 CurrentLon = s.CourierProfile.Current_lon != 0 ? (double?)s.CourierProfile.Current_lon : null,
+                IsCourierOnline = s.CourierProfile.Is_online,
+                HasOperationalVehicle = IsVehicleOperational(v),
+                VehicleHealthPenalty = ComputeVehicleHealthPenalty(v),
                 CursorAtUtc = now
             };
         }).ToList();
@@ -108,7 +114,7 @@ public class ShiftPlannerService : IShiftPlannerService
 
             var placed = TryPlanOrder(order, routeStates, now);
             if (!placed)
-                unplanned.Add(ToUnplanned(order, "Не хватает вместимости или координат для маршрута"));
+                unplanned.Add(ToUnplanned(order, "Нет доступного курьера/ТС или не хватает вместимости/координат"));
         }
 
         var plans = new List<ShiftPlan>();
@@ -242,6 +248,8 @@ public class ShiftPlannerService : IShiftPlannerService
     {
         var reqWeight = Math.Max(order.Weight, ComputeVolumetricWeight(order.Length, order.Width, order.Height));
         var reqVolume = ComputeVolumeM3(order.Length, order.Width, order.Height);
+        var isIntercity = !string.Equals(order.PickupAddress?.City?.Trim(), order.DeliveryAddress?.City?.Trim(), StringComparison.OrdinalIgnoreCase);
+        var requiresVehicle = isIntercity || reqWeight >= 80m || reqVolume >= 1.5m;
         return TryAddLegToBestCourier(states, new PlannedLeg
         {
             Order = order,
@@ -249,7 +257,8 @@ public class ShiftPlannerService : IShiftPlannerService
             StartAddress = order.PickupAddress,
             EndAddress = order.DeliveryAddress,
             LoadWeightKg = reqWeight,
-            LoadVolumeM3 = reqVolume
+            LoadVolumeM3 = reqVolume,
+            RequiresVehicle = requiresVehicle
         }, nowUtc);
     }
 
@@ -272,6 +281,7 @@ public class ShiftPlannerService : IShiftPlannerService
                 EndAddress = originAddr,
                 LoadWeightKg = reqWeight,
                 LoadVolumeM3 = reqVolume,
+                RequiresVehicle = reqWeight >= 80m || reqVolume >= 1.5m,
                 Notes = "Довоз до хаба отправления"
             }, nowUtc);
         }
@@ -290,6 +300,7 @@ public class ShiftPlannerService : IShiftPlannerService
                     EndAddress = destAddr,
                     LoadWeightKg = reqWeight,
                     LoadVolumeM3 = reqVolume,
+                    RequiresVehicle = true,
                     Notes = "Межхабовая перевозка"
                 }, nowUtc);
             }
@@ -302,6 +313,7 @@ public class ShiftPlannerService : IShiftPlannerService
                 EndAddress = order.DeliveryAddress,
                 LoadWeightKg = reqWeight,
                 LoadVolumeM3 = reqVolume,
+                RequiresVehicle = reqWeight >= 80m || reqVolume >= 1.5m,
                 Notes = "Последняя миля от хаба"
             }, nowUtc);
         }
@@ -316,6 +328,7 @@ public class ShiftPlannerService : IShiftPlannerService
                 EndAddress = order.DeliveryAddress,
                 LoadWeightKg = reqWeight,
                 LoadVolumeM3 = reqVolume,
+                RequiresVehicle = reqWeight >= 80m || reqVolume >= 1.5m,
                 Notes = "Последняя миля от хаба"
             }, nowUtc);
         }
@@ -330,14 +343,27 @@ public class ShiftPlannerService : IShiftPlannerService
         decimal best = decimal.MaxValue;
         foreach (var state in states)
         {
+            if (!state.IsCourierOnline)
+                continue;
+            if (leg.RequiresVehicle && !state.HasOperationalVehicle)
+                continue;
+
             var projection = state.Clone(nowUtc);
             if (!projection.TryAddLeg(leg, nowUtc))
                 continue;
 
-            var d = projection.TotalDistanceKm;
-            if (d < best)
+            var projectedDistanceDelta = Math.Max(0m, projection.TotalDistanceKm - state.TotalDistanceKm);
+            var loadWeightRatio = projection.MaxWeightKg > 0 ? projection.PeakWeightKg / projection.MaxWeightKg : 1m;
+            var loadVolumeRatio = projection.MaxVolumeM3 > 0 ? projection.PeakVolumeM3 / projection.MaxVolumeM3 : 1m;
+            var loadPenalty = Math.Max(loadWeightRatio, loadVolumeRatio) * CriticalLoadPenaltyWeight;
+            var slaPenalty = leg.Order.Sla_due_at.HasValue && projection.CursorAtUtc > leg.Order.Sla_due_at.Value
+                ? (decimal)(projection.CursorAtUtc - leg.Order.Sla_due_at.Value).TotalMinutes * SlaLateMinutePenalty
+                : 0m;
+            var noVehiclePenalty = projection.HasOperationalVehicle ? 0m : NoVehiclePenalty;
+            var score = projectedDistanceDelta + loadPenalty + slaPenalty + projection.VehicleHealthPenalty + noVehiclePenalty + projection.Legs.Count * 0.35m;
+            if (score < best)
             {
-                best = d;
+                best = score;
                 winner = state;
                 winnerProjection = projection;
             }
@@ -460,12 +486,60 @@ public class ShiftPlannerService : IShiftPlannerService
 
     private static double ToRad(double v) => v * (Math.PI / 180.0);
 
+    private static bool IsVehicleOperational(Vehicle? v)
+    {
+        if (v == null || !v.Is_available)
+            return false;
+
+        var now = DateTime.UtcNow;
+        if (v.Maintenance_due_at.HasValue && v.Maintenance_due_at.Value <= now)
+            return false;
+        if (v.Insurance_expires_at.HasValue && v.Insurance_expires_at.Value <= now)
+            return false;
+        if (v.Registration_expires_at.HasValue && v.Registration_expires_at.Value <= now)
+            return false;
+        return true;
+    }
+
+    private static decimal ComputeVehicleHealthPenalty(Vehicle? v)
+    {
+        if (v == null)
+            return 1.8m;
+
+        var now = DateTime.UtcNow;
+        decimal penalty = v.Is_available ? 0m : 4m;
+
+        if (v.Maintenance_due_at.HasValue)
+        {
+            penalty += v.Maintenance_due_at.Value <= now
+                ? 5m
+                : v.Maintenance_due_at.Value <= now.AddDays(7) ? 0.8m : 0m;
+        }
+        if (v.Insurance_expires_at.HasValue)
+        {
+            penalty += v.Insurance_expires_at.Value <= now
+                ? 5m
+                : v.Insurance_expires_at.Value <= now.AddDays(7) ? 0.8m : 0m;
+        }
+        if (v.Registration_expires_at.HasValue)
+        {
+            penalty += v.Registration_expires_at.Value <= now
+                ? 5m
+                : v.Registration_expires_at.Value <= now.AddDays(7) ? 0.8m : 0m;
+        }
+
+        return penalty;
+    }
+
     private sealed class CourierRouteState
     {
         public required CourierShift Shift { get; init; }
         public Vehicle? Vehicle { get; init; }
         public required decimal MaxWeightKg { get; init; }
         public required decimal MaxVolumeM3 { get; init; }
+        public required bool IsCourierOnline { get; init; }
+        public required bool HasOperationalVehicle { get; init; }
+        public required decimal VehicleHealthPenalty { get; init; }
         public decimal CurrentWeightKg { get; private set; }
         public decimal CurrentVolumeM3 { get; private set; }
         public decimal PeakWeightKg { get; private set; }
@@ -496,6 +570,9 @@ public class ShiftPlannerService : IShiftPlannerService
                 MaxVolumeM3 = MaxVolumeM3,
                 CurrentLat = CurrentLat,
                 CurrentLon = CurrentLon,
+                IsCourierOnline = IsCourierOnline,
+                HasOperationalVehicle = HasOperationalVehicle,
+                VehicleHealthPenalty = VehicleHealthPenalty,
                 CursorAtUtc = nowUtc
             };
             clone.Legs.AddRange(Legs);
@@ -646,6 +723,7 @@ public class ShiftPlannerService : IShiftPlannerService
         public required Address? EndAddress { get; init; }
         public decimal LoadWeightKg { get; init; }
         public decimal LoadVolumeM3 { get; init; }
+        public bool RequiresVehicle { get; init; }
         public string? Notes { get; init; }
     }
 

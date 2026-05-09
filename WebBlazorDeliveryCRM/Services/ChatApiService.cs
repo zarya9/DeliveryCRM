@@ -151,6 +151,15 @@ public class ChatApiService
         return new Uri(_http.BaseAddress, url).ToString();
     }
 
+    public string BuildAvatarUrl(int userId, long? version = null)
+    {
+        var suffix = version.HasValue ? $"?v={version.Value}" : string.Empty;
+        var path = $"/api/Files/avatar/{userId}{suffix}";
+        if (_http.BaseAddress is null)
+            return path;
+        return new Uri(_http.BaseAddress, path).ToString();
+    }
+
     public async Task<bool> EditMessageAsync(int messageId, string text)
     {
         var res = await _http.PutAsJsonAsync($"/api/Chat/messages/{messageId}", text);

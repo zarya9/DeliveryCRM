@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
@@ -174,6 +174,7 @@ namespace APIDeliveryCRM.Controllers
                 PickupAddress_id = pickupAddress.ID_Address,
                 DeliveryAddress_id = deliveryAddress.ID_Address,
                 DeliveryRouteKind = 1,
+                AutoSelectRouteKind = true,
                 Priority = request.Priority,
                 RequestedDeliveryAtUtc = request.RequestedDeliveryAtUtc
             };

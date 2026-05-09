@@ -65,6 +65,37 @@ public class LeadsApiService
         return (false, error);
     }
 
+    public async Task<(bool ok, string? error)> UpdateAsync(
+        int leadId,
+        CreateLeadRequestDto request,
+        int companyId,
+        int managerUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var url = $"/api/Leads/{leadId}?companyId={companyId}&managerUserId={managerUserId}";
+        var resp = await _http.PutAsJsonAsync(url, request, cancellationToken);
+        if (resp.IsSuccessStatusCode)
+            return (true, null);
+
+        var errorBody = await resp.Content.ReadAsStringAsync(cancellationToken);
+        var error = $"HTTP {(int)resp.StatusCode}: {errorBody}";
+        Console.WriteLine($"[LeadsApiService] UpdateAsync failed. {error}");
+        return (false, error);
+    }
+
+    public async Task<(bool ok, string? error)> DeleteAsync(int leadId, int companyId, CancellationToken cancellationToken = default)
+    {
+        var url = $"/api/Leads/{leadId}?companyId={companyId}";
+        var resp = await _http.DeleteAsync(url, cancellationToken);
+        if (resp.IsSuccessStatusCode)
+            return (true, null);
+
+        var errorBody = await resp.Content.ReadAsStringAsync(cancellationToken);
+        var error = $"HTTP {(int)resp.StatusCode}: {errorBody}";
+        Console.WriteLine($"[LeadsApiService] DeleteAsync failed. {error}");
+        return (false, error);
+    }
+
     public async Task<bool> UpdateStageAsync(int leadId, int stageId, CancellationToken cancellationToken = default)
     {
         var resp = await _http.PostAsync($"/api/Leads/{leadId}/stage?stageId={stageId}", null, cancellationToken);

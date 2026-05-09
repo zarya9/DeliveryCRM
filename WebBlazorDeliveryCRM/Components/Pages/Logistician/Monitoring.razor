@@ -1,8 +1,10 @@
 @page "/logistician/monitoring"
 @layout LogisticianLayout
 @using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
 @inject MonitoringApiService MonitoringApi
+@inject TrackingHubClientService TrackingHubClient
 @inject IJSRuntime JS
 @inject IConfiguration Configuration
 @implements IDisposable
@@ -12,14 +14,13 @@
 <div class="dms-page-header">
     <h1>Мониторинг операций</h1>
     <p class="subtitle">
-        Лента событий по заказам компании и карта: все курьеры компании и склады.
-        Курьеры офлайн отмечаются серым, онлайн — зеленым.
+        Лента событий по заказам компании и карта: все курьеры компании и склады. Координаты курьеров в сети обновляются по SignalR в реальном времени; полная синхронизация карты периодическая.
     </p>
 </div>
 
 <div class="dms-stat-grid mb-3">
     <KpiCard Title="События за 48 ч" Value="@_feedCount.ToString()" Meta="по заказам компании" />
-    <KpiCard Title="На смене (профили)" Value="@_onShiftCount.ToString()" Meta="активная смена без окончания" />
+    <KpiCard Title="На смене" Value="@_onShiftCount.ToString()" Meta="активная смена без окончания" />
 </div>
 
 <div class="row g-3">
@@ -58,7 +59,7 @@
     <div class="col-lg-5">
         <div class="dms-card">
             <h2 class="dms-card-title">Карта</h2>
-            <p class="small text-muted mb-2">Показываются все курьеры с координатами: серый — офлайн, зеленый — онлайн.</p>
+            <p class="small text-muted mb-2">Курьеры: live по WebSocket; склады и новые курьеры — при периодическом обновлении.</p>
             <div id="logistician-monitoring-map" style="height: 420px; width: 100%; border-radius: 8px;"></div>
         </div>
     </div>
@@ -69,8 +70,11 @@
     private bool _feedLoading = true;
     private int _feedCount;
     private int _onShiftCount;
-    private PeriodicTimer? _timer;
-    private CancellationTokenSource? _cts;
+    private PeriodicTimer? _feedTimer;
+    private PeriodicTimer? _mapTimer;
+    private CancellationTokenSource? _feedCts;
+    private CancellationTokenSource? _mapCts;
+    private IDisposable? _trackingHandler;
     private bool _mapReady;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -78,7 +82,8 @@
         if (!firstRender) return;
         await ReloadFeedAsync();
         await InitMapOnceAsync();
-        StartRefreshLoop();
+        await StartLiveTrackingAsync();
+        StartRefreshLoops();
     }
 
     private async Task InitMapOnceAsync()
@@ -124,7 +129,7 @@
             foreach (var c in live.Couriers)
             {
                 if (c.Lat == 0 && c.Lon == 0) continue;
-                markers.Add(new { lat = c.Lat, lon = c.Lon, title = c.Title ?? "Курьер", kind = "courier", online = c.Online });
+                markers.Add(new { id = c.Id, lat = c.Lat, lon = c.Lon, title = c.Title ?? "Курьер", kind = "courier", online = c.Online });
             }
         }
 
@@ -132,7 +137,7 @@
         {
             foreach (var h in live.Hubs)
             {
-                markers.Add(new { lat = h.Lat, lon = h.Lon, title = h.Title ?? "Склад", kind = "hub" });
+                markers.Add(new { id = h.Id, lat = h.Lat, lon = h.Lon, title = h.Title ?? "Склад", kind = "hub" });
             }
         }
 
@@ -142,40 +147,88 @@
         StateHasChanged();
     }
 
-    private void StartRefreshLoop()
-    {
-        StopRefreshLoop();
-        _cts = new CancellationTokenSource();
-        _timer = new PeriodicTimer(TimeSpan.FromSeconds(25));
-        _ = RunLoopAsync(_cts.Token);
-    }
-
-    private async Task RunLoopAsync(CancellationToken ct)
+    private async Task StartLiveTrackingAsync()
     {
         try
         {
-            while (_timer is not null && await _timer.WaitForNextTickAsync(ct))
+            var hub = await TrackingHubClient.GetConnectionAsync();
+            await TrackingHubClient.EnsureStartedAsync();
+            _trackingHandler?.Dispose();
+            _trackingHandler = hub.On<CourierLocationPushDto>("CourierLocationUpdated", async payload =>
             {
+                await InvokeAsync(async () =>
+                {
+                    if (!_mapReady || payload == null)
+                        return;
+                    await JS.InvokeVoidAsync(
+                        "leafletMap.upsertCourierMarker",
+                        payload.CourierProfileId,
+                        payload.Lat,
+                        payload.Lon,
+                        payload.Title ?? $"Курьер #{payload.CourierProfileId}",
+                        payload.Online);
+                });
+            });
+        }
+        catch
+        {
+            // SignalR необязателен: карта обновится по таймеру
+        }
+    }
+
+    private void StartRefreshLoops()
+    {
+        StopRefreshLoops();
+        _feedCts = new CancellationTokenSource();
+        _mapCts = new CancellationTokenSource();
+        _feedTimer = new PeriodicTimer(TimeSpan.FromSeconds(25));
+        _mapTimer = new PeriodicTimer(TimeSpan.FromSeconds(90));
+        _ = FeedLoopAsync(_feedCts.Token);
+        _ = MapLoopAsync(_mapCts.Token);
+    }
+
+    private async Task FeedLoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (_feedTimer is not null && await _feedTimer.WaitForNextTickAsync(ct))
                 await ReloadFeedAsync();
-                await RefreshMapAsync();
-            }
         }
         catch (OperationCanceledException)
         {
         }
     }
 
-    private void StopRefreshLoop()
+    private async Task MapLoopAsync(CancellationToken ct)
     {
-        _cts?.Cancel();
-        _cts?.Dispose();
-        _cts = null;
-        _timer?.Dispose();
-        _timer = null;
+        try
+        {
+            while (_mapTimer is not null && await _mapTimer.WaitForNextTickAsync(ct))
+                await RefreshMapAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void StopRefreshLoops()
+    {
+        _feedCts?.Cancel();
+        _feedCts?.Dispose();
+        _feedCts = null;
+        _mapCts?.Cancel();
+        _mapCts?.Dispose();
+        _mapCts = null;
+        _feedTimer?.Dispose();
+        _feedTimer = null;
+        _mapTimer?.Dispose();
+        _mapTimer = null;
     }
 
     public void Dispose()
     {
-        StopRefreshLoop();
+        _trackingHandler?.Dispose();
+        _trackingHandler = null;
+        StopRefreshLoops();
     }
 }

@@ -1,5 +1,8 @@
 @using WebBlazorDeliveryCRM.Components.Shared
+@inject CustomAuthenticationStateProvider AuthState
+@inject ChatHubClientService ChatHub
 @inject ChatUnreadStateService ChatUnreadState
+@inject NavigationManager Navigation
 @implements IDisposable
 
 <div class="sidebar-header">
@@ -37,6 +40,11 @@
         <HugeIcon Name="calendar-03" CssClass="icon" /> <span class="sidebar-label">Смены</span>
     </NavLink>
 </nav>
+<div class="sidebar-footer">
+    <button type="button" class="sidebar-link sidebar-link-button sidebar-link-logout" @onclick="LogoutAsync" title="Выйти">
+        <HugeIcon Name="logout-01" CssClass="icon" /> <span class="sidebar-label">Выйти</span>
+    </button>
+</div>
 
 @code {
     private PeriodicTimer? _refreshTimer;
@@ -85,6 +93,20 @@
         _refreshCts = null;
         _refreshTimer?.Dispose();
         _refreshTimer = null;
+    }
+
+    private async Task LogoutAsync()
+    {
+        try
+        {
+            await ChatHub.StopAsync();
+        }
+        catch
+        {
+        }
+
+        await AuthState.MarkUserAsLoggedOutAsync();
+        Navigation.NavigateTo("/login", forceLoad: true, replace: true);
     }
 
     public void Dispose()

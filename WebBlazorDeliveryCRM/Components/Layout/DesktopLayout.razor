@@ -83,6 +83,7 @@
             return
             [
                 new("/courier/shift", "calendar-03", "Смена", true),
+                new("/courier/manual-location", "maps-location-01", "Карта", false),
                 new("/courier/orders", "invoice-01", "Заказы", false),
                 new("/courier/chat", "message-01", "Чат", false),
                 new("/courier/notifications", "notification-01", "Уведомления", false),
@@ -91,7 +92,7 @@
         if (path.StartsWith("logistician"))
             return
             [
-                new("/logistician", "dashboard-square-03", "Главная", true),
+                new("/logistician", "dashboard-square-01", "Главная", true),
                 new("/logistician/shifts", "calendar-03", "Смены", false),
                 new("/logistician/monitoring", "maps-location-01", "Карта", false),
                 new("/logistician/chat", "message-01", "Чат", false),
@@ -100,7 +101,7 @@
         if (path.StartsWith("manager") || role is "Менеджер" or "Админ" or "Администратор")
             return
             [
-                new("/manager", "dashboard-square-03", "Главная", true),
+                new("/manager", "dashboard-square-01", "Главная", true),
                 new("/manager/orders", "invoice-01", "Заказы", false),
                 new("/manager/employees", "user-group", "Команда", false),
                 new("/manager/chat", "message-01", "Чат", false),

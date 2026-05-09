@@ -341,7 +341,21 @@ public class ChatService : IChatService
             int? peerUserId = null;
             if (roomKind == "direct")
             {
-                peerUserId = room.Participants.FirstOrDefault(p => p.Is_active && p.User_id != userId)?.User_id;
+                peerUserId = room.Participants
+                    .FirstOrDefault(p => p.User_id != userId)?.User_id;
+
+                if (!peerUserId.HasValue)
+                {
+                    peerUserId = roomMsgs
+                        .Where(m => m.Sender_id != userId)
+                        .Select(m => (int?)m.Sender_id)
+                        .FirstOrDefault();
+                }
+
+                if (!peerUserId.HasValue && TryParseLegacyDirectName(room.Name, userId, out var parsedPeerId))
+                {
+                    peerUserId = parsedPeerId;
+                }
             }
             var name = room.Name;
             if (roomKind == "direct")
@@ -610,10 +624,38 @@ public class ChatService : IChatService
         if (string.IsNullOrWhiteSpace(roomTypeName))
             return "company";
         var v = roomTypeName.Trim().ToLowerInvariant();
-        if (v.Contains("direct")) return "direct";
+        if (v.Contains("direct") || v.Contains("лич") || v.StartsWith("лс") || v == "dm") return "direct";
         if (v.Contains("order")) return "order";
         if (v.Contains("company") || v.Contains("group") || v.Contains("общ")) return "company";
         return v;
+    }
+
+    private static bool TryParseLegacyDirectName(string? roomName, int currentUserId, out int peerUserId)
+    {
+        peerUserId = 0;
+        if (string.IsNullOrWhiteSpace(roomName))
+            return false;
+
+        var s = roomName.Trim();
+        if (!s.StartsWith("ЛС", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var colonIndex = s.IndexOf(':');
+        if (colonIndex < 0 || colonIndex >= s.Length - 1)
+            return false;
+
+        var pair = s[(colonIndex + 1)..].Trim();
+        var parts = pair.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 2)
+            return false;
+
+        if (!int.TryParse(parts[0], out var id1) || !int.TryParse(parts[1], out var id2))
+            return false;
+
+        peerUserId = id1 == currentUserId ? id2 : id1;
+        if (peerUserId <= 0)
+            peerUserId = id2 == currentUserId ? id1 : id2;
+        return peerUserId > 0;
     }
 
     private string DecryptSafe(string payload)

@@ -50,6 +50,34 @@ public class LeadsController : Controller
             return await _leadService.CreateAsync(request, resolvedCompanyId.Value, actorUserId.Value);
         }
 
+        [HttpPut("{id:int}")]
+        public async Task<IActionResult> Update(
+            int id,
+            [FromBody] CreateLeadRequest request,
+            [FromQuery] int? companyId = null,
+            [FromQuery] int? managerUserId = null)
+        {
+            var resolvedCompanyId = ResolveCompanyId(companyId, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!resolvedCompanyId.HasValue) return Unauthorized();
+
+            var currentUserId = GetCurrentUserId();
+            var actorUserId = managerUserId ?? currentUserId;
+            if (!actorUserId.HasValue) return Unauthorized();
+
+            return await _leadService.UpdateAsync(id, request, resolvedCompanyId.Value, actorUserId.Value);
+        }
+
+        [HttpDelete("{id:int}")]
+        public async Task<IActionResult> Delete(int id, [FromQuery] int? companyId = null)
+        {
+            var resolvedCompanyId = ResolveCompanyId(companyId, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!resolvedCompanyId.HasValue) return Unauthorized();
+
+            return await _leadService.DeleteAsync(id, resolvedCompanyId.Value);
+        }
+
         [HttpPost("{id:int}/stage")]
         public async Task<IActionResult> UpdateStage(int id, [FromQuery] int stageId)
         {

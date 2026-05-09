@@ -38,6 +38,7 @@ builder.Services.AddScoped<CustomAuthenticationStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(sp => sp.GetRequiredService<CustomAuthenticationStateProvider>());
 builder.Services.AddScoped<AuthApiService>();
 builder.Services.AddScoped<ChatHubClientService>();
+builder.Services.AddScoped<TrackingHubClientService>();
 builder.Services.AddScoped<ChatApiService>();
 builder.Services.AddScoped<ChatUnreadStateService>();
 builder.Services.AddScoped<OrdersApiService>();

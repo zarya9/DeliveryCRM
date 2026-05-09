@@ -6,6 +6,7 @@
 @inject CouriersApiService CouriersApi
 @inject OrdersApiService OrdersApi
 @inject LogisticsHubsApiService HubsApi
+@inject TrackingHubClientService TrackingHubClient
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 @inject IConfiguration Configuration
@@ -16,7 +17,7 @@
 
 <div class="dms-page-header">
     <h1>Карта оптимизации маршрутов</h1>
-    <p class="subtitle">Курьеры и склады на карте компании.</p>
+    <p class="subtitle">Курьеры и склады на карте компании. Позиции курьеров в сети обновляются по SignalR при каждом сохранении координат (GPS или ручная точка).</p>
 </div>
 
 <div class="dms-card mb-3">
@@ -183,6 +184,9 @@
     private TimeSpan _savingTime = TimeSpan.Zero;
     private double _savingFuelLiters;
 
+    private bool _mapReady;
+    private IDisposable? _trackingHandler;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
@@ -195,6 +199,7 @@
                 .Where(c => c.Current_lat != 0 || c.Current_lon != 0)
                 .Select(c => new
                 {
+                    id = c.ID_CourierProfile,
                     lat = (double)c.Current_lat,
                     lon = (double)c.Current_lon,
                     title = $"{c.User?.FName} {c.User?.Name} — {c.CourierStatus?.Name}",
@@ -219,10 +224,42 @@
                 var routeLang = Configuration["Map:RouteLanguage"];
                 await JS.InvokeVoidAsync("leafletMap.init", "logistician-map", 55.7558, 37.6173, 10, null, osrmUrl, true, routeLang);
                 await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
+                _mapReady = true;
+                await StartLiveTrackingAsync();
                 if (_hubs.Count > 0 && !_hubs.Any(h => h.Latitude.HasValue && h.Longitude.HasValue))
                     _routeMessage = "Склады найдены, но у них нет координат (latitude/longitude), поэтому точки не показываются на карте.";
             }
             catch { /* map may fail */ }
+        }
+    }
+
+    private async Task StartLiveTrackingAsync()
+    {
+        if (!_mapReady) return;
+        try
+        {
+            var hub = await TrackingHubClient.GetConnectionAsync();
+            await TrackingHubClient.EnsureStartedAsync();
+            _trackingHandler?.Dispose();
+            _trackingHandler = hub.On<CourierLocationPushDto>("CourierLocationUpdated", async payload =>
+            {
+                await InvokeAsync(async () =>
+                {
+                    if (!_mapReady || payload == null)
+                        return;
+                    await JS.InvokeVoidAsync(
+                        "leafletMap.upsertCourierMarker",
+                        payload.CourierProfileId,
+                        payload.Lat,
+                        payload.Lon,
+                        payload.Title ?? $"Курьер #{payload.CourierProfileId}",
+                        payload.Online);
+                });
+            });
+        }
+        catch
+        {
+            // SignalR не обязателен для страницы
         }
     }
 
@@ -679,6 +716,8 @@
 
     public void Dispose()
     {
+        _trackingHandler?.Dispose();
+        _trackingHandler = null;
         _routeCts?.Cancel();
         _routeCts?.Dispose();
     }

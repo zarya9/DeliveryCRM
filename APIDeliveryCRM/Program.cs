@@ -76,7 +76,8 @@ builder.Services.AddAuthentication(options =>
         {
             var accessToken = context.Request.Query["access_token"];
             var path = context.HttpContext.Request.Path;
-            if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/chatHub"))
+            if (!string.IsNullOrEmpty(accessToken) &&
+                (path.StartsWithSegments("/chatHub") || path.StartsWithSegments("/trackingHub")))
             {
                 context.Token = accessToken;
             }
@@ -153,7 +154,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// SignalR Hub
+// SignalR Hubs
 app.MapHub<APIDeliveryCRM.Hubs.ChatHub>("/chatHub");
+app.MapHub<APIDeliveryCRM.Hubs.TrackingHub>("/trackingHub");
 
 app.Run();

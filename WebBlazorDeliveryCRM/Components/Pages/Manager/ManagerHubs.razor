@@ -18,70 +18,52 @@
     <KpiCard Title="Складов в системе" Value="@((_list?.Count ?? 0).ToString())" />
 </div>
 
-<div class="dms-card mb-3">
-    <h2 class="dms-card-title">Новый склад</h2>
-    <div class="row g-3">
-        <div class="col-md-4">
-            <label class="form-label">Название</label>
-            <input class="form-control" @bind="_name" placeholder="Склад Север" />
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">Город</label>
-            <input class="form-control" @bind="_city" />
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">Улица</label>
-            <input class="form-control" @bind="_street" />
-        </div>
-        <div class="col-md-2">
-            <label class="form-label">Дом</label>
-            <input class="form-control" @bind="_house" />
-        </div>
-        <div class="col-md-2">
-            <label class="form-label">Квартира / офис</label>
-            <input class="form-control" @bind="_flat" />
-        </div>
-        <div class="col-md-3">
-            <label class="form-label">Регион</label>
-            <input class="form-control" @bind="_region" />
-        </div>
-        <div class="col-md-2">
-            <label class="form-label">Индекс</label>
-            <input class="form-control" @bind="_postal" />
-        </div>
-        <div class="col-12">
-            <button type="button" class="btn btn-primary dms-btn-primary mt-1" disabled="@_saving" @onclick="SaveHub">Сохранить склад</button>
+<div class="dms-card">
+    <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+        <h2 class="dms-card-title mb-0">Список складов компании</h2>
+        <div class="d-flex align-items-center gap-2">
+            @if (_selectedHubId.HasValue)
+            {
+                <button type="button" class="btn btn-outline-info btn-sm d-inline-flex align-items-center gap-1" @onclick="OpenSelectedHubInfo">
+                    <HugeIcon Name="audit-01" CssClass="dms-icon-sm" />
+                    <span>Инфо</span>
+                </button>
+                <button type="button" class="btn btn-outline-danger btn-sm d-inline-flex align-items-center gap-1" @onclick="DeleteSelectedHubAsync">
+                    <HugeIcon Name="delete-02" CssClass="dms-icon-sm" />
+                    <span>Удалить</span>
+                </button>
+            }
+            <button type="button" class="btn btn-primary dms-btn-primary d-inline-flex align-items-center gap-1" @onclick="OpenCreateHubModal" title="Добавить склад">
+                <HugeIcon Name="plus-sign" CssClass="dms-icon-sm" />
+                <span>Склад</span>
+            </button>
         </div>
     </div>
-</div>
-
-<div class="dms-card">
-    <h2 class="dms-card-title">Список складов компании</h2>
     @if (_list?.Count > 0)
     {
         <div class="hub-grid">
             @foreach (var h in _list)
             {
-                <div class="hub-card">
+                <div class="hub-card @(_selectedHubId == h.Id ? "hub-card-selected" : "")"
+                     @onclick="() => SelectHub(h)"
+                     @ondblclick="() => OpenHubDetails(h)">
                     <h3 class="hub-card-title">@(string.IsNullOrWhiteSpace(h.Name) ? "Склад" : h.Name)</h3>
                     <div class="small text-muted">@FormatAddress(h)</div>
                     @if (h.OrdersOnSite is { Count: > 0 })
                     {
-                        <div class="mt-2 small">
+                        <div class="mt-2 small hub-card-orders">
                             <strong class="d-block mb-1">Заказы на складе</strong>
                             <ul class="mb-0 ps-3">
                                 @foreach (var o in h.OrdersOnSite)
                                 {
-                                    <li>
-                                        Заказ №@o.OrderNumber — от @(o.ClientName ?? "—"), доставка: @(o.DeliveryTo ?? "—")
-                                    </li>
+                                    <li>Заказ №@o.OrderNumber — от @(o.ClientName ?? "—"), доставка: @(o.DeliveryTo ?? "—")</li>
                                 }
                             </ul>
                         </div>
                     }
                     else
                     {
-                        <p class="small text-muted mb-0 mt-2">Нет заказов на этом складе по маршруту.</p>
+                        <p class="small text-muted mb-0 mt-2 hub-card-orders">Нет заказов на этом складе по маршруту.</p>
                     }
                     @if (!string.IsNullOrWhiteSpace(BuildMapUrl(h)))
                     {
@@ -95,12 +77,156 @@
                 </div>
             }
         </div>
+        <p class="small text-muted mt-2 mb-0"></p>
     }
     else
     {
         <p class="text-muted">Склады ещё не заведены.</p>
     }
 </div>
+
+@if (_showCreateModal)
+{
+    <div class="employee-modal-backdrop" @onclick="CloseCreateHubModal">
+        <div class="employee-modal employee-modal--hub-create" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <h2 class="h5 mb-0">Новый склад</h2>
+                <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseCreateHubModal"></button>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label hub-form-label"><HugeIcon Name="store-01" CssClass="hub-form-label-icon" />Название</label>
+                    <input class="form-control" @bind="_name" placeholder="Склад Север" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label hub-form-label"><HugeIcon Name="location-01" CssClass="hub-form-label-icon" />Город</label>
+                    <input class="form-control" @bind="_city" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label hub-form-label"><HugeIcon Name="route-02" CssClass="hub-form-label-icon" />Улица</label>
+                    <input class="form-control" @bind="_street" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label hub-form-label"><HugeIcon Name="home-01" CssClass="hub-form-label-icon" />Дом</label>
+                    <input class="form-control" @bind="_house" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label hub-form-label"><HugeIcon Name="briefcase-01" CssClass="hub-form-label-icon" />Квартира/офис</label>
+                    <input class="form-control" @bind="_flat" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label hub-form-label"><HugeIcon Name="dashboard-square-01" CssClass="hub-form-label-icon" />Регион</label>
+                    <input class="form-control" @bind="_region" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label hub-form-label"><HugeIcon Name="mail-01" CssClass="hub-form-label-icon" />Индекс</label>
+                    <input class="form-control" @bind="_postal" />
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-end gap-2 mt-3">
+                <button type="button" class="btn btn-outline-secondary" @onclick="CloseCreateHubModal">Отмена</button>
+                <button type="button" class="btn btn-primary dms-btn-primary" disabled="@_saving" @onclick="SaveHub">
+                    @(_saving ? "Сохраняем..." : "Сохранить склад")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_showDetailsModal && ActiveHub is not null)
+{
+    <div class="employee-modal-backdrop" @onclick="CloseHubDetailsModal">
+        <div class="employee-modal employee-modal--hub-create" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <h2 class="h5 mb-0">@(_hubEditMode ? "Редактирование склада" : "Карточка склада")</h2>
+                <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseHubDetailsModal"></button>
+            </div>
+
+            @if (_hubEditMode)
+            {
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label hub-form-label"><HugeIcon Name="store-01" CssClass="hub-form-label-icon" />Название</label>
+                        <input class="form-control" @bind="_editName" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label hub-form-label"><HugeIcon Name="location-01" CssClass="hub-form-label-icon" />Город</label>
+                        <input class="form-control" @bind="_editCity" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label hub-form-label"><HugeIcon Name="route-02" CssClass="hub-form-label-icon" />Улица</label>
+                        <input class="form-control" @bind="_editStreet" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label hub-form-label"><HugeIcon Name="home-01" CssClass="hub-form-label-icon" />Дом</label>
+                        <input class="form-control" @bind="_editHouse" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label hub-form-label"><HugeIcon Name="briefcase-01" CssClass="hub-form-label-icon" />Квартира/офис</label>
+                        <input class="form-control" @bind="_editFlat" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label hub-form-label"><HugeIcon Name="dashboard-square-01" CssClass="hub-form-label-icon" />Регион</label>
+                        <input class="form-control" @bind="_editRegion" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label hub-form-label"><HugeIcon Name="mail-01" CssClass="hub-form-label-icon" />Индекс</label>
+                        <input class="form-control" @bind="_editPostal" />
+                    </div>
+                </div>
+                <div class="d-flex justify-content-end gap-2 mt-3">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CancelHubEditMode">Отмена</button>
+                    <button type="button" class="btn btn-primary dms-btn-primary" disabled="@_saving" @onclick="SaveHubEditsAsync">
+                        @(_saving ? "Сохраняем..." : "Сохранить")
+                    </button>
+                </div>
+            }
+            else
+            {
+                <div class="mb-2"><strong>Название склада:</strong> @(string.IsNullOrWhiteSpace(ActiveHub.Name) ? "Склад" : ActiveHub.Name)</div>
+                <div class="mb-2"><strong>Адрес:</strong> @FormatAddress(ActiveHub)</div>
+
+                <div class="mb-2">
+                    <strong>Заказы на складе:</strong>
+                    @if (ActiveHub.OrdersOnSite is { Count: > 0 })
+                    {
+                        <ul class="mt-1 mb-0 ps-3">
+                            @foreach (var o in ActiveHub.OrdersOnSite)
+                            {
+                                <li>Заказ №@o.OrderNumber — от @(o.ClientName ?? "—"), доставка: @(o.DeliveryTo ?? "—")</li>
+                            }
+                        </ul>
+                    }
+                    else
+                    {
+                        <div class="text-muted mt-1">Нет заказов на этом складе.</div>
+                    }
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(BuildMapUrl(ActiveHub)))
+                {
+                    <iframe class="hub-mini-map hub-mini-map--details"
+                            src="@BuildMapUrl(ActiveHub)"
+                            loading="lazy"
+                            title="Карта склада"></iframe>
+                }
+
+                <div class="d-flex justify-content-end gap-2 mt-3">
+                    <button type="button" class="btn btn-outline-secondary d-inline-flex align-items-center gap-1" @onclick="EnableHubEditMode">
+                        <HugeIcon Name="edit-01" CssClass="dms-icon-sm" />
+                        <span>Редактировать</span>
+                    </button>
+                    <button type="button" class="btn btn-danger d-inline-flex align-items-center gap-1" @onclick="DeleteActiveHubAsync">
+                        <HugeIcon Name="delete-02" CssClass="dms-icon-sm" />
+                        <span>Удалить</span>
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+}
 
 @code {
     private List<LogisticsHubListItemDto>? _list;
@@ -112,8 +238,23 @@
     private string? _region;
     private string? _postal;
     private bool _saving;
+    private bool _showCreateModal;
+    private bool _showDetailsModal;
+    private int? _selectedHubId;
+    private int? _detailsHubId;
+    private bool _hubEditMode;
+    private string _editName = string.Empty;
+    private string _editStreet = string.Empty;
+    private string _editHouse = string.Empty;
+    private string? _editFlat;
+    private string? _editCity;
+    private string? _editRegion;
+    private string? _editPostal;
     private PeriodicTimer? _refreshTimer;
     private CancellationTokenSource? _refreshCts;
+
+    private LogisticsHubListItemDto? ActiveHub
+        => _detailsHubId.HasValue ? _list?.FirstOrDefault(h => h.Id == _detailsHubId.Value) : null;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -135,6 +276,7 @@
             Notify.ShowWarning("Укажите название, улицу и дом.");
             return;
         }
+
         _saving = true;
         try
         {
@@ -151,8 +293,8 @@
             if (ok)
             {
                 Notify.ShowSuccess("Склад создан.");
-                _name = _street = _house = "";
-                _flat = _city = _region = _postal = null;
+                ResetCreateForm();
+                _showCreateModal = false;
                 await Reload();
                 _ = Task.Run(async () =>
                 {
@@ -164,10 +306,186 @@
                     });
                 });
             }
-            else Notify.ShowError("Не удалось создать склад.");
+            else
+            {
+                Notify.ShowError("Не удалось создать склад.");
+            }
         }
-        catch (Exception ex) { Notify.ShowError(ex.Message); }
-        finally { _saving = false; }
+        catch (Exception ex)
+        {
+            Notify.ShowError(ex.Message);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void OpenCreateHubModal()
+    {
+        ResetCreateForm();
+        _showCreateModal = true;
+    }
+
+    private void CloseCreateHubModal()
+    {
+        _showCreateModal = false;
+    }
+
+    private void SelectHub(LogisticsHubListItemDto hub)
+    {
+        if (hub.Id <= 0)
+        {
+            Notify.ShowError("Некорректный ID склада в ответе API.");
+            return;
+        }
+        _selectedHubId = hub.Id;
+    }
+
+    private void OpenHubDetails(LogisticsHubListItemDto hub)
+    {
+        if (hub.Id <= 0)
+        {
+            Notify.ShowError("Некорректный ID склада в ответе API.");
+            return;
+        }
+        _selectedHubId = hub.Id;
+        _detailsHubId = hub.Id;
+        _hubEditMode = false;
+        _showDetailsModal = true;
+    }
+
+    private void OpenSelectedHubInfo()
+    {
+        if (!_selectedHubId.HasValue)
+            return;
+        var hub = _list?.FirstOrDefault(h => h.Id == _selectedHubId.Value);
+        if (hub is null)
+            return;
+        OpenHubDetails(hub);
+    }
+
+    private async Task DeleteSelectedHubAsync()
+    {
+        if (!_selectedHubId.HasValue)
+            return;
+        if (_selectedHubId.Value <= 0)
+        {
+            Notify.ShowError("Не удалось удалить склад: не определён ID.");
+            return;
+        }
+        await DeleteHubByIdAsync(_selectedHubId.Value);
+    }
+
+    private async Task DeleteActiveHubAsync()
+    {
+        if (!_detailsHubId.HasValue)
+            return;
+        if (_detailsHubId.Value <= 0)
+        {
+            Notify.ShowError("Не удалось удалить склад: не определён ID.");
+            return;
+        }
+        await DeleteHubByIdAsync(_detailsHubId.Value);
+    }
+
+    private async Task DeleteHubByIdAsync(int hubId)
+    {
+        var (ok, error) = await HubsApi.DeleteAsync(hubId);
+        if (!ok)
+        {
+            Notify.ShowError(string.IsNullOrWhiteSpace(error) ? "Не удалось удалить склад." : error!);
+            return;
+        }
+
+        Notify.ShowSuccess("Склад удалён.");
+        if (_selectedHubId == hubId)
+            _selectedHubId = null;
+        if (_detailsHubId == hubId)
+        {
+            _showDetailsModal = false;
+            _detailsHubId = null;
+        }
+        await Reload();
+        StateHasChanged();
+    }
+
+    private void CloseHubDetailsModal()
+    {
+        _showDetailsModal = false;
+        _detailsHubId = null;
+        _hubEditMode = false;
+    }
+
+    private void EnableHubEditMode()
+    {
+        if (ActiveHub is null)
+            return;
+
+        _hubEditMode = true;
+        _editName = ActiveHub.Name ?? string.Empty;
+        _editStreet = ActiveHub.Street ?? string.Empty;
+        _editHouse = ActiveHub.House ?? string.Empty;
+        _editFlat = ActiveHub.Flat;
+        _editCity = ActiveHub.City;
+        _editRegion = ActiveHub.Region;
+        _editPostal = ActiveHub.PostalCode;
+    }
+
+    private void CancelHubEditMode()
+    {
+        _hubEditMode = false;
+    }
+
+    private async Task SaveHubEditsAsync()
+    {
+        if (ActiveHub is null)
+            return;
+        if (ActiveHub.Id <= 0)
+        {
+            Notify.ShowError("Не удалось обновить склад: не определён ID.");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_editName) || string.IsNullOrWhiteSpace(_editStreet) || string.IsNullOrWhiteSpace(_editHouse))
+        {
+            Notify.ShowWarning("Укажите название, улицу и дом.");
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var ok = await HubsApi.UpdateAsync(ActiveHub.Id, new CreateLogisticsHubApiRequest
+            {
+                Name = _editName.Trim(),
+                Street = _editStreet.Trim(),
+                House = _editHouse.Trim(),
+                Flat = _editFlat,
+                City = _editCity,
+                Region = _editRegion,
+                PostalCode = _editPostal
+            });
+            if (!ok)
+            {
+                Notify.ShowError("Не удалось обновить склад.");
+                return;
+            }
+
+            Notify.ShowSuccess("Склад обновлён.");
+            _hubEditMode = false;
+            await Reload();
+            StateHasChanged();
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void ResetCreateForm()
+    {
+        _name = _street = _house = "";
+        _flat = _city = _region = _postal = null;
     }
 
     private static string FormatAddress(LogisticsHubListItemDto h)

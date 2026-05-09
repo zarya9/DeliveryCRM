@@ -98,6 +98,45 @@ namespace APIDeliveryCRM.Services
             return new OkObjectResult(new { message = "Лид создан", id = lead.ID_Lead });
         }
 
+        public async Task<IActionResult> UpdateAsync(int leadId, CreateLeadRequest request, int companyId, int managerUserId)
+        {
+            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.ID_Lead == leadId && l.Company_id == companyId);
+            if (lead == null)
+                return new NotFoundObjectResult(new { message = "Лид не найден" });
+
+            var source = await _context.LeadSources.FindAsync(request.LeadSourceId);
+            if (source == null)
+                return new BadRequestObjectResult(new { message = "Источник лида не найден" });
+
+            var stage = await _context.LeadStages.FindAsync(request.LeadStageId);
+            if (stage == null)
+                return new BadRequestObjectResult(new { message = "Стадия лида не найдена" });
+
+            lead.Name = request.Name.Trim();
+            lead.Contact = string.IsNullOrWhiteSpace(request.Contact) ? null : request.Contact.Trim();
+            lead.LeadSource_id = request.LeadSourceId;
+            lead.LeadStage_id = request.LeadStageId;
+            lead.ManagerUser_id = managerUserId;
+            lead.Comment = string.IsNullOrWhiteSpace(request.Comment) ? null : request.Comment.Trim();
+            lead.NextTask_title = string.IsNullOrWhiteSpace(request.NextTaskTitle) ? lead.NextTask_title : request.NextTaskTitle.Trim();
+            lead.NextTask_due_at = request.NextTaskDueAtUtc?.ToUniversalTime() ?? lead.NextTask_due_at;
+            lead.Updated_at = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+            return new OkObjectResult(new { message = "Лид обновлён", id = lead.ID_Lead });
+        }
+
+        public async Task<IActionResult> DeleteAsync(int leadId, int companyId)
+        {
+            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.ID_Lead == leadId && l.Company_id == companyId);
+            if (lead == null)
+                return new NotFoundObjectResult(new { message = "Лид не найден" });
+
+            _context.Leads.Remove(lead);
+            await _context.SaveChangesAsync();
+            return new OkObjectResult(new { deleted = true });
+        }
+
         public async Task<IActionResult> UpdateStageAsync(int leadId, int stageId)
         {
             var lead = await _context.Leads.FirstOrDefaultAsync(l => l.ID_Lead == leadId);

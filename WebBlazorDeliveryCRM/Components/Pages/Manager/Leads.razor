@@ -29,15 +29,45 @@
             else
             {
                 <div class="table-responsive">
-                    <table class="table table-sm align-middle">
+                    <table class="table table-sm align-middle leads-table">
                         <thead>
                             <tr>
-                                <th>Название</th>
-                                <th>Контакт</th>
-                                <th>Источник</th>
-                                <th>Стадия</th>
-                                <th>Ответственный</th>
-                                <th>Создан</th>
+                                <th>
+                                    <span class="leads-table-th">
+                                        <span>Название</span>
+                                        <HugeIcon Name="package-moving" CssClass="leads-th-icon" />
+                                    </span>
+                                </th>
+                                <th>
+                                    <span class="leads-table-th">
+                                        <span>Контакт</span>
+                                        <HugeIcon Name="mail-01" CssClass="leads-th-icon" />
+                                    </span>
+                                </th>
+                                <th>
+                                    <span class="leads-table-th">
+                                        <span>Источник</span>
+                                        <HugeIcon Name="route-02" CssClass="leads-th-icon" />
+                                    </span>
+                                </th>
+                                <th>
+                                    <span class="leads-table-th">
+                                        <span>Стадия</span>
+                                        <HugeIcon Name="activity-01" CssClass="leads-th-icon" />
+                                    </span>
+                                </th>
+                                <th>
+                                    <span class="leads-table-th">
+                                        <span>Ответственный</span>
+                                        <HugeIcon Name="user-03" CssClass="leads-th-icon" />
+                                    </span>
+                                </th>
+                                <th>
+                                    <span class="leads-table-th">
+                                        <span>Создан</span>
+                                        <HugeIcon Name="calendar-03" CssClass="leads-th-icon" />
+                                    </span>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
@@ -113,21 +143,99 @@
 @if (_selectedLead is not null)
 {
     <div class="employee-modal-backdrop" @onclick="CloseLead">
-        <div class="employee-modal" @onclick:stopPropagation="true">
+        <div class="employee-modal lead-detail-modal" @onclick:stopPropagation="true">
             <div class="d-flex justify-content-between align-items-start mb-3">
-                <h2 class="h5 mb-0">Карточка лида</h2>
                 <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseLead"></button>
             </div>
-            <p class="mb-2"><strong>Название:</strong> @_selectedLead.Name</p>
-            <p class="mb-2"><strong>Контакт:</strong> @(string.IsNullOrWhiteSpace(_selectedLead.Contact) ? "—" : _selectedLead.Contact)</p>
-            <p class="mb-2"><strong>Источник:</strong> @_selectedLead.Source</p>
-            <p class="mb-2"><strong>Стадия:</strong> <StatusBadge Text="@_selectedLead.Stage" Tone="@GetLeadStageTone(_selectedLead.Stage)" /></p>
-            <p class="mb-2"><strong>Ответственный:</strong> @(string.IsNullOrWhiteSpace(_selectedLead.ManagerName) ? "—" : _selectedLead.ManagerName)</p>
-            <p class="mb-2"><strong>Создан:</strong> @_selectedLead.CreatedAt.ToString("dd.MM.yyyy HH:mm")</p>
-            @if (!string.IsNullOrWhiteSpace(_selectedLead.Comment))
+            @if (_leadEditMode)
             {
-                <p class="mb-0"><strong>Комментарий:</strong></p>
-                <p class="text-muted mb-0 mt-1" style="white-space: pre-wrap;">@_selectedLead.Comment</p>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Название</label>
+                        <input class="form-control" @bind="_editLeadName" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Контакт</label>
+                        <input class="form-control" @bind="_editLeadContact" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Источник</label>
+                        <select class="form-select" @bind="_editLeadSourceId">
+                            <option value="0">— выберите источник —</option>
+                            @foreach (var s in _meta?.Sources ?? new List<LeadsApiService.IdNameDto>())
+                            {
+                                <option value="@s.Id">@s.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Стадия</label>
+                        <select class="form-select" @bind="_editLeadStageId">
+                            <option value="0">— выберите стадию —</option>
+                            @foreach (var s in _meta?.Stages ?? new List<LeadsApiService.IdNameDto>())
+                            {
+                                <option value="@s.Id">@s.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Комментарий</label>
+                        <textarea class="form-control" rows="3" @bind="_editLeadComment"></textarea>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-end gap-2 mt-3">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CancelEditLead">Отмена</button>
+                    <button type="button" class="btn btn-primary dms-btn-primary" @onclick="SaveLeadChangesAsync" disabled="@_saving">
+                        @(_saving ? "Сохраняем..." : "Сохранить")
+                    </button>
+                </div>
+            }
+            else
+            {
+                <div class="lead-detail-row">
+                    <HugeIcon Name="package-moving" CssClass="lead-detail-icon" />
+                    <p class="mb-0"><strong>Название:</strong> @_selectedLead.Name</p>
+                </div>
+                <div class="lead-detail-row">
+                    <HugeIcon Name="mail-01" CssClass="lead-detail-icon" />
+                    <p class="mb-0"><strong>Контакт:</strong> @(string.IsNullOrWhiteSpace(_selectedLead.Contact) ? "—" : _selectedLead.Contact)</p>
+                </div>
+                <div class="lead-detail-row">
+                    <HugeIcon Name="route-02" CssClass="lead-detail-icon" />
+                    <p class="mb-0"><strong>Источник:</strong> @_selectedLead.Source</p>
+                </div>
+                <div class="lead-detail-row">
+                    <HugeIcon Name="activity-01" CssClass="lead-detail-icon" />
+                    <p class="mb-0"><strong>Стадия:</strong> <StatusBadge Text="@_selectedLead.Stage" Tone="@GetLeadStageTone(_selectedLead.Stage)" /></p>
+                </div>
+                <div class="lead-detail-row">
+                    <HugeIcon Name="user-03" CssClass="lead-detail-icon" />
+                    <p class="mb-0"><strong>Ответственный:</strong> @(string.IsNullOrWhiteSpace(_selectedLead.ManagerName) ? "—" : _selectedLead.ManagerName)</p>
+                </div>
+                <div class="lead-detail-row">
+                    <HugeIcon Name="calendar-03" CssClass="lead-detail-icon" />
+                    <p class="mb-0"><strong>Создан:</strong> @_selectedLead.CreatedAt.ToString("dd.MM.yyyy HH:mm")</p>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_selectedLead.Comment))
+                {
+                    <div class="lead-detail-row lead-detail-row-comment">
+                        <HugeIcon Name="message-01" CssClass="lead-detail-icon" />
+                        <div>
+                            <p class="mb-0"><strong>Комментарий:</strong></p>
+                            <p class="text-muted mb-0 mt-1" style="white-space: pre-wrap;">@_selectedLead.Comment</p>
+                        </div>
+                    </div>
+                }
+                <div class="d-flex justify-content-end gap-2 mt-3">
+                    <button type="button" class="btn btn-outline-secondary d-inline-flex align-items-center gap-1" @onclick="StartEditLead">
+                        <HugeIcon Name="edit-01" CssClass="dms-icon-sm" />
+                        <span>Редактировать</span>
+                    </button>
+                    <button type="button" class="btn btn-danger d-inline-flex align-items-center gap-1" @onclick="DeleteLeadAsync">
+                        <HugeIcon Name="delete-02" CssClass="dms-icon-sm" />
+                        <span>Удалить</span>
+                    </button>
+                </div>
             }
         </div>
     </div>
@@ -173,6 +281,12 @@
     private bool _saving;
     private int _currentUserId;
     private LeadDto? _selectedLead;
+    private bool _leadEditMode;
+    private string _editLeadName = string.Empty;
+    private string? _editLeadContact;
+    private int _editLeadSourceId;
+    private int _editLeadStageId;
+    private string? _editLeadComment;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -264,12 +378,103 @@
 
     private void OpenLead(LeadDto l)
     {
+        if (l.Id <= 0)
+        {
+            Notify.ShowError("Некорректный ID лида.");
+            return;
+        }
+        _leadEditMode = false;
         _selectedLead = l;
     }
 
     private void CloseLead()
     {
+        _leadEditMode = false;
         _selectedLead = null;
+    }
+
+    private void StartEditLead()
+    {
+        if (_selectedLead is null)
+            return;
+        _leadEditMode = true;
+        _editLeadName = _selectedLead.Name;
+        _editLeadContact = _selectedLead.Contact;
+        _editLeadComment = _selectedLead.Comment;
+        _editLeadSourceId = _meta?.Sources.FirstOrDefault(s => string.Equals(s.Name, _selectedLead.Source, StringComparison.OrdinalIgnoreCase))?.Id ?? 0;
+        _editLeadStageId = _meta?.Stages.FirstOrDefault(s => string.Equals(s.Name, _selectedLead.Stage, StringComparison.OrdinalIgnoreCase))?.Id ?? 0;
+    }
+
+    private void CancelEditLead()
+    {
+        _leadEditMode = false;
+    }
+
+    private async Task SaveLeadChangesAsync()
+    {
+        if (_selectedLead is null)
+            return;
+        if (_selectedLead.Id <= 0)
+        {
+            Notify.ShowError("Не удалось обновить лид: не определён ID.");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_editLeadName) || _editLeadSourceId <= 0 || _editLeadStageId <= 0)
+        {
+            Notify.ShowWarning("Заполните название, источник и стадию.");
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var req = new CreateLeadRequestDto
+            {
+                Name = _editLeadName.Trim(),
+                Contact = string.IsNullOrWhiteSpace(_editLeadContact) ? null : _editLeadContact.Trim(),
+                LeadSourceId = _editLeadSourceId,
+                LeadStageId = _editLeadStageId,
+                Comment = string.IsNullOrWhiteSpace(_editLeadComment) ? null : _editLeadComment.Trim()
+            };
+            var result = await LeadsApi.UpdateAsync(_selectedLead.Id, req, _companyId, _currentUserId);
+            if (!result.ok)
+            {
+                Notify.ShowError(string.IsNullOrWhiteSpace(result.error) ? "Не удалось обновить лид." : result.error!);
+                return;
+            }
+            await LoadLeads();
+            _selectedLead = _leads.FirstOrDefault(x => x.Id == _selectedLead.Id);
+            _leadEditMode = false;
+            Notify.ShowSuccess("Лид обновлён.");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task DeleteLeadAsync()
+    {
+        if (_selectedLead is null)
+            return;
+        if (_selectedLead.Id <= 0)
+        {
+            Notify.ShowError("Не удалось удалить лид: не определён ID.");
+            return;
+        }
+
+        var result = await LeadsApi.DeleteAsync(_selectedLead.Id, _companyId);
+        if (!result.ok)
+        {
+            Notify.ShowError(string.IsNullOrWhiteSpace(result.error) ? "Не удалось удалить лид." : result.error!);
+            return;
+        }
+
+        var removedId = _selectedLead.Id;
+        await LoadLeads();
+        _selectedLead = null;
+        _leadEditMode = false;
+        Notify.ShowSuccess($"Лид #{removedId} удалён.");
     }
 
     private static string GetLeadStageTone(string? stage)
