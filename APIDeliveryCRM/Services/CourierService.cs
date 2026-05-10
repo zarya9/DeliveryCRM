@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -261,6 +261,19 @@ namespace APIDeliveryCRM.Services
                 .ToListAsync();
         }
 
+        public async Task<Vehicle?> GetVehicleForCompanyAsync(int vehicleId, int companyId)
+        {
+            return await _context.Vehicles
+                .AsNoTracking()
+                .Where(v => v.ID_Vehicle == vehicleId && v.Company_id == companyId)
+                .Include(v => v.VehicleCategory)
+                .Include(v => v.VehicleModel)
+                    .ThenInclude(m => m!.VehicleBrand)
+                .Include(v => v.VehicleBodyType)
+                .Include(v => v.FuelType)
+                .FirstOrDefaultAsync();
+        }
+
         public async Task AssignVehicleAsync(int courierProfileId, int vehicleId, int? actorUserId = null, string? ipAddress = null)
         {
             var courier = await _context.CourierProfiles
@@ -416,6 +429,149 @@ namespace APIDeliveryCRM.Services
                 ipAddress: ipAddress);
 
             return entity;
+        }
+
+        public async Task UpdateVehicleAsync(int vehicleId, CreateVehicleRequest dto, int companyId, int? actorUserId = null, string? ipAddress = null)
+        {
+            var entity = await _context.Vehicles
+                .FirstOrDefaultAsync(v => v.ID_Vehicle == vehicleId && v.Company_id == companyId);
+            if (entity == null)
+                throw new KeyNotFoundException("ТС не найдено.");
+
+            if (string.IsNullOrWhiteSpace(dto.License_plate))
+                throw new InvalidOperationException("Укажите гос. номер.");
+            dto.License_plate = NormalizeLicensePlate(dto.License_plate);
+            if (!IsValidLicensePlate(dto.License_plate))
+                throw new InvalidOperationException("Гос. номер должен быть в формате А123ВС77 (допустимы только буквы АВЕКМНОРСТУХ и цифры).");
+            if (!VinHelper.IsValid(dto.VIN, out var vinError))
+                throw new InvalidOperationException(vinError ?? "Некорректный VIN.");
+
+            var vinNorm = dto.VIN.Trim().ToUpperInvariant();
+            if (await _context.Vehicles.AnyAsync(v => v.Company_id == companyId && v.VIN == vinNorm && v.ID_Vehicle != vehicleId))
+                throw new InvalidOperationException("В компании уже есть ТС с таким VIN.");
+            if (await _context.Vehicles.AnyAsync(v => v.Company_id == companyId && v.License_plate == dto.License_plate && v.ID_Vehicle != vehicleId))
+                throw new InvalidOperationException("В компании уже есть ТС с таким гос. номером.");
+
+            var category = await _context.VehicleCategories.AsNoTracking().FirstOrDefaultAsync(c => c.ID_Category == dto.Category_id);
+            if (category == null)
+                throw new InvalidOperationException("Категория ТС не найдена.");
+
+            var brandName = (dto.Brand_name ?? string.Empty).Trim();
+            var modelName = (dto.Model_name ?? string.Empty).Trim();
+            var year = dto.Year;
+
+            if (dto.Model_id is int catalogModelId && catalogModelId > 0)
+            {
+                var catalogModel = await _context.VehicleModels.AsNoTracking()
+                    .Include(m => m.VehicleBrand)
+                    .FirstOrDefaultAsync(m => m.ID_Model == catalogModelId);
+                if (catalogModel == null)
+                    throw new InvalidOperationException("Модель ТС из справочника не найдена.");
+                brandName = (catalogModel.VehicleBrand?.Name ?? brandName).Trim();
+                modelName = (catalogModel.Name ?? modelName).Trim();
+                year = catalogModel.Year;
+            }
+            else if (string.IsNullOrWhiteSpace(brandName) || string.IsNullOrWhiteSpace(modelName))
+            {
+                throw new InvalidOperationException("Укажите марку и модель ТС (вручную) или выберите модель из справочника.");
+            }
+
+            var body = await _context.VehicleBodyTypes.AsNoTracking().FirstOrDefaultAsync(b => b.ID_BodyType == dto.BodyType_id);
+            if (body == null)
+                throw new InvalidOperationException("Тип кузова не найден.");
+
+            var fuel = await _context.FuelTypes.AsNoTracking().FirstOrDefaultAsync(f => f.ID_FuelType == dto.FuelType_id);
+            if (fuel == null)
+                throw new InvalidOperationException("Тип топлива не найден.");
+
+            if (dto.CurrentCourier_id.HasValue)
+            {
+                var cp = await _context.CourierProfiles.AsNoTracking()
+                    .FirstOrDefaultAsync(c => c.ID_CourierProfile == dto.CurrentCourier_id.Value);
+                if (cp == null)
+                    throw new InvalidOperationException("Курьер не найден.");
+                if (cp.Company_id != companyId)
+                    throw new InvalidOperationException("Курьер принадлежит другой компании.");
+                if (cp.VehicleCategory_id != dto.Category_id)
+                    throw new InvalidOperationException("Нельзя закрепить ТС: категория не соответствует допуску курьера.");
+            }
+
+            entity.License_plate = dto.License_plate;
+            entity.VIN = vinNorm;
+            entity.Category_id = dto.Category_id;
+            entity.Model_id = dto.Model_id is int mid && mid > 0 ? mid : null;
+            entity.Brand_name = brandName;
+            entity.Model_name = modelName;
+            entity.Year = year;
+            entity.Color = dto.Color ?? string.Empty;
+            entity.BodyType_id = dto.BodyType_id;
+            entity.Cargo_volume = dto.Cargo_volume;
+            entity.Max_cargo_weight = dto.Max_cargo_weight;
+            entity.FuelType_id = dto.FuelType_id;
+            entity.FuelTank_Capacity = dto.FuelTank_Capacity;
+            entity.Current_mileage = dto.Current_mileage;
+            entity.Insurance_policy = dto.Insurance_policy ?? string.Empty;
+            entity.Insurance_expires_at = dto.Insurance_expires_at?.ToUniversalTime();
+            entity.Registration_expires_at = dto.Registration_expires_at?.ToUniversalTime();
+            entity.Maintenance_due_at = dto.Maintenance_due_at?.ToUniversalTime();
+            entity.Is_available = dto.Is_available;
+            entity.CurrentCourier_id = dto.CurrentCourier_id;
+
+            await _context.SaveChangesAsync();
+
+            if (dto.CurrentCourier_id.HasValue)
+            {
+                var others = await _context.Vehicles
+                    .Where(v => v.Company_id == companyId
+                        && v.CurrentCourier_id == dto.CurrentCourier_id.Value
+                        && v.ID_Vehicle != vehicleId)
+                    .ToListAsync();
+                foreach (var v in others)
+                    v.CurrentCourier_id = null;
+                await _context.SaveChangesAsync();
+            }
+
+            await _audit.LogAsync(
+                companyId,
+                actorUserId,
+                "Vehicles",
+                entity.ID_Vehicle,
+                "UPDATE",
+                $"Изменено ТС: {entity.License_plate}, {entity.Brand_name} {entity.Model_name}",
+                ipAddress: ipAddress);
+        }
+
+        public async Task DeleteVehicleAsync(int vehicleId, int companyId, int? actorUserId = null, string? ipAddress = null)
+        {
+            var vehicle = await _context.Vehicles
+                .FirstOrDefaultAsync(v => v.ID_Vehicle == vehicleId && v.Company_id == companyId);
+            if (vehicle == null)
+                throw new KeyNotFoundException("ТС не найдено.");
+
+            var plate = vehicle.License_plate;
+
+            var plans = await _context.ShiftPlans
+                .Where(p => p.Vehicle_id == vehicleId)
+                .ToListAsync();
+            foreach (var p in plans)
+                p.Vehicle_id = null;
+
+            var assignments = await _context.VehicleAssignments
+                .Where(a => a.Vehicle_id == vehicleId)
+                .ToListAsync();
+            _context.VehicleAssignments.RemoveRange(assignments);
+
+            _context.Vehicles.Remove(vehicle);
+            await _context.SaveChangesAsync();
+
+            await _audit.LogAsync(
+                companyId,
+                actorUserId,
+                "Vehicles",
+                vehicleId,
+                "DELETE",
+                $"Удалено ТС: {plate}",
+                ipAddress: ipAddress);
         }
 
         private static string NormalizeLicensePlate(string input)

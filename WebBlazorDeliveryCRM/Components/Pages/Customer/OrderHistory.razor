@@ -146,6 +146,7 @@
 
     private static string PriorityLabel(byte p) => p switch
     {
+        3 => "Критически срочный",
         2 => "Критический",
         1 => "Срочный",
         _ => "Обычный"

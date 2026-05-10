@@ -295,7 +295,27 @@ else
             _lastGeoError = "Не удалось определить координаты (таймаут).";
         else
             _lastGeoError = $"Геолокация: {message}";
+
+        // Геоданные недоступны — прерываем режим «в сети», чтобы не показывать устаревшую позицию как активную.
+        await ForceOfflineWhenGeoUnavailableAsync();
         await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ForceOfflineWhenGeoUnavailableAsync()
+    {
+        if (!_profileId.HasValue || !_online)
+            return;
+
+        try
+        {
+            await StopGeoWatchInternalAsync();
+            await CouriersApi.SetOnlineAsync(_profileId.Value, false);
+            _online = false;
+        }
+        catch
+        {
+            // Ошибка переключения online не должна ронять UI; пользователь увидит причину в _lastGeoError.
+        }
     }
 
     private async Task<(decimal lat, decimal lon)?> TryGetPositionSafeAsync()

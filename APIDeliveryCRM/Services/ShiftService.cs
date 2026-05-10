@@ -59,7 +59,7 @@ namespace APIDeliveryCRM.Services
                 onlineCourier.LastActivity_at = DateTime.UtcNow;
             }
             await _context.SaveChangesAsync();
-            await NotifyLogisticiansShiftStartedAsync(courierProfileId, courier.Company_id);
+            await TryNotifyLogisticiansShiftStartedAsync(courierProfileId, courier.Company_id);
             await TryRebuildCompanyPlanAsync(courier.Company_id, "shift.started");
             return shift;
         }
@@ -174,6 +174,18 @@ namespace APIDeliveryCRM.Services
 
             foreach (var logistUserId in logistIds)
                 await _notificationService.SendAsync(logistUserId, notificationTypeId, title, message);
+        }
+
+        private async Task TryNotifyLogisticiansShiftStartedAsync(int courierProfileId, int companyId)
+        {
+            try
+            {
+                await NotifyLogisticiansShiftStartedAsync(courierProfileId, companyId);
+            }
+            catch
+            {
+                // Shift lifecycle must not fail if notification insert fails (e.g. legacy NOT NULL constraints).
+            }
         }
 
         private async Task<int> ResolveShiftNotificationTypeIdAsync()

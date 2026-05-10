@@ -14,7 +14,7 @@
 
 <div class="dms-page-header">
     <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-        <a href="/logistician/couriers" class="btn btn-outline-secondary btn-sm">← К курьерам</a>
+        <a href="/logistician/fleet" class="btn btn-outline-secondary btn-sm">← К автопарку</a>
     </div>
     <h1>Добавить транспорт</h1>
     <p class="subtitle">
@@ -418,7 +418,7 @@ else
             if (ok)
             {
                 Notify.ShowSuccess(id.HasValue ? $"ТС создано (id {id})." : "ТС создано.");
-                Nav.NavigateTo("/logistician/couriers");
+                Nav.NavigateTo("/logistician/fleet");
             }
             else
                 Notify.ShowError(string.IsNullOrWhiteSpace(err) ? "Ошибка создания." : err);

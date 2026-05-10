@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -116,6 +117,76 @@ public class VehiclesController : Controller
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = $"Ошибка создания ТС: {ex.Message}" });
+            }
+        }
+
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+        [HttpGet("{id:int}")]
+        public async Task<IActionResult> GetById(int id)
+        {
+            var companyId = GetCompanyId();
+            if (!companyId.HasValue)
+                return Unauthorized(new { message = "Не указана компания в токене." });
+
+            var vehicle = await _courierService.GetVehicleForCompanyAsync(id, companyId.Value);
+            if (vehicle == null)
+                return NotFound(new { message = "ТС не найдено." });
+            return Ok(vehicle);
+        }
+
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+        [HttpPut("{id:int}")]
+        public async Task<IActionResult> Update(int id, [FromBody] CreateVehicleRequest dto)
+        {
+            var companyId = GetCompanyId();
+            if (!companyId.HasValue)
+                return Unauthorized(new { message = "Не указана компания в токене." });
+
+            var userId = GetUserId();
+            var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+            try
+            {
+                await _courierService.UpdateVehicleAsync(id, dto, companyId.Value, userId, ip);
+                return Ok();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = $"Ошибка сохранения ТС: {ex.Message}" });
+            }
+        }
+
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+        [HttpDelete("{id:int}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var companyId = GetCompanyId();
+            if (!companyId.HasValue)
+                return Unauthorized(new { message = "Не указана компания в токене." });
+
+            var userId = GetUserId();
+            var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+            try
+            {
+                await _courierService.DeleteVehicleAsync(id, companyId.Value, userId, ip);
+                return NoContent();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = $"Ошибка удаления ТС: {ex.Message}" });
             }
         }
 

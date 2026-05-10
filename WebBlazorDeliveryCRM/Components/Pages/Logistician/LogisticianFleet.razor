@@ -1,0 +1,995 @@
+@page "/logistician/fleet"
+@layout LogisticianLayout
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Utilities
+@using WebBlazorDeliveryCRM.Components.Shared
+@inject CouriersApiService CouriersApi
+@inject VehiclesApiService VehiclesApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AppNotificationService Notify
+@implements IDisposable
+
+<PageTitle>Автопарк — Логист</PageTitle>
+
+<div class="dms-page-header">
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="delivery-truck-01" CssClass="logistician-page-title-icon" />
+        Автопарк компании
+    </h1>
+    <p class="subtitle mb-0">
+        <a class="text-decoration-none" href="/logistician/couriers">← К списку курьеров</a>
+    </p>
+</div>
+
+<div class="dms-card">
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <h2 class="dms-card-title logistician-card-title-with-icon mb-0">
+            <HugeIcon Name="car-01" CssClass="logistician-card-title-icon" />
+            Транспорт
+        </h2>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            @if (_selectedVehicleId.HasValue)
+            {
+                <button type="button" class="btn btn-outline-info btn-sm d-inline-flex align-items-center gap-1" @onclick="OpenSelectedVehicleInfoAsync">
+                    <HugeIcon Name="audit-01" CssClass="dms-icon-sm" />
+                    <span>Инфо</span>
+                </button>
+                <button type="button" class="btn btn-outline-danger btn-sm d-inline-flex align-items-center gap-1" @onclick="DeleteSelectedVehicleAsync">
+                    <HugeIcon Name="delete-02" CssClass="dms-icon-sm" />
+                    <span>Удалить</span>
+                </button>
+            }
+            <button type="button" class="btn btn-primary btn-sm dms-btn-primary d-inline-flex align-items-center gap-1" @onclick="OpenAddVehicleModalAsync">
+                <HugeIcon Name="plus-sign" CssClass="dms-icon-sm" />
+                <span>Добавить авто</span>
+            </button>
+        </div>
+    </div>
+    @if (_vehicles.Count == 0)
+    {
+        <p class="text-muted mb-0">ТС пока не добавлены.</p>
+    }
+    else
+    {
+        <div class="hub-grid">
+            @foreach (var v in _vehicles.OrderBy(x => x.License_plate))
+            {
+                var assignedCourier = _couriers?.FirstOrDefault(c => c.ID_CourierProfile == v.CurrentCourier_id);
+                <div class="hub-card @(_selectedVehicleId == v.ID_Vehicle ? "hub-card-selected" : "")"
+                     @onclick="() => SelectVehicle(v)"
+                     @ondblclick="() => OpenVehicleDetailsAsync(v)">
+                    <h3 class="hub-card-title">@FormatVehicleShort(v)</h3>
+                    <div class="small text-muted">@(string.IsNullOrWhiteSpace(v.License_plate) ? "—" : v.License_plate)</div>
+                    <div class="small text-muted font-monospace">VIN @(string.IsNullOrWhiteSpace(v.VIN) ? "—" : TruncateVin(v.VIN))</div>
+                    <div class="small mt-2 mb-0 hub-card-orders d-flex align-items-center gap-2 flex-wrap">
+                        @if (assignedCourier is not null)
+                        {
+                            <UserAvatarThumb UserId="assignedCourier.User_id" Alt="@($"{assignedCourier.User?.FName} {assignedCourier.User?.Name}".Trim())" />
+                        }
+                        <span><span class="text-muted">Курьер: </span>@(assignedCourier is null ? "—" : $"{assignedCourier.User?.FName} {assignedCourier.User?.Name}".Trim())</span>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (_showAddVehicleModal)
+{
+    <div class="employee-modal-backdrop" @onclick="CloseAddVehicleModal">
+        <div class="employee-modal employee-modal--fleet-form" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <h2 class="h5 mb-0">Добавить транспорт</h2>
+                <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseAddVehicleModal"></button>
+            </div>
+
+            @if (_lookups is null)
+            {
+                <div class="alert alert-warning mb-0">Не удалось загрузить справочники для создания ТС.</div>
+            }
+            else
+            {
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Гос. номер *</label>
+                        <input class="form-control" value="@_newVehicle.License_plate" @oninput="OnLicensePlateInput" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">VIN *</label>
+                        <input class="form-control" maxlength="17" value="@_newVehicle.VIN" @oninput="OnVinInput" />
+                    </div>
+                    @if (UseVehicleCatalog)
+                    {
+                        <div class="col-md-6">
+                            <label class="form-label">Марка *</label>
+                            <select class="form-select" @bind="_selectedBrandId" @bind:after="OnCatalogBrandChangedAfter">
+                                <option value="0">— любая марка (или выберите первой) —</option>
+                                @foreach (var b in _catalogBrands)
+                                {
+                                    <option value="@b.Id">@b.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Модель *</label>
+                            <select class="form-select" @bind="_selectedModelId" @bind:after="OnCatalogModelChangedAfter">
+                                <option value="0">— выберите модель —</option>
+                                @foreach (var m in GetFilteredCatalogModels())
+                                {
+                                    <option value="@m.Id">@FormatCatalogModelOption(m)</option>
+                                }
+                            </select>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(_catalogHint))
+                        {
+                            <div class="col-12">
+                                <div class="form-text text-info">@_catalogHint</div>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <div class="col-md-4">
+                            <label class="form-label">Марка *</label>
+                            <input class="form-control" @bind="_newVehicle.Brand_name" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Модель *</label>
+                            <input class="form-control" @bind="_newVehicle.Model_name" />
+                        </div>
+                    }
+                    <div class="col-md-4">
+                        <label class="form-label">Категория *</label>
+                        <select class="form-select" @bind="_newVehicle.Category_id" @bind:after="OnCategoryChangedAfter">
+                            <option value="0">—</option>
+                            @foreach (var c in _lookups.Categories)
+                            {
+                                <option value="@c.Id">@c.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Кузов *</label>
+                        <select class="form-select" @bind="_newVehicle.BodyType_id">
+                            <option value="0">—</option>
+                            @foreach (var b in _lookups.BodyTypes)
+                            {
+                                <option value="@b.Id">@b.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Топливо *</label>
+                        <select class="form-select" @bind="_newVehicle.FuelType_id">
+                            <option value="0">—</option>
+                            @foreach (var f in _lookups.FuelTypes)
+                            {
+                                <option value="@f.Id">@f.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Год выпуска *</label>
+                        <input type="number" min="1980" max="2100" class="form-control" @bind="_newVehicleYear" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Цвет</label>
+                        <input class="form-control" @bind="_newVehicle.Color" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Объём кузова, м³</label>
+                        <input type="number" step="0.01" class="form-control" @bind="_newVehicle.Cargo_volume" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Макс. груз, кг</label>
+                        <input type="number" step="0.01" class="form-control" @bind="_newVehicle.Max_cargo_weight" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Бак, л</label>
+                        <input type="number" step="0.01" class="form-control" @bind="_newVehicle.FuelTank_Capacity" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Пробег</label>
+                        <input type="number" step="0.01" class="form-control" @bind="_newVehicle.Current_mileage" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Полис страхования</label>
+                        <input class="form-control" @bind="_newVehicle.Insurance_policy" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Закрепить за курьером</label>
+                        <select class="form-select" @bind="_newVehicleCourierId">
+                            <option value="0">— только автопарк —</option>
+                            @foreach (var c in (_couriers ?? new List<CourierProfileDto>()).OrderBy(x => x.User?.FName))
+                            {
+                                <option value="@c.ID_CourierProfile">@($"{c.User?.FName} {c.User?.Name}".Trim())</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="d-flex gap-2 mt-3">
+                    <button type="button" class="btn btn-primary dms-btn-primary" disabled="@_savingVehicle" @onclick="CreateVehicleAsync">
+                        @(_savingVehicle ? "Сохраняем..." : "Создать ТС")
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" disabled="@_savingVehicle" @onclick="CloseAddVehicleModal">Отмена</button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@if (_showDetailsModal && _detailsVehicleId.HasValue)
+{
+    <div class="employee-modal-backdrop" @onclick="CloseVehicleDetailsModal">
+        <div class="employee-modal employee-modal--fleet-form" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <h2 class="h5 mb-0">@(_vehicleEditMode ? "Редактирование ТС" : "Карточка ТС")</h2>
+                <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseVehicleDetailsModal"></button>
+            </div>
+
+            @if (_loadingVehicleDetail || _detailVehicle is null)
+            {
+                <p class="text-muted mb-0">Загрузка…</p>
+            }
+            else if (_vehicleEditMode)
+            {
+                @if (_lookups is null)
+                {
+                    <div class="alert alert-warning mb-0">Справочники недоступны.</div>
+                }
+                else
+                {
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Гос. номер *</label>
+                            <input class="form-control" value="@_editVehicle.License_plate" @oninput="OnEditLicensePlateInput" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">VIN *</label>
+                            <input class="form-control" maxlength="17" value="@_editVehicle.VIN" @oninput="OnEditVinInput" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Марка *</label>
+                            <input class="form-control" @bind="_editVehicle.Brand_name" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Модель *</label>
+                            <input class="form-control" @bind="_editVehicle.Model_name" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Категория *</label>
+                            <select class="form-select" @bind="_editVehicle.Category_id" @bind:after="OnEditCategoryChangedAfter">
+                                <option value="0">—</option>
+                                @foreach (var c in _lookups.Categories)
+                                {
+                                    <option value="@c.Id">@c.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Кузов *</label>
+                            <select class="form-select" @bind="_editVehicle.BodyType_id">
+                                <option value="0">—</option>
+                                @foreach (var b in _lookups.BodyTypes)
+                                {
+                                    <option value="@b.Id">@b.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Топливо *</label>
+                            <select class="form-select" @bind="_editVehicle.FuelType_id">
+                                <option value="0">—</option>
+                                @foreach (var f in _lookups.FuelTypes)
+                                {
+                                    <option value="@f.Id">@f.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Год выпуска *</label>
+                            <input type="number" min="1980" max="2100" class="form-control" @bind="_editVehicleYear" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Цвет</label>
+                            <input class="form-control" @bind="_editVehicle.Color" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Объём кузова, м³</label>
+                            <input type="number" step="0.01" class="form-control" @bind="_editVehicle.Cargo_volume" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Макс. груз, кг</label>
+                            <input type="number" step="0.01" class="form-control" @bind="_editVehicle.Max_cargo_weight" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Бак, л</label>
+                            <input type="number" step="0.01" class="form-control" @bind="_editVehicle.FuelTank_Capacity" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Пробег</label>
+                            <input type="number" step="0.01" class="form-control" @bind="_editVehicle.Current_mileage" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Полис страхования</label>
+                            <input class="form-control" @bind="_editVehicle.Insurance_policy" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Закрепить за курьером</label>
+                            <select class="form-select" @bind="_editVehicleCourierId">
+                                <option value="0">— только автопарк —</option>
+                                @foreach (var c in (_couriers ?? new List<CourierProfileDto>()).OrderBy(x => x.User?.FName))
+                                {
+                                    <option value="@c.ID_CourierProfile">@($"{c.User?.FName} {c.User?.Name}".Trim())</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Полис до</label>
+                            <input type="datetime-local" class="form-control"
+                                   value="@FormatDtLocal(_editVehicle.Insurance_expires_at)"
+                                   @onchange="OnEditInsuranceExpiresChanged" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Регистрация до</label>
+                            <input type="datetime-local" class="form-control"
+                                   value="@FormatDtLocal(_editVehicle.Registration_expires_at)"
+                                   @onchange="OnEditRegistrationExpiresChanged" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">ТО до</label>
+                            <input type="datetime-local" class="form-control"
+                                   value="@FormatDtLocal(_editVehicle.Maintenance_due_at)"
+                                   @onchange="OnEditMaintenanceDueChanged" />
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="fleet-edit-available" @bind="_editVehicle.Is_available" />
+                                <label class="form-check-label" for="fleet-edit-available">Доступно для назначений</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                        <button type="button" class="btn btn-outline-secondary" @onclick="CancelVehicleEditMode">Отмена</button>
+                        <button type="button" class="btn btn-primary dms-btn-primary" disabled="@_savingVehicleEdit" @onclick="SaveVehicleEditsAsync">
+                            @(_savingVehicleEdit ? "Сохраняем..." : "Сохранить")
+                        </button>
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="fleet-detail-grid">
+                    <div><strong>Марка / модель</strong></div><div>@FormatVehicleShort(_detailVehicle)</div>
+                    <div><strong>Гос. номер</strong></div><div>@(string.IsNullOrWhiteSpace(_detailVehicle.License_plate) ? "—" : _detailVehicle.License_plate)</div>
+                    <div><strong>VIN</strong></div><div class="font-monospace small">@(string.IsNullOrWhiteSpace(_detailVehicle.VIN) ? "—" : _detailVehicle.VIN)</div>
+                    <div><strong>Категория</strong></div><div>@(string.IsNullOrWhiteSpace(_detailVehicle.VehicleCategory?.Name) ? "—" : _detailVehicle.VehicleCategory!.Name)</div>
+                    <div><strong>Кузов</strong></div><div>@(string.IsNullOrWhiteSpace(_detailVehicle.VehicleBodyType?.Name) ? "—" : _detailVehicle.VehicleBodyType!.Name)</div>
+                    <div><strong>Топливо</strong></div><div>@(string.IsNullOrWhiteSpace(_detailVehicle.FuelType?.Name) ? "—" : _detailVehicle.FuelType!.Name)</div>
+                    <div><strong>Год</strong></div><div>@(_detailVehicle.Year.Year > 0 ? _detailVehicle.Year.Year.ToString() : "—")</div>
+                    <div><strong>Цвет</strong></div><div>@(string.IsNullOrWhiteSpace(_detailVehicle.Color) ? "—" : _detailVehicle.Color)</div>
+                    <div><strong>Объём, м³</strong></div><div>@_detailVehicle.Cargo_volume.ToString("0.##")</div>
+                    <div><strong>Макс. груз, кг</strong></div><div>@_detailVehicle.Max_cargo_weight.ToString("0.##")</div>
+                    <div><strong>Бак, л</strong></div><div>@_detailVehicle.FuelTank_Capacity.ToString("0.##")</div>
+                    <div><strong>Пробег</strong></div><div>@_detailVehicle.Current_mileage.ToString("0.##")</div>
+                    <div><strong>Полис</strong></div><div>@(string.IsNullOrWhiteSpace(_detailVehicle.Insurance_policy) ? "—" : _detailVehicle.Insurance_policy)</div>
+                    <div><strong>Полис до</strong></div><div>@FormatDetailDate(_detailVehicle.Insurance_expires_at)</div>
+                    <div><strong>Регистрация до</strong></div><div>@FormatDetailDate(_detailVehicle.Registration_expires_at)</div>
+                    <div><strong>ТО до</strong></div><div>@FormatDetailDate(_detailVehicle.Maintenance_due_at)</div>
+                    <div><strong>Доступно</strong></div><div>@(_detailVehicle.Is_available ? "Да" : "Нет")</div>
+                    <div><strong>Курьер</strong></div><div>@FormatCourierForVehicle(_detailVehicle)</div>
+                </div>
+                <div class="d-flex justify-content-end gap-2 mt-3 flex-wrap">
+                    <button type="button" class="btn btn-outline-secondary d-inline-flex align-items-center gap-1" @onclick="EnableVehicleEditMode">
+                        <HugeIcon Name="edit-01" CssClass="dms-icon-sm" />
+                        <span>Редактировать</span>
+                    </button>
+                    <button type="button" class="btn btn-danger d-inline-flex align-items-center gap-1" @onclick="DeleteActiveVehicleAsync">
+                        <HugeIcon Name="delete-02" CssClass="dms-icon-sm" />
+                        <span>Удалить</span>
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<style>
+    .fleet-detail-grid {
+        display: grid;
+        grid-template-columns: minmax(140px, 1fr) 2fr;
+        gap: 0.5rem 1rem;
+        align-items: baseline;
+        font-size: 0.95rem;
+    }
+
+    .dms-page-title-with-icon,
+    .logistician-card-title-with-icon {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .logistician-page-title-icon,
+    .logistician-card-title-icon {
+        width: 1.5rem;
+        height: 1.5rem;
+        flex-shrink: 0;
+        opacity: 0.92;
+    }
+</style>
+
+@code {
+    private List<CourierProfileDto>? _couriers;
+    private List<VehicleDto> _vehicles = new();
+    private VehicleFormLookupsDto? _lookups;
+    private PeriodicTimer? _refreshTimer;
+    private CancellationTokenSource? _refreshCts;
+    private bool _showAddVehicleModal;
+    private bool _showDetailsModal;
+    private int? _selectedVehicleId;
+    private int? _detailsVehicleId;
+    private bool _vehicleEditMode;
+    private bool _loadingVehicleDetail;
+    private VehicleDto? _detailVehicle;
+    private CreateVehicleApiRequest _editVehicle = CreateVehicleDefault();
+    private int _editVehicleYear = DateTime.UtcNow.Year;
+    private int _editVehicleCourierId;
+    private bool _savingVehicleEdit;
+    private bool _savingVehicle;
+    private CreateVehicleApiRequest _newVehicle = CreateVehicleDefault();
+    private int _newVehicleYear = DateTime.UtcNow.Year;
+    private int _newVehicleCourierId;
+    private List<IdNameDto> _catalogBrands = new();
+    private List<VehicleCatalogModelDto> _allCatalogModels = new();
+    private int _selectedBrandId;
+    private int _selectedModelId;
+    private string _catalogHint = string.Empty;
+
+    private bool _hasCatalogData;
+    private bool UseVehicleCatalog => _hasCatalogData;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await ReloadAsync();
+        StartAutoRefreshLoop();
+        StateHasChanged();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _couriers = await CouriersApi.GetAllAsync(null) ?? new List<CourierProfileDto>();
+        var cid = _couriers.FirstOrDefault()?.Company_id;
+        if (!cid.HasValue)
+        {
+            var state = await AuthStateProvider.GetAuthenticationStateAsync();
+            if (int.TryParse(state.User.FindFirst("companyId")?.Value, out var claimCid))
+                cid = claimCid;
+        }
+
+        _vehicles = cid.HasValue
+            ? await CouriersApi.GetVehiclesByCompanyAsync(cid.Value) ?? new List<VehicleDto>()
+            : new List<VehicleDto>();
+        _lookups ??= await VehiclesApi.GetLookupsAsync();
+        StateHasChanged();
+    }
+
+    private static string FormatVehicleShort(VehicleDto v)
+    {
+        var brand = v.VehicleModel?.VehicleBrand?.Name ?? v.Brand_name ?? "";
+        var model = v.VehicleModel?.Name ?? v.Model_name ?? "";
+        var plate = v.License_plate ?? "";
+        var parts = new[] { brand, model, plate }.Where(s => !string.IsNullOrWhiteSpace(s));
+        var s = string.Join(" ", parts);
+        return string.IsNullOrWhiteSpace(s) ? $"ТС #{v.ID_Vehicle}" : s;
+    }
+
+    private static string TruncateVin(string? vin)
+    {
+        if (string.IsNullOrWhiteSpace(vin)) return "—";
+        return vin.Length <= 12 ? vin : vin[..6] + "…" + vin[^4..];
+    }
+
+    private string FormatCourierForVehicle(VehicleDto v)
+    {
+        if (v.CurrentCourier_id is null or 0)
+            return "—";
+        var c = _couriers?.FirstOrDefault(x => x.ID_CourierProfile == v.CurrentCourier_id);
+        if (c is null)
+            return $"профиль #{v.CurrentCourier_id}";
+        return $"{c.User?.FName} {c.User?.Name}".Trim();
+    }
+
+    private static string FormatDetailDate(DateTime? utc)
+    {
+        if (!utc.HasValue) return "—";
+        return DateTime.SpecifyKind(utc.Value, DateTimeKind.Utc).ToLocalTime().ToString("g");
+    }
+
+    private static string? FormatDtLocal(DateTime? utc)
+    {
+        if (!utc.HasValue) return null;
+        var local = DateTime.SpecifyKind(utc.Value, DateTimeKind.Utc).ToLocalTime();
+        return local.ToString("yyyy-MM-ddTHH:mm");
+    }
+
+    private static DateTime? ParseDtLocal(ChangeEventArgs e)
+    {
+        var s = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(s))
+            return null;
+        if (!DateTime.TryParse(s, out var local))
+            return null;
+        return local.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(local, DateTimeKind.Local).ToUniversalTime()
+            : local.ToUniversalTime();
+    }
+
+    private void OnEditInsuranceExpiresChanged(ChangeEventArgs e)
+        => _editVehicle.Insurance_expires_at = ParseDtLocal(e);
+
+    private void OnEditRegistrationExpiresChanged(ChangeEventArgs e)
+        => _editVehicle.Registration_expires_at = ParseDtLocal(e);
+
+    private void OnEditMaintenanceDueChanged(ChangeEventArgs e)
+        => _editVehicle.Maintenance_due_at = ParseDtLocal(e);
+
+    private void SelectVehicle(VehicleDto v)
+    {
+        _selectedVehicleId = v.ID_Vehicle;
+    }
+
+    private async Task OpenVehicleDetailsAsync(VehicleDto v)
+    {
+        _selectedVehicleId = v.ID_Vehicle;
+        _detailsVehicleId = v.ID_Vehicle;
+        _vehicleEditMode = false;
+        _showDetailsModal = true;
+        _loadingVehicleDetail = true;
+        _detailVehicle = null;
+        StateHasChanged();
+
+        _detailVehicle = await VehiclesApi.GetVehicleByIdAsync(v.ID_Vehicle) ?? v;
+        _loadingVehicleDetail = false;
+        StateHasChanged();
+    }
+
+    private async Task OpenSelectedVehicleInfoAsync()
+    {
+        if (!_selectedVehicleId.HasValue)
+            return;
+        var v = _vehicles.FirstOrDefault(x => x.ID_Vehicle == _selectedVehicleId.Value);
+        if (v is null)
+            return;
+        await OpenVehicleDetailsAsync(v);
+    }
+
+    private void CloseVehicleDetailsModal()
+    {
+        _showDetailsModal = false;
+        _detailsVehicleId = null;
+        _vehicleEditMode = false;
+        _detailVehicle = null;
+    }
+
+    private void FillEditFromDetail()
+    {
+        if (_detailVehicle is null || _lookups is null)
+            return;
+        var v = _detailVehicle;
+        _editVehicle = new CreateVehicleApiRequest
+        {
+            License_plate = v.License_plate ?? "",
+            VIN = v.VIN ?? "",
+            Category_id = v.Category_id > 0 ? v.Category_id : (_lookups.Categories.FirstOrDefault()?.Id ?? 0),
+            Model_id = null,
+            Brand_name = v.Brand_name ?? v.VehicleModel?.VehicleBrand?.Name ?? "",
+            Model_name = v.Model_name ?? v.VehicleModel?.Name ?? "",
+            Year = v.Year,
+            Color = v.Color ?? "",
+            BodyType_id = v.BodyType_id,
+            Cargo_volume = v.Cargo_volume,
+            Max_cargo_weight = v.Max_cargo_weight,
+            FuelType_id = v.FuelType_id,
+            FuelTank_Capacity = v.FuelTank_Capacity,
+            Current_mileage = v.Current_mileage,
+            Insurance_policy = v.Insurance_policy ?? "",
+            Insurance_expires_at = v.Insurance_expires_at,
+            Registration_expires_at = v.Registration_expires_at,
+            Maintenance_due_at = v.Maintenance_due_at,
+            Is_available = v.Is_available,
+            CurrentCourier_id = v.CurrentCourier_id
+        };
+        _editVehicleYear = v.Year.Year > 0 ? v.Year.Year : DateTime.UtcNow.Year;
+        _editVehicleCourierId = v.CurrentCourier_id ?? 0;
+    }
+
+    private void EnableVehicleEditMode()
+    {
+        if (_detailVehicle is null || _lookups is null)
+        {
+            Notify.ShowWarning("Нет данных или справочников для редактирования.");
+            return;
+        }
+        FillEditFromDetail();
+        _vehicleEditMode = true;
+    }
+
+    private void CancelVehicleEditMode()
+    {
+        _vehicleEditMode = false;
+    }
+
+    private Task OnEditCategoryChangedAfter()
+    {
+        var maxWeight = _lookups?.Categories.FirstOrDefault(c => c.Id == _editVehicle.Category_id)?.MaxWeight;
+        if (maxWeight.HasValue && maxWeight.Value > 0)
+            _editVehicle.Max_cargo_weight = maxWeight.Value;
+        return Task.CompletedTask;
+    }
+
+    private void OnEditVinInput(ChangeEventArgs e)
+    {
+        _editVehicle.VIN = VinHelper.SanitizeInput(e.Value?.ToString());
+    }
+
+    private void OnEditLicensePlateInput(ChangeEventArgs e)
+    {
+        var raw = (e.Value?.ToString() ?? string.Empty).ToUpperInvariant();
+        raw = raw.Replace('A', 'А').Replace('B', 'В').Replace('E', 'Е').Replace('K', 'К').Replace('M', 'М')
+            .Replace('H', 'Н').Replace('O', 'О').Replace('P', 'Р').Replace('C', 'С').Replace('T', 'Т')
+            .Replace('Y', 'У').Replace('X', 'Х');
+        raw = new string(raw.Where(ch => char.IsDigit(ch) || "АВЕКМНОРСТУХ".Contains(ch)).ToArray());
+        _editVehicle.License_plate = raw.Length > 9 ? raw[..9] : raw;
+    }
+
+    private async Task SaveVehicleEditsAsync()
+    {
+        if (!_detailsVehicleId.HasValue || _detailVehicle is null || _lookups is null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(_editVehicle.License_plate) || string.IsNullOrWhiteSpace(_editVehicle.VIN))
+        {
+            Notify.ShowWarning("Укажите гос. номер и VIN.");
+            return;
+        }
+        if (!System.Text.RegularExpressions.Regex.IsMatch(_editVehicle.License_plate, "^[АВЕКМНОРСТУХ]\\d{3}[АВЕКМНОРСТУХ]{2}\\d{2,3}$"))
+        {
+            Notify.ShowWarning("Гос. номер должен быть в формате А123ВС77.");
+            return;
+        }
+        if (!VinHelper.IsValid(_editVehicle.VIN, out var vinErr))
+        {
+            Notify.ShowWarning(vinErr ?? "Некорректный VIN.");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_editVehicle.Brand_name) || string.IsNullOrWhiteSpace(_editVehicle.Model_name))
+        {
+            Notify.ShowWarning("Укажите марку и модель.");
+            return;
+        }
+        if (_editVehicle.Category_id <= 0 || _editVehicle.BodyType_id <= 0 || _editVehicle.FuelType_id <= 0)
+        {
+            Notify.ShowWarning("Выберите категорию, кузов и топливо.");
+            return;
+        }
+
+        _editVehicle.Year = new DateOnly(Math.Clamp(_editVehicleYear, 1980, 2100), 1, 1);
+        _editVehicle.CurrentCourier_id = _editVehicleCourierId > 0 ? _editVehicleCourierId : null;
+
+        _savingVehicleEdit = true;
+        try
+        {
+            var (ok, err) = await VehiclesApi.UpdateVehicleAsync(_detailsVehicleId.Value, _editVehicle);
+            if (!ok)
+            {
+                Notify.ShowError(string.IsNullOrWhiteSpace(err) ? "Не удалось сохранить ТС." : err!);
+                return;
+            }
+
+            Notify.ShowSuccess("ТС обновлено.");
+            _vehicleEditMode = false;
+            _detailVehicle = await VehiclesApi.GetVehicleByIdAsync(_detailsVehicleId.Value) ?? _detailVehicle;
+            await ReloadAsync();
+        }
+        finally
+        {
+            _savingVehicleEdit = false;
+        }
+    }
+
+    private async Task DeleteSelectedVehicleAsync()
+    {
+        if (!_selectedVehicleId.HasValue)
+            return;
+        await DeleteVehicleByIdAsync(_selectedVehicleId.Value);
+    }
+
+    private async Task DeleteActiveVehicleAsync()
+    {
+        if (!_detailsVehicleId.HasValue)
+            return;
+        await DeleteVehicleByIdAsync(_detailsVehicleId.Value);
+    }
+
+    private async Task DeleteVehicleByIdAsync(int vehicleId)
+    {
+        var (ok, err) = await VehiclesApi.DeleteVehicleAsync(vehicleId);
+        if (!ok)
+        {
+            Notify.ShowError(string.IsNullOrWhiteSpace(err) ? "Не удалось удалить ТС." : err!);
+            return;
+        }
+
+        Notify.ShowSuccess("ТС удалено.");
+        if (_selectedVehicleId == vehicleId)
+            _selectedVehicleId = null;
+        if (_detailsVehicleId == vehicleId)
+            CloseVehicleDetailsModal();
+        await ReloadAsync();
+    }
+
+    private async Task OpenAddVehicleModalAsync()
+    {
+        _newVehicle = CreateVehicleDefault();
+        _newVehicleYear = DateTime.UtcNow.Year;
+        _newVehicleCourierId = 0;
+        var brandsFromApi = await VehiclesApi.GetCatalogBrandsAsync();
+        _allCatalogModels = await VehiclesApi.GetCatalogModelsAsync(null);
+        _catalogBrands = brandsFromApi.Count > 0
+            ? brandsFromApi
+            : _allCatalogModels
+                .GroupBy(x => x.BrandId)
+                .Select(g => new IdNameDto { Id = g.Key, Name = g.First().BrandName ?? "" })
+                .OrderBy(b => b.Name)
+                .ToList();
+        _hasCatalogData = _catalogBrands.Count > 0 || _allCatalogModels.Count > 0;
+        _selectedBrandId = 0;
+        _selectedModelId = 0;
+        _catalogHint = string.Empty;
+        _showAddVehicleModal = true;
+    }
+
+    private async Task OnCatalogBrandChangedAfter()
+    {
+        _selectedModelId = 0;
+        _newVehicle.Model_id = null;
+        _newVehicle.Model_name = string.Empty;
+        _catalogHint = string.Empty;
+
+        if (_selectedBrandId > 0)
+        {
+            var byBrand = await VehiclesApi.GetCatalogModelsAsync(_selectedBrandId);
+            if (byBrand.Count > 0)
+            {
+                _allCatalogModels = byBrand;
+            }
+            else
+            {
+                var selectedBrandName = _catalogBrands.FirstOrDefault(b => b.Id == _selectedBrandId)?.Name;
+                if (!string.IsNullOrWhiteSpace(selectedBrandName))
+                {
+                    var all = await VehiclesApi.GetCatalogModelsAsync(null);
+                    var byName = all
+                        .Where(m => string.Equals((m.BrandName ?? string.Empty).Trim(), selectedBrandName.Trim(), StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    _allCatalogModels = byName.Count > 0 ? byName : all;
+                }
+            }
+        }
+        else
+        {
+            _allCatalogModels = await VehiclesApi.GetCatalogModelsAsync(null);
+        }
+
+        if (_selectedModelId <= 0)
+        {
+            SyncBrandNameFromSelection();
+            return;
+        }
+
+        var current = _allCatalogModels.FirstOrDefault(x => x.Id == _selectedModelId);
+        if (current is null || (_selectedBrandId > 0 && current.BrandId != _selectedBrandId))
+        {
+            _selectedModelId = 0;
+            _newVehicle.Model_id = null;
+            _newVehicle.Model_name = string.Empty;
+            _catalogHint = string.Empty;
+        }
+
+        SyncBrandNameFromSelection();
+    }
+
+    private Task OnCatalogModelChangedAfter()
+    {
+        var m = _allCatalogModels.FirstOrDefault(x => x.Id == _selectedModelId);
+        if (m is null || _selectedModelId <= 0)
+        {
+            _newVehicle.Model_id = null;
+            _newVehicle.Model_name = string.Empty;
+            _catalogHint = string.Empty;
+            SyncBrandNameFromSelection();
+            return Task.CompletedTask;
+        }
+
+        _selectedBrandId = m.BrandId;
+        _newVehicle.Model_id = m.Id;
+        _newVehicleYear = m.Year.Year;
+        _newVehicle.Brand_name = m.BrandName ?? string.Empty;
+        _newVehicle.Model_name = m.Name ?? string.Empty;
+        _catalogHint = BuildCatalogHint(m);
+        SyncBrandNameFromSelection();
+        return Task.CompletedTask;
+    }
+
+    private Task OnCategoryChangedAfter()
+    {
+        var maxWeight = _lookups?.Categories.FirstOrDefault(c => c.Id == _newVehicle.Category_id)?.MaxWeight;
+        if (maxWeight.HasValue && maxWeight.Value > 0)
+            _newVehicle.Max_cargo_weight = maxWeight.Value;
+        return Task.CompletedTask;
+    }
+
+    private void SyncBrandNameFromSelection()
+    {
+        if (_selectedBrandId > 0)
+            _newVehicle.Brand_name = _catalogBrands.FirstOrDefault(b => b.Id == _selectedBrandId)?.Name ?? string.Empty;
+        else if ((_newVehicle.Model_id ?? 0) <= 0)
+            _newVehicle.Brand_name = string.Empty;
+    }
+
+    private List<VehicleCatalogModelDto> GetFilteredCatalogModels()
+    {
+        IEnumerable<VehicleCatalogModelDto> q = _allCatalogModels;
+        if (_selectedBrandId > 0)
+            q = q.Where(m => m.BrandId == _selectedBrandId);
+        return q.OrderBy(m => m.BrandName).ThenBy(m => m.Name).ThenBy(m => m.Year).ToList();
+    }
+
+    private string FormatCatalogModelOption(VehicleCatalogModelDto m)
+    {
+        if (_selectedBrandId > 0)
+            return $"{m.Name} ({m.Year})";
+        var brand = string.IsNullOrWhiteSpace(m.BrandName) ? "?" : m.BrandName;
+        return $"{brand} — {m.Name} ({m.Year})";
+    }
+
+    private static string BuildCatalogHint(VehicleCatalogModelDto m)
+    {
+        var tr = string.IsNullOrWhiteSpace(m.TransmissionTypeName) ? $"КПП #{m.TransmissionTypeId}" : m.TransmissionTypeName;
+        var dr = string.IsNullOrWhiteSpace(m.DriveTypeName) ? $"привод #{m.DriveTypeId}" : m.DriveTypeName;
+        return $"Справочник: расход {m.AvgFuelCity:0.#} / {m.AvgFuelHighWay:0.#} л/100 км, двигатель {m.EngineCapacity:0.#} л, {m.HorsePower} л.с., {tr}, {dr}.";
+    }
+
+    private void OnVinInput(ChangeEventArgs e)
+    {
+        _newVehicle.VIN = VinHelper.SanitizeInput(e.Value?.ToString());
+    }
+
+    private void CloseAddVehicleModal()
+    {
+        _showAddVehicleModal = false;
+    }
+
+    private async Task CreateVehicleAsync()
+    {
+        if (_lookups is null)
+        {
+            Notify.ShowError("Справочники ТС не загружены.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_newVehicle.License_plate) || string.IsNullOrWhiteSpace(_newVehicle.VIN))
+        {
+            Notify.ShowWarning("Укажите гос. номер и VIN.");
+            return;
+        }
+        if (!System.Text.RegularExpressions.Regex.IsMatch(_newVehicle.License_plate, "^[АВЕКМНОРСТУХ]\\d{3}[АВЕКМНОРСТУХ]{2}\\d{2,3}$"))
+        {
+            Notify.ShowWarning("Гос. номер должен быть в формате А123ВС77.");
+            return;
+        }
+        if (!VinHelper.IsValid(_newVehicle.VIN, out var vinErr))
+        {
+            Notify.ShowWarning(vinErr ?? "Некорректный VIN.");
+            return;
+        }
+        if ((_newVehicle.Model_id ?? 0) <= 0 &&
+            (string.IsNullOrWhiteSpace(_newVehicle.Brand_name) || string.IsNullOrWhiteSpace(_newVehicle.Model_name)))
+        {
+            Notify.ShowWarning("Выберите модель из справочника или укажите марку и модель вручную.");
+            return;
+        }
+        if (_newVehicle.Category_id <= 0 || _newVehicle.BodyType_id <= 0 || _newVehicle.FuelType_id <= 0)
+        {
+            Notify.ShowWarning("Выберите категорию, кузов и топливо.");
+            return;
+        }
+        if (UseVehicleCatalog && _selectedBrandId > 0 && GetFilteredCatalogModels().Count == 0)
+        {
+            Notify.ShowWarning("Для выбранной марки в справочнике нет моделей. Выберите другую марку или заполните вручную.");
+            return;
+        }
+
+        _newVehicle.Year = new DateOnly(Math.Clamp(_newVehicleYear, 1980, 2100), 1, 1);
+        _newVehicle.CurrentCourier_id = _newVehicleCourierId > 0 ? _newVehicleCourierId : null;
+
+        _savingVehicle = true;
+        try
+        {
+            var (ok, err, _) = await VehiclesApi.CreateVehicleAsync(_newVehicle);
+            if (!ok)
+            {
+                Notify.ShowError(string.IsNullOrWhiteSpace(err) ? "Не удалось создать ТС." : err!);
+                return;
+            }
+
+            Notify.ShowSuccess("ТС добавлено.");
+            _newVehicle = CreateVehicleDefault();
+            _newVehicleYear = DateTime.UtcNow.Year;
+            _newVehicleCourierId = 0;
+            _showAddVehicleModal = false;
+            await ReloadAsync();
+        }
+        finally
+        {
+            _savingVehicle = false;
+        }
+    }
+
+    private static CreateVehicleApiRequest CreateVehicleDefault() => new()
+    {
+        Year = new DateOnly(DateTime.UtcNow.Year, 1, 1),
+        Cargo_volume = 0,
+        Max_cargo_weight = 0,
+        FuelTank_Capacity = 0,
+        Current_mileage = 0,
+        Is_available = true
+    };
+
+    private void OnLicensePlateInput(ChangeEventArgs e)
+    {
+        var raw = (e.Value?.ToString() ?? string.Empty).ToUpperInvariant();
+        raw = raw.Replace('A', 'А').Replace('B', 'В').Replace('E', 'Е').Replace('K', 'К').Replace('M', 'М')
+            .Replace('H', 'Н').Replace('O', 'О').Replace('P', 'Р').Replace('C', 'С').Replace('T', 'Т')
+            .Replace('Y', 'У').Replace('X', 'Х');
+        raw = new string(raw.Where(ch => char.IsDigit(ch) || "АВЕКМНОРСТУХ".Contains(ch)).ToArray());
+        _newVehicle.License_plate = raw.Length > 9 ? raw[..9] : raw;
+    }
+
+    private void StartAutoRefreshLoop()
+    {
+        StopAutoRefreshLoop();
+        _refreshCts = new CancellationTokenSource();
+        _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(20));
+        _ = RunAutoRefreshAsync(_refreshCts.Token);
+    }
+
+    private async Task RunAutoRefreshAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (_refreshTimer is not null && await _refreshTimer.WaitForNextTickAsync(ct))
+                await ReloadAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void StopAutoRefreshLoop()
+    {
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        _refreshCts = null;
+        _refreshTimer?.Dispose();
+        _refreshTimer = null;
+    }
+
+    public void Dispose()
+    {
+        StopAutoRefreshLoop();
+    }
+}

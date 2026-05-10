@@ -455,7 +455,13 @@ namespace APIDeliveryCRM.Services
 
                     var distanceScore = (double)(distance ?? 30m);
                     var loadScore = c.ActiveOrders * 4.0;
-                    var urgentBoost = order.Priority == 2 ? -3.0 : order.Priority == 1 ? -1.5 : 0.0;
+                    var urgentBoost = order.Priority switch
+                    {
+                        3 => -5.5,
+                        2 => -3.0,
+                        1 => -1.5,
+                        _ => 0.0
+                    };
                     var vehicleBoost = c.HasOperationalVehicle ? -2.0 : 2.0;
                     var total = distanceScore + loadScore + urgentBoost + vehicleBoost;
 
@@ -1000,6 +1006,7 @@ namespace APIDeliveryCRM.Services
         {
             var baseMinutes = priority switch
             {
+                3 => 28,
                 2 => 45,
                 1 => 90,
                 _ => 150

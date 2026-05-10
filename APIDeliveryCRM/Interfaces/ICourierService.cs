@@ -16,6 +16,9 @@ namespace APIDeliveryCRM.Interfaces
         Task<IReadOnlyList<Vehicle>> GetVehiclesByCompanyAsync(int companyId);
         Task AssignVehicleAsync(int courierProfileId, int vehicleId, int? actorUserId = null, string? ipAddress = null);
         Task<Vehicle> CreateVehicleAsync(CreateVehicleRequest dto, int companyId, int? actorUserId = null, string? ipAddress = null);
+        Task<Vehicle?> GetVehicleForCompanyAsync(int vehicleId, int companyId);
+        Task UpdateVehicleAsync(int vehicleId, CreateVehicleRequest dto, int companyId, int? actorUserId = null, string? ipAddress = null);
+        Task DeleteVehicleAsync(int vehicleId, int companyId, int? actorUserId = null, string? ipAddress = null);
         Task UpdateCourierDocumentsAsync(int courierProfileId, int companyId, string? driverLicense, string? passportData);
         Task EnsureCourierProfileForUserAsync(int userId, int companyId);
     }

@@ -1,0 +1,45 @@
+@inject ChatApiService ChatApi
+
+@if (_failed || UserId <= 0)
+{
+    <div class="user-avatar-thumb user-avatar-thumb--fallback @(Large ? "user-avatar-thumb--lg" : null) @CssClass" role="img" aria-label="@Alt">
+        <HugeIcon Name="user-03" CssClass="@(Large ? "user-avatar-thumb__icon user-avatar-thumb__icon--lg" : "user-avatar-thumb__icon")" />
+    </div>
+}
+else
+{
+    <img src="@_src"
+         alt="@Alt"
+         class="user-avatar-thumb @(Large ? "user-avatar-thumb--lg" : null) @CssClass"
+         width="48"
+         height="48"
+         loading="lazy"
+         @onerror="OnImgError" />
+}
+
+@code {
+    [Parameter] public int UserId { get; set; }
+    [Parameter] public string CssClass { get; set; } = "";
+    [Parameter] public string Alt { get; set; } = "";
+    [Parameter] public bool Large { get; set; }
+
+    private bool _failed;
+    private string _src = "";
+    private int _boundUserId;
+
+    protected override void OnParametersSet()
+    {
+        if (UserId != _boundUserId)
+        {
+            _boundUserId = UserId;
+            _failed = false;
+        }
+        _src = UserId > 0 ? ChatApi.BuildAvatarUrl(UserId) : "";
+    }
+
+    private void OnImgError()
+    {
+        if (_failed) return;
+        _failed = true;
+    }
+}

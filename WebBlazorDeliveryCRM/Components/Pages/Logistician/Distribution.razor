@@ -12,135 +12,254 @@
 <PageTitle>Распределение заказов — Логист</PageTitle>
 
 <div class="dms-page-header">
-    <h1>Панель распределения заказов</h1>
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="package-moving" CssClass="logistician-page-title-icon" />
+        Панель распределения заказов
+    </h1>
     <p class="subtitle">Новые заказы и назначение курьеров</p>
 </div>
 
 <div class="dms-stat-grid">
-    <KpiCard Title="Ожидают назначения" Value="@_unassignedCount.ToString()" />
-    <KpiCard Title="Свободных курьеров" Value="@_freeCouriersCount.ToString()" />
+    <KpiCard Title="Ожидают назначения" Value="@_unassignedCount.ToString()" IconName="task-01" />
+    <KpiCard Title="Свободных курьеров" Value="@_freeCouriersCount.ToString()" IconName="user-group" />
 </div>
 
 <div class="dms-card">
-    <h2 class="dms-card-title">Заказы без курьера</h2>
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <h2 class="dms-card-title logistician-card-title-with-icon mb-0">
+            <HugeIcon Name="invoice-01" CssClass="logistician-card-title-icon" />
+            Заказы без курьера
+        </h2>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            @if (_selectedUnassignedOrderId.HasValue)
+            {
+                <button type="button" class="btn btn-outline-info btn-sm d-inline-flex align-items-center gap-1" @onclick="OpenSelectedOrderInfo">
+                    <HugeIcon Name="audit-01" CssClass="dms-icon-sm" />
+                    <span>Инфо</span>
+                </button>
+                <button type="button" class="btn btn-outline-success btn-sm d-inline-flex align-items-center gap-1" disabled="@(_assigningOrderId == _selectedUnassignedOrderId || GetOrderBySelectedId() is null || GetRecommendedCourier(GetOrderBySelectedId()!) is null)" @onclick="AssignBestSelectedAsync">
+                    <HugeIcon Name="analytics-up" CssClass="dms-icon-sm" />
+                    <span>Лучший</span>
+                </button>
+            }
+        </div>
+    </div>
     @if (_unassigned?.Count > 0)
     {
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>№</th>
-                    <th>Название</th>
-                    <th>Маршрут</th>
-                    <th>Точки маршрута</th>
-                    <th>Статус</th>
-                    <th>Действие</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var o in _unassigned)
-                {
-                    var top3 = GetTopCouriersForOrder(o);
-                    <tr>
-                        <td>@o.Order_Number</td>
-                        <td>@o.Name</td>
-                        <td>@RouteKindLabel(o.DeliveryRouteKind)</td>
-                        <td>
-                            @if (o.RouteStops is { Count: > 0 })
+        <div class="hub-grid">
+            @foreach (var o in _unassigned)
+            {
+                var top3 = GetTopCouriersForOrder(o);
+                <div class="hub-card @(_selectedUnassignedOrderId == o.ID_Order ? "hub-card-selected" : "")"
+                     @onclick="() => SelectUnassignedOrder(o)"
+                     @ondblclick="() => OpenOrderInfoModal(o)">
+                    <h3 class="hub-card-title mb-1">№@o.Order_Number · @(string.IsNullOrWhiteSpace(o.Name) ? "Без названия" : o.Name)</h3>
+                    <div class="small text-muted mb-1">@RouteKindLabel(o.DeliveryRouteKind)</div>
+                    <div class="mb-2">
+                        <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@GetOrderStatusTone(o.OrderStatus?.Name)" />
+                    </div>
+                    @if (o.RouteStops is { Count: > 0 })
+                    {
+                        <ol class="small mb-0 ps-3 hub-card-orders">
+                            @foreach (var s in o.RouteStops.OrderBy(x => x.SortOrder))
                             {
-                                <ol class="mb-0 ps-3 small">
-                                    @foreach (var s in o.RouteStops.OrderBy(x => x.SortOrder))
+                                <li class="text-body">@(string.IsNullOrEmpty(s.Title) ? StopKindLabel(s.Kind) : s.Title)</li>
+                            }
+                        </ol>
+                    }
+                    else
+                    {
+                        <p class="small text-muted mb-0 hub-card-orders">Точки маршрута не заданы.</p>
+                    }
+                    <div class="mt-auto pt-2 border-top border-secondary border-opacity-25" @onclick:stopPropagation="true">
+                        <div class="d-flex flex-wrap align-items-center gap-1 mb-1">
+                            <select class="form-select form-select-sm" style="width: auto; min-width: 10rem; max-width: 100%; flex: 1;" value="@GetSelectedCourier(o.ID_Order)" @onchange="e => SetSelectedCourier(o.ID_Order, int.TryParse(e.Value?.ToString(), out var v) ? v : 0)">
+                                <option value="0">— Курьер —</option>
+                                @if (_couriers != null)
+                                {
+                                    @foreach (var c in GetCouriersRankedForOrder(o))
                                     {
-                                        <li class="text-body">@(string.IsNullOrEmpty(s.Title) ? StopKindLabel(s.Kind) : s.Title)</li>
+                                        <option value="@c.ID_CourierProfile">@GetCourierLabel(c, o)</option>
+                                    }
+                                }
+                            </select>
+                            <button type="button" class="btn btn-sm btn-primary" disabled="@(_assigningOrderId == o.ID_Order)" @onclick="() => AssignCourier(o.ID_Order)">Назначить</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" title="Лучший по баллу" disabled="@(_assigningOrderId == o.ID_Order || GetRecommendedCourier(o) is null)" @onclick="() => AssignBestCourier(o.ID_Order)">Лучший</button>
+                        </div>
+                        @if (top3.Count > 0)
+                        {
+                            <div class="small border rounded px-2 py-1 bg-body-secondary bg-opacity-25">
+                                <div class="text-muted text-uppercase" style="font-size: 0.65rem; letter-spacing: 0.04em;">Топ‑3 по баллу</div>
+                                <ol class="mb-0 ps-3 mt-1">
+                                    @foreach (var row in top3)
+                                    {
+                                        <li class="@(row.Rank == 1 ? "fw-semibold" : null)">
+                                            @CourierShortName(row.Courier) — <span class="text-muted">@row.Score.ToString("0.0")</span>
+                                            @if (row.Rank == 1)
+                                            {
+                                                <span class="badge text-bg-success ms-1" style="font-size: 0.65rem;">лучший</span>
+                                            }
+                                        </li>
                                     }
                                 </ol>
-                            }
-                            else
-                            {
-                                <span class="text-muted">—</span>
-                            }
-                        </td>
-                        <td><StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@GetOrderStatusTone(o.OrderStatus?.Name)" /></td>
-                        <td style="min-width: 280px;">
-                            <div class="d-flex flex-wrap align-items-center gap-1 mb-1">
-                                <select class="form-select form-select-sm" style="width: auto; min-width: 12rem; max-width: 100%;" value="@GetSelectedCourier(o.ID_Order)" @onchange="e => SetSelectedCourier(o.ID_Order, int.TryParse(e.Value?.ToString(), out var v) ? v : 0)">
-                                    <option value="0">— Выбрать курьера —</option>
-                                    @if (_couriers != null)
-                                    {
-                                        @foreach (var c in GetCouriersRankedForOrder(o))
-                                        {
-                                            <option value="@c.ID_CourierProfile">@GetCourierLabel(c, o)</option>
-                                        }
-                                    }
-                                </select>
-                                <button type="button" class="btn btn-sm btn-primary" disabled="@(_assigningOrderId == o.ID_Order)" @onclick="() => AssignCourier(o.ID_Order)">Назначить</button>
-                                <button type="button" class="btn btn-sm btn-outline-primary" title="Назначить курьера с максимальным баллом" disabled="@(_assigningOrderId == o.ID_Order || GetRecommendedCourier(o) is null)" @onclick="() => AssignBestCourier(o.ID_Order)">Лучший</button>
                             </div>
-                            @if (top3.Count > 0)
-                            {
-                                <div class="small border rounded px-2 py-1 bg-body-secondary bg-opacity-25">
-                                    <div class="text-muted text-uppercase" style="font-size: 0.65rem; letter-spacing: 0.04em;">Топ‑3 по баллу</div>
-                                    <ol class="mb-0 ps-3 mt-1">
-                                        @foreach (var row in top3)
-                                        {
-                                            <li class="@(row.Rank == 1 ? "fw-semibold" : null)">
-                                                @CourierShortName(row.Courier) — <span class="text-muted">@row.Score.ToString("0.0")</span>
-                                                @if (row.Rank == 1)
-                                                {
-                                                    <span class="badge text-bg-success ms-1" style="font-size: 0.65rem;">лучший</span>
-                                                }
-                                            </li>
-                                        }
-                                    </ol>
-                                </div>
-                            }
-                            else if (_couriers is { Count: 0 })
-                            {
-                                <div class="small text-warning mt-1">Нет курьеров в компании.</div>
-                            }
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+                        }
+                        else if (_couriers is { Count: 0 })
+                        {
+                            <div class="small text-warning mt-1">Нет курьеров в компании.</div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
     }
     else
     {
-        <p class="text-muted">Нет заказов без курьера.</p>
+        <p class="text-muted mb-0">Нет заказов без курьера.</p>
     }
 </div>
 
 <div class="dms-card mt-3">
-    <h2 class="dms-card-title">Курьеры</h2>
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <h2 class="dms-card-title logistician-card-title-with-icon mb-0">
+            <HugeIcon Name="user-group" CssClass="logistician-card-title-icon" />
+            Курьеры
+        </h2>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            @if (_selectedDistributionCourierId.HasValue)
+            {
+                <button type="button" class="btn btn-outline-info btn-sm d-inline-flex align-items-center gap-1" @onclick="OpenSelectedCourierInfo">
+                    <HugeIcon Name="audit-01" CssClass="dms-icon-sm" />
+                    <span>Инфо</span>
+                </button>
+                <button type="button" class="btn btn-outline-primary btn-sm d-inline-flex align-items-center gap-1" @onclick="NavigateToSelectedCourier">
+                    <HugeIcon Name="user-03" CssClass="dms-icon-sm" />
+                    <span>Профиль</span>
+                </button>
+            }
+        </div>
+    </div>
     @if (_couriers != null && _couriers.Count > 0)
     {
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>ФИО</th>
-                    <th>Категория допуска (ТС)</th>
-                    <th>Водительское удостоверение</th>
-                    <th>Текущий автомобиль</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var c in _couriers)
-                {
-                    <tr style="cursor: pointer;" title="Карточка курьера"
-                        @onclick="@(() => Navigation.NavigateTo($"/logistician/couriers/{c.ID_CourierProfile}"))">
-                        <td>@(c.User?.FName) @(c.User?.Name)</td>
-                        <td>@(c.VehicleCategory?.Name ?? c.VehicleCategoryName ?? "—")</td>
-                        <td>@(string.IsNullOrWhiteSpace(c.DriverLicense) ? "—" : c.DriverLicense)</td>
-                        <td>@CurrentVehicleLabel(c.ID_CourierProfile)</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+        <div class="hub-grid">
+            @foreach (var c in _couriers.OrderBy(x => x.User?.FName).ThenBy(x => x.User?.Name))
+            {
+                <div class="hub-card @(_selectedDistributionCourierId == c.ID_CourierProfile ? "hub-card-selected" : "")"
+                     @onclick="() => SelectDistributionCourier(c)"
+                     @ondblclick="() => OpenCourierPreviewModal(c)">
+                    <div class="courier-hub-card-head">
+                        <div class="courier-hub-card-head__main">
+                            <h3 class="hub-card-title">@($"{c.User?.FName} {c.User?.Name}".Trim())</h3>
+                            <div class="small text-muted">@(c.VehicleCategory?.Name ?? c.VehicleCategoryName ?? "—")</div>
+                            <div class="small mt-1">Вод. удостоверение: @(string.IsNullOrWhiteSpace(c.DriverLicense) ? "—" : c.DriverLicense)</div>
+                        </div>
+                        <UserAvatarThumb @key="c.User_id"
+                                         UserId="c.User_id"
+                                         Alt="@($"{c.User?.FName} {c.User?.Name}".Trim())" />
+                    </div>
+                    <div class="small mt-2 mb-0 hub-card-orders">
+                        <span class="text-muted">Авто: </span>@CurrentVehicleLabel(c.ID_CourierProfile)
+                    </div>
+                </div>
+            }
+        </div>
     }
     else
     {
         <p class="text-muted">Нет данных о курьерах.</p>
     }
 </div>
+
+@if (_showOrderAssignModal && ModalOrder is not null)
+{
+    var mo = ModalOrder;
+    <div class="employee-modal-backdrop" @onclick="CloseOrderModal">
+        <div class="employee-modal employee-modal--fleet-form" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <h2 class="h5 mb-0">Заказ №@mo.Order_Number</h2>
+                <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseOrderModal"></button>
+            </div>
+            <div class="mb-2"><strong>Название:</strong> @(string.IsNullOrWhiteSpace(mo.Name) ? "—" : mo.Name)</div>
+            <div class="mb-2"><strong>Маршрут:</strong> @RouteKindLabel(mo.DeliveryRouteKind)</div>
+            <div class="mb-2"><strong>Статус:</strong> <StatusBadge Text="@(mo.OrderStatus?.Name ?? "—")" Tone="@GetOrderStatusTone(mo.OrderStatus?.Name)" /></div>
+            @if (mo.RouteStops is { Count: > 0 })
+            {
+                <div class="mb-2">
+                    <strong>Точки:</strong>
+                    <ol class="mb-0 ps-3 mt-1">
+                        @foreach (var s in mo.RouteStops.OrderBy(x => x.SortOrder))
+                        {
+                            <li>@(string.IsNullOrEmpty(s.Title) ? StopKindLabel(s.Kind) : s.Title)</li>
+                        }
+                    </ol>
+                </div>
+            }
+            <hr />
+            <div @onclick:stopPropagation="true">
+                <label class="form-label small">Назначить курьера</label>
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <select class="form-select form-select-sm" style="max-width: 22rem;" value="@GetSelectedCourier(mo.ID_Order)" @onchange="e => SetSelectedCourier(mo.ID_Order, int.TryParse(e.Value?.ToString(), out var v) ? v : 0)">
+                        <option value="0">— Выбрать курьера —</option>
+                        @if (_couriers != null)
+                        {
+                            @foreach (var c in GetCouriersRankedForOrder(mo))
+                            {
+                                <option value="@c.ID_CourierProfile">@GetCourierLabel(c, mo)</option>
+                            }
+                        }
+                    </select>
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@(_assigningOrderId == mo.ID_Order)" @onclick="() => AssignCourier(mo.ID_Order)">Назначить</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_assigningOrderId == mo.ID_Order || GetRecommendedCourier(mo) is null)" @onclick="() => AssignBestCourier(mo.ID_Order)">Лучший</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_showCourierPreviewModal && _previewCourier is not null)
+{
+    var pc = _previewCourier;
+    <div class="employee-modal-backdrop" @onclick="CloseCourierPreviewModal">
+        <div class="employee-modal employee-modal--fleet-form" @onclick:stopPropagation="true">
+            <div class="d-flex align-items-start gap-3 mb-3">
+                <UserAvatarThumb UserId="pc.User_id"
+                                 Large="true"
+                                 Alt="@($"{pc.User?.FName} {pc.User?.Name}".Trim())" />
+                <div class="flex-grow-1 min-w-0">
+                    <h2 class="h5 mb-0">@($"{pc.User?.FName} {pc.User?.Name}".Trim())</h2>
+                </div>
+                <button type="button" class="btn-close flex-shrink-0" aria-label="Закрыть" @onclick="CloseCourierPreviewModal"></button>
+            </div>
+            <div class="mb-2"><strong>Категория ТС:</strong> @(pc.VehicleCategory?.Name ?? pc.VehicleCategoryName ?? "—")</div>
+            <div class="mb-2"><strong>Водительское удостоверение:</strong> @(string.IsNullOrWhiteSpace(pc.DriverLicense) ? "—" : pc.DriverLicense)</div>
+            <div class="mb-3"><strong>Текущий автомобиль:</strong> @CurrentVehicleLabel(pc.ID_CourierProfile)</div>
+            <div class="d-flex justify-content-end gap-2">
+                <button type="button" class="btn btn-outline-secondary" @onclick="CloseCourierPreviewModal">Закрыть</button>
+                <button type="button" class="btn btn-primary dms-btn-primary d-inline-flex align-items-center gap-1" @onclick="() => GoCourierProfile(pc.ID_CourierProfile)">
+                    <HugeIcon Name="user-03" CssClass="dms-icon-sm" />
+                    <span>Открыть карточку</span>
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .dms-page-title-with-icon,
+    .logistician-card-title-with-icon {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .logistician-page-title-icon,
+    .logistician-card-title-icon {
+        width: 1.5rem;
+        height: 1.5rem;
+        flex-shrink: 0;
+        opacity: 0.92;
+    }
+</style>
 
 @code {
     private List<OrderDto>? _orders;
@@ -152,6 +271,16 @@
     private int _assigningOrderId;
     private Dictionary<int, int> _courierActiveOrders = new();
     private List<VehicleDto> _vehicles = new();
+
+    private int? _selectedUnassignedOrderId;
+    private int? _selectedDistributionCourierId;
+    private bool _showOrderAssignModal;
+    private int? _modalOrderId;
+    private bool _showCourierPreviewModal;
+    private CourierProfileDto? _previewCourier;
+
+    private OrderDto? ModalOrder =>
+        _modalOrderId.HasValue ? _unassigned?.FirstOrDefault(x => x.ID_Order == _modalOrderId.Value) : null;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -179,6 +308,81 @@
         _orderCourierSelection = _unassigned.ToDictionary(
             x => x.ID_Order,
             x => GetRecommendedCourier(x)?.ID_CourierProfile ?? 0);
+
+        if (_selectedUnassignedOrderId.HasValue && !(_unassigned?.Any(o => o.ID_Order == _selectedUnassignedOrderId.Value) ?? false))
+            _selectedUnassignedOrderId = null;
+        if (_selectedDistributionCourierId.HasValue && !(_couriers?.Any(c => c.ID_CourierProfile == _selectedDistributionCourierId.Value) ?? false))
+            _selectedDistributionCourierId = null;
+    }
+
+    private void SelectUnassignedOrder(OrderDto o) => _selectedUnassignedOrderId = o.ID_Order;
+
+    private void SelectDistributionCourier(CourierProfileDto c) => _selectedDistributionCourierId = c.ID_CourierProfile;
+
+    private OrderDto? GetOrderBySelectedId()
+        => _selectedUnassignedOrderId.HasValue
+            ? _unassigned?.FirstOrDefault(x => x.ID_Order == _selectedUnassignedOrderId.Value)
+            : null;
+
+    private void OpenSelectedOrderInfo()
+    {
+        var o = GetOrderBySelectedId();
+        if (o is null) return;
+        OpenOrderInfoModal(o);
+    }
+
+    private void OpenOrderInfoModal(OrderDto o)
+    {
+        _selectedUnassignedOrderId = o.ID_Order;
+        _modalOrderId = o.ID_Order;
+        _showOrderAssignModal = true;
+    }
+
+    private void CloseOrderModal()
+    {
+        _showOrderAssignModal = false;
+        _modalOrderId = null;
+    }
+
+    private async Task AssignBestSelectedAsync()
+    {
+        if (!_selectedUnassignedOrderId.HasValue) return;
+        await AssignBestCourier(_selectedUnassignedOrderId.Value);
+        if (_showOrderAssignModal)
+            CloseOrderModal();
+    }
+
+    private void OpenSelectedCourierInfo()
+    {
+        if (!_selectedDistributionCourierId.HasValue) return;
+        var c = _couriers?.FirstOrDefault(x => x.ID_CourierProfile == _selectedDistributionCourierId.Value);
+        if (c is null) return;
+        OpenCourierPreviewModal(c);
+    }
+
+    private void OpenCourierPreviewModal(CourierProfileDto c)
+    {
+        _previewCourier = c;
+        _selectedDistributionCourierId = c.ID_CourierProfile;
+        _showCourierPreviewModal = true;
+    }
+
+    private void CloseCourierPreviewModal()
+    {
+        _showCourierPreviewModal = false;
+        _previewCourier = null;
+    }
+
+    private void NavigateToSelectedCourier()
+    {
+        if (!_selectedDistributionCourierId.HasValue) return;
+        GoCourierProfile(_selectedDistributionCourierId.Value);
+    }
+
+    private void GoCourierProfile(int id)
+    {
+        _showCourierPreviewModal = false;
+        Navigation.NavigateTo($"/logistician/couriers/{id}");
     }
 
     private int GetSelectedCourier(int orderId) => _orderCourierSelection.GetValueOrDefault(orderId);
@@ -271,8 +475,8 @@
         var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
                 Math.Cos(ToRad(lat1)) * Math.Cos(ToRad(lat2)) *
                 Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
-        var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
-        return r * c;
+        var cc = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+        return r * cc;
     }
 
     private async Task AssignBestCourier(int orderId)
@@ -295,7 +499,7 @@
         try
         {
             var ok = await OrdersApi.AssignCourierAsync(orderId, courierId);
-            if (ok) { Notify.ShowSuccess("Курьер назначен."); await Load(); }
+            if (ok) { Notify.ShowSuccess("Курьер назначен."); CloseOrderModal(); await Load(); }
             else Notify.ShowError("Не удалось назначить курьера.");
         }
         catch (Exception ex) { Notify.ShowError(ex.Message); }

@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Json;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using WebBlazorDeliveryCRM.Models;
@@ -84,6 +84,53 @@ public class VehiclesApiService
             }
         }
         return (false, string.IsNullOrWhiteSpace(err) ? $"HTTP {(int)resp.StatusCode}" : err, null);
+    }
+
+    public async Task<VehicleDto?> GetVehicleByIdAsync(int id)
+    {
+        var resp = await _http.GetAsync($"/api/Vehicles/{id}");
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        if (!resp.IsSuccessStatusCode)
+            return null;
+        return await resp.Content.ReadFromJsonAsync<VehicleDto>(JsonOpts);
+    }
+
+    public async Task<(bool ok, string? error)> UpdateVehicleAsync(int id, CreateVehicleApiRequest body)
+    {
+        var json = JsonSerializer.Serialize(body);
+        var resp = await _http.PutAsync($"/api/Vehicles/{id}", new StringContent(json, Encoding.UTF8, "application/json"));
+        if (resp.IsSuccessStatusCode)
+            return (true, null);
+
+        var err = await resp.Content.ReadAsStringAsync();
+        return (false, TryParseErrorMessage(err) ?? $"HTTP {(int)resp.StatusCode}");
+    }
+
+    public async Task<(bool ok, string? error)> DeleteVehicleAsync(int id)
+    {
+        var resp = await _http.DeleteAsync($"/api/Vehicles/{id}");
+        if (resp.StatusCode == System.Net.HttpStatusCode.NoContent)
+            return (true, null);
+
+        var err = await resp.Content.ReadAsStringAsync();
+        return (false, TryParseErrorMessage(err) ?? $"HTTP {(int)resp.StatusCode}");
+    }
+
+    private static string? TryParseErrorMessage(string err)
+    {
+        if (string.IsNullOrWhiteSpace(err))
+            return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(err);
+            if (doc.RootElement.TryGetProperty("message", out var m))
+                return m.GetString();
+        }
+        catch
+        {
+        }
+        return null;
     }
 
     public async Task<List<VehicleExpiringDocDto>> GetExpiringDocsAsync(int days = 14)

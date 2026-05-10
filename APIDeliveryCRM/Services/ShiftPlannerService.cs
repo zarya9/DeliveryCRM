@@ -16,6 +16,24 @@ public class ShiftPlannerService : IShiftPlannerService
     private const decimal CriticalLoadPenaltyWeight = 8.0m;
     private const decimal SlaLateMinutePenalty = 0.03m;
 
+    /// <summary>Приоритет заказа: 3 — критически срочный (ускоренная последовательность точек в городской связке).</summary>
+    private const byte OrderPriorityCriticallyUrgent = 3;
+
+    /// <summary>Макс. прямое расстояние забрать→вручить (км), при котором считаем «один город / соседняя агломерация» для ускорения критически срочных.</summary>
+    private const decimal CriticalUrbanClusterMaxDirectKm = 85m;
+
+    /// <summary>Виртуальные «минус км» к оценке следующей точки — чем больше, тем раньше берём забор критически срочного городского заказа.</summary>
+    private const decimal CriticalUrbanPickupScoreBiasKm = 48m;
+
+    /// <summary>После забора критически срочного городского заказа сильно тянем доставку вперёд по маршруту.</summary>
+    private const decimal CriticalUrbanDropScoreBiasKm = 165m;
+
+    /// <summary>Заборы двух заказов ближе этого расстояния (км) — кластер заборов.</summary>
+    private const decimal PickupClusterMaxKm = 5.5m;
+
+    /// <summary>На каждый ещё не сделанный забор в том же кластере усиливаем привлекательность этого забора (км-экв. к score), без штрафов на доставку.</summary>
+    private const decimal PickupClusterPickupAffinityKmPerNeighbor = 38m;
+
     private readonly ContextDB _context;
 
     public ShiftPlannerService(ContextDB context)
@@ -360,7 +378,8 @@ public class ShiftPlannerService : IShiftPlannerService
                 ? (decimal)(projection.CursorAtUtc - leg.Order.Sla_due_at.Value).TotalMinutes * SlaLateMinutePenalty
                 : 0m;
             var noVehiclePenalty = projection.HasOperationalVehicle ? 0m : NoVehiclePenalty;
-            var score = projectedDistanceDelta + loadPenalty + slaPenalty + projection.VehicleHealthPenalty + noVehiclePenalty + projection.Legs.Count * 0.35m;
+            var criticalUrbanCourierBias = IsCriticalUrbanFastPath(leg.Order) ? -5.5m : 0m;
+            var score = projectedDistanceDelta + loadPenalty + slaPenalty + projection.VehicleHealthPenalty + noVehiclePenalty + projection.Legs.Count * 0.35m + criticalUrbanCourierBias;
             if (score < best)
             {
                 best = score;
@@ -470,6 +489,61 @@ public class ShiftPlannerService : IShiftPlannerService
         if (address?.Latitude is not { } lat || address.Longitude is not { } lon)
             return null;
         return ((double)lat, (double)lon);
+    }
+
+    /// <summary>
+    /// Критически срочный заказ в «локальной» связке (один населённый пункт по справочнику или короткое плечо А→Б):
+    /// для таких маршрутизатор стремится завершить заказ как можно раньше. Иначе порядок точек оптимизируется по расстоянию (топливо).
+    /// </summary>
+    private static bool IsCriticalUrbanFastPath(Order order)
+    {
+        if (order.Priority != OrderPriorityCriticallyUrgent)
+            return false;
+        var pickup = order.PickupAddress;
+        var delivery = order.DeliveryAddress;
+        if (pickup == null || delivery == null)
+            return false;
+
+        if (!string.IsNullOrWhiteSpace(pickup.City) && !string.IsNullOrWhiteSpace(delivery.City) &&
+            string.Equals(pickup.City.Trim(), delivery.City.Trim(), StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var pk = GetPoint(pickup);
+        var dk = GetPoint(delivery);
+        if (pk == null || dk == null)
+            return false;
+
+        return DistKm(pk.Value, dk.Value) <= CriticalUrbanClusterMaxDirectKm;
+    }
+
+    /// <summary>
+    /// Близкие точки забора: усиливаем заборы в кластере (снижаем score только у кандидатов-заборов), доставки не штрафуем.
+    /// </summary>
+    private static decimal PickupClusterPickupAffinityBiasKm(
+        RouteNode candidate,
+        HashSet<int> pickedLegIndices,
+        IReadOnlyList<PlannedLeg> legs)
+    {
+        if (!candidate.IsPickup)
+            return 0m;
+        var i = candidate.LegIndex;
+        var pickI = GetPoint(legs[i].StartAddress);
+        if (pickI == null)
+            return 0m;
+
+        var neighbors = 0;
+        for (var j = 0; j < legs.Count; j++)
+        {
+            if (j == i || pickedLegIndices.Contains(j))
+                continue;
+            var pickJ = GetPoint(legs[j].StartAddress);
+            if (pickJ == null)
+                continue;
+            if (DistKm(pickI.Value, pickJ.Value) <= PickupClusterMaxKm)
+                neighbors++;
+        }
+
+        return neighbors == 0 ? 0m : -(neighbors * PickupClusterPickupAffinityKmPerNeighbor);
     }
 
     private static decimal DistKm((double lat, double lon) a, (double lat, double lon) b)
@@ -641,7 +715,20 @@ public class ShiftPlannerService : IShiftPlannerService
                         var slaPenalty = n.Leg.Order.Sla_due_at.HasValue
                             ? Math.Max(0m, (decimal)(DateTime.UtcNow - n.Leg.Order.Sla_due_at.Value).TotalMinutes) * 0.02m
                             : 0m;
-                        return new { Node = n, Score = distanceScore + slaPenalty };
+                        // Критически срочный + городская связка: сдвигаем забор и вручение этого заказа раньше по маршруту.
+                        // Для длинных межгородских плечей — только расстояние (экономия топлива), порядок остальных точек гибкий.
+                        var rushBiasKm = 0m;
+                        if (IsCriticalUrbanFastPath(n.Leg.Order))
+                        {
+                            if (n.IsPickup)
+                                rushBiasKm = -CriticalUrbanPickupScoreBiasKm;
+                            else if (picked.Contains(n.LegIndex))
+                                rushBiasKm = -CriticalUrbanDropScoreBiasKm;
+                        }
+
+                        var pickupClusterBiasKm = PickupClusterPickupAffinityBiasKm(n, picked, Legs);
+
+                        return new { Node = n, Score = distanceScore + slaPenalty + rushBiasKm + pickupClusterBiasKm };
                     })
                     .OrderBy(x => x.Score)
                     .First()

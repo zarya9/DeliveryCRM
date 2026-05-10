@@ -33,6 +33,6 @@ public class CreateCustomerOrderRequestDto
     [Range(0.1, 100000)]
     public decimal Width { get; set; } = 10;
 
-    [Range(0, 2)]
+    [Range(0, 3)]
     public byte Priority { get; set; } = 0;
 }

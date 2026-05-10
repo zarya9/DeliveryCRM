@@ -6,25 +6,33 @@
 @inject CouriersApiService CouriersApi
 @inject ShiftPlannerApiService PlannerApi
 @inject AppNotificationService Notify
+@inject NavigationManager Navigation
 
 <PageTitle>Планирование смен — Логист</PageTitle>
 
 <div class="dms-page-header">
-    <h1>Планирование смен</h1>
-    <p class="subtitle">Планировщик строит маршруты автоматически с учетом доступности курьеров, состояния/вместимости ТС, приоритета SLA и handoff через хабы.</p>
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="calendar-03" CssClass="logistician-page-title-icon" />
+        Планирование смен
+    </h1>
+    <p class="subtitle">Планировщик строит маршруты автоматически: доступность курьеров и ТС, приоритет, SLA, хабы. Заказы с приоритетом «критически срочный» в одном городе или короткой городской связке получают порядок точек с упором на быстрое выполнение; на длинных плечах порядок оптимизируется по расстоянию (топливо).</p>
 </div>
 
 <div class="dms-stat-grid mb-3">
-    <KpiCard Title="Курьеров всего" Value="@_totalCouriers.ToString()" Meta="По компании" />
-    <KpiCard Title="Онлайн сейчас" Value="@_onlineCouriers.ToString()" Meta="По фактическому статусу" />
-    <KpiCard Title="Активные смены" Value="@((_planner?.ActiveShifts ?? 0).ToString())" Meta="Доступно для планирования" />
-    <KpiCard Title="Маршрутов" Value="@((_planner?.Plans?.Count ?? 0).ToString())" Meta="Текущая версия плана" />
+    <KpiCard Title="Курьеров всего" Value="@_totalCouriers.ToString()" Meta="По компании" IconName="user-group" />
+    <KpiCard Title="Онлайн сейчас" Value="@_onlineCouriers.ToString()" Meta="По фактическому статусу" IconName="activity-01" />
+    <KpiCard Title="Активные смены" Value="@((_planner?.ActiveShifts ?? 0).ToString())" Meta="Доступно для планирования" IconName="clock-01" />
+    <KpiCard Title="Маршрутов" Value="@((_planner?.Plans?.Count ?? 0).ToString())" Meta="Текущая версия плана" IconName="route-02" />
 </div>
 
 <div class="dms-card mb-3">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
-        <h2 class="dms-card-title mb-0">Планировщик маршрутов</h2>
-        <button type="button" class="btn btn-sm btn-primary dms-btn-primary" disabled="@_plannerBusy" @onclick="RebuildPlannerAsync">
+        <h2 class="dms-card-title logistician-card-title-with-icon mb-0">
+            <HugeIcon Name="dashboard-square-01" CssClass="logistician-card-title-icon" />
+            Планировщик маршрутов
+        </h2>
+        <button type="button" class="btn btn-sm btn-primary dms-btn-primary d-inline-flex align-items-center gap-1" disabled="@_plannerBusy" @onclick="RebuildPlannerAsync">
+            <HugeIcon Name="analytics-up" CssClass="dms-icon-sm" />
             @(_plannerBusy ? "Планируем..." : "Перепланировать")
         </button>
     </div>
@@ -45,77 +53,153 @@
 </div>
 
 <div class="dms-card">
-    <h2 class="dms-card-title">Курьеры и управление сменами</h2>
-    <div class="table-responsive">
-        <table class="table table-sm">
-            <thead>
-                <tr>
-                    <th>Курьер</th>
-                    <th>Статус смены</th>
-                    <th>Маршрут</th>
-                    <th>Действия</th>
-                </tr>
-            </thead>
-            <tbody>
-                @if (_loading)
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <h2 class="dms-card-title logistician-card-title-with-icon mb-0">
+            <HugeIcon Name="user-group" CssClass="logistician-card-title-icon" />
+            Курьеры и управление сменами
+        </h2>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            @if (_selectedShiftCourierId.HasValue)
+            {
+                <button type="button" class="btn btn-outline-info btn-sm d-inline-flex align-items-center gap-1" @onclick="OpenSelectedShiftCourierInfo">
+                    <HugeIcon Name="audit-01" CssClass="dms-icon-sm" />
+                    <span>Инфо</span>
+                </button>
+                <button type="button" class="btn btn-outline-primary btn-sm d-inline-flex align-items-center gap-1" @onclick="NavigateToSelectedCourier">
+                    <HugeIcon Name="user-03" CssClass="dms-icon-sm" />
+                    <span>Профиль</span>
+                </button>
+            }
+        </div>
+    </div>
+    @if (_loading)
+    {
+        <p class="text-muted mb-0">Загрузка...</p>
+    }
+    else if (_couriers.Count == 0)
+    {
+        <p class="text-muted mb-0">Курьеры не найдены.</p>
+    }
+    else
+    {
+        <div class="hub-grid">
+            @foreach (var c in _couriers.OrderBy(x => x.User?.FName).ThenBy(x => x.User?.Name))
+            {
+                var state = _shiftByCourier.GetValueOrDefault(c.ID_CourierProfile);
+                var plan = _planner?.Plans?.FirstOrDefault(p => p.CourierId == c.ID_CourierProfile);
+                <div class="hub-card @(_selectedShiftCourierId == c.ID_CourierProfile ? "hub-card-selected" : "")"
+                     @onclick="() => SelectShiftCourier(c)"
+                     @ondblclick="() => OpenShiftCourierModal(c)">
+                    <div class="courier-hub-card-head">
+                        <div class="courier-hub-card-head__main">
+                            <h3 class="hub-card-title">@($"{c.User?.FName} {c.User?.Name}".Trim())</h3>
+                            <div class="mb-2">
+                                <StatusBadge Text="@(state.active ? "В смене" : "Не в смене")" Tone="@(state.active ? "success" : "neutral")" />
+                            </div>
+                        </div>
+                        <UserAvatarThumb @key="c.User_id"
+                                         UserId="c.User_id"
+                                         Alt="@($"{c.User?.FName} {c.User?.Name}".Trim())" />
+                    </div>
+                    <div class="small hub-card-orders">
+                        @if (plan is null)
+                        {
+                            <span class="text-muted">Маршрут не построен</span>
+                        }
+                        else
+                        {
+                            <div>План v<strong>@plan.Version</strong> · заказов @plan.OrdersCount · стопов @plan.Stops.Count</div>
+                            <div class="text-muted">@plan.TotalDistanceKm.ToString("0.0") км · @Math.Round(plan.EstimatedDurationMinutes) мин</div>
+                            <div class="text-muted">Загрузка: @Math.Round(plan.LoadFactorWeight * 100, 1)% / @Math.Round(plan.LoadFactorVolume * 100, 1)%</div>
+                        }
+                    </div>
+                    <div class="small text-muted mt-2 pt-2 border-top border-secondary border-opacity-25">
+                        Активность: @(c.LastActivity_at == default ? "—" : c.LastActivity_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (_showShiftCourierModal && _modalShiftCourier is not null)
+{
+    var m = _modalShiftCourier;
+    var mState = _shiftByCourier.GetValueOrDefault(m.ID_CourierProfile);
+    var mPlan = _planner?.Plans?.FirstOrDefault(p => p.CourierId == m.ID_CourierProfile);
+    <div class="employee-modal-backdrop" @onclick="CloseShiftCourierModal">
+        <div class="employee-modal employee-modal--fleet-form" @onclick:stopPropagation="true">
+            <div class="d-flex align-items-start gap-3 mb-3">
+                <UserAvatarThumb UserId="m.User_id"
+                                 Large="true"
+                                 Alt="@($"{m.User?.FName} {m.User?.Name}".Trim())" />
+                <div class="flex-grow-1 min-w-0">
+                    <h2 class="h5 mb-0">@($"{m.User?.FName} {m.User?.Name}".Trim())</h2>
+                </div>
+                <button type="button" class="btn-close flex-shrink-0" aria-label="Закрыть" @onclick="CloseShiftCourierModal"></button>
+            </div>
+            <div class="mb-2">
+                <strong>Статус смены:</strong>
+                <StatusBadge Text="@(mState.active ? "В смене" : "Не в смене")" Tone="@(mState.active ? "success" : "neutral")" />
+            </div>
+            <div class="mb-3">
+                <strong>Маршрут:</strong>
+                @if (mPlan is null)
                 {
-                    <tr><td colspan="3" class="text-muted">Загрузка...</td></tr>
-                }
-                else if (_couriers.Count == 0)
-                {
-                    <tr><td colspan="3" class="text-muted">Курьеры не найдены.</td></tr>
+                    <span class="text-muted">Маршрут не построен</span>
                 }
                 else
                 {
-                    @foreach (var c in _couriers.OrderBy(x => x.User?.FName).ThenBy(x => x.User?.Name))
-                    {
-                        var state = _shiftByCourier.GetValueOrDefault(c.ID_CourierProfile);
-                        var plan = _planner?.Plans?.FirstOrDefault(p => p.CourierId == c.ID_CourierProfile);
-                        <tr>
-                            <td>@($"{c.User?.FName} {c.User?.Name}".Trim())</td>
-                            <td>
-                                <StatusBadge Text="@(state.active ? "В смене" : "Не в смене")" Tone="@(state.active ? "success" : "neutral")" />
-                            </td>
-                            <td style="min-width: 16rem;">
-                                @if (plan is null)
-                                {
-                                    <span class="text-muted">Маршрут не построен</span>
-                                }
-                                else
-                                {
-                                    <div class="small">
-                                        Версия: <strong>@plan.Version</strong>,
-                                        заказов: <strong>@plan.OrdersCount</strong>,
-                                        стопов: <strong>@plan.Stops.Count</strong>
-                                    </div>
-                                    <div class="small text-muted">
-                                        @plan.TotalDistanceKm.ToString("0.0") км · @Math.Round(plan.EstimatedDurationMinutes) мин
-                                    </div>
-                                    <div class="small text-muted">
-                                        Загрузка: вес @Math.Round(plan.LoadFactorWeight * 100, 1)% / объем @Math.Round(plan.LoadFactorVolume * 100, 1)%
-                                    </div>
-                                }
-                            </td>
-                            <td>
-                                @if (state.active)
-                                {
-                                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_shiftLoadingCourierId == c.ID_CourierProfile)" @onclick="() => EndShift(c.ID_CourierProfile)">Завершить смену</button>
-                                }
-                                else
-                                {
-                                    <button type="button" class="btn btn-sm btn-outline-success" disabled="@(_shiftLoadingCourierId == c.ID_CourierProfile)" @onclick="() => StartShift(c.ID_CourierProfile)">Начать смену</button>
-                                }
-                                <div class="small text-muted mt-1">
-                                    Последняя активность: @(c.LastActivity_at == default ? "—" : c.LastActivity_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))
-                                </div>
-                            </td>
-                        </tr>
-                    }
+                    <div class="small mt-1">Версия @mPlan.Version, заказов @mPlan.OrdersCount, стопов @mPlan.Stops.Count · @mPlan.TotalDistanceKm.ToString("0.0") км · @Math.Round(mPlan.EstimatedDurationMinutes) мин</div>
+                    <div class="small text-muted">Загрузка: вес @Math.Round(mPlan.LoadFactorWeight * 100, 1)% / объём @Math.Round(mPlan.LoadFactorVolume * 100, 1)%</div>
                 }
-            </tbody>
-        </table>
+            </div>
+            <div class="mb-3 small text-muted">
+                Последняя активность: @(m.LastActivity_at == default ? "—" : m.LastActivity_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))
+            </div>
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                @if (mState.active)
+                {
+                    <button type="button" class="btn btn-outline-danger d-inline-flex align-items-center gap-1" disabled="@(_shiftLoadingCourierId == m.ID_CourierProfile)" @onclick="() => EndShiftFromModal(m.ID_CourierProfile)">
+                        <HugeIcon Name="clock-01" CssClass="dms-icon-sm" />
+                        Завершить смену
+                    </button>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-outline-success d-inline-flex align-items-center gap-1" disabled="@(_shiftLoadingCourierId == m.ID_CourierProfile)" @onclick="() => StartShiftFromModal(m.ID_CourierProfile)">
+                        <HugeIcon Name="calendar-03" CssClass="dms-icon-sm" />
+                        Начать смену
+                    </button>
+                }
+            </div>
+            <div class="d-flex justify-content-end gap-2 flex-wrap">
+                <button type="button" class="btn btn-outline-secondary" @onclick="CloseShiftCourierModal">Закрыть</button>
+                <button type="button" class="btn btn-primary dms-btn-primary d-inline-flex align-items-center gap-1" @onclick="() => GoCourierProfile(m.ID_CourierProfile)">
+                    <HugeIcon Name="user-03" CssClass="dms-icon-sm" />
+                    Открыть карточку
+                </button>
+            </div>
+        </div>
     </div>
-</div>
+}
+
+<style>
+    .dms-page-title-with-icon,
+    .logistician-card-title-with-icon {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .logistician-page-title-icon,
+    .logistician-card-title-icon {
+        width: 1.5rem;
+        height: 1.5rem;
+        flex-shrink: 0;
+        opacity: 0.92;
+    }
+</style>
 
 @if (_planner?.Plans?.Count > 0)
 {
@@ -206,6 +290,62 @@
     private int _shiftLoadingCourierId;
     private bool _plannerBusy;
     private CompanyPlannerResultDto? _planner;
+
+    private int? _selectedShiftCourierId;
+    private bool _showShiftCourierModal;
+    private CourierProfileDto? _modalShiftCourier;
+
+    private void SelectShiftCourier(CourierProfileDto c) => _selectedShiftCourierId = c.ID_CourierProfile;
+
+    private void OpenShiftCourierModal(CourierProfileDto c)
+    {
+        _modalShiftCourier = c;
+        _selectedShiftCourierId = c.ID_CourierProfile;
+        _showShiftCourierModal = true;
+    }
+
+    private void CloseShiftCourierModal()
+    {
+        _showShiftCourierModal = false;
+        _modalShiftCourier = null;
+    }
+
+    private void OpenSelectedShiftCourierInfo()
+    {
+        if (!_selectedShiftCourierId.HasValue)
+            return;
+        var c = _couriers.FirstOrDefault(x => x.ID_CourierProfile == _selectedShiftCourierId.Value);
+        if (c is null)
+            return;
+        OpenShiftCourierModal(c);
+    }
+
+    private void NavigateToSelectedCourier()
+    {
+        if (!_selectedShiftCourierId.HasValue)
+            return;
+        GoCourierProfile(_selectedShiftCourierId.Value);
+    }
+
+    private void GoCourierProfile(int id)
+    {
+        CloseShiftCourierModal();
+        Navigation.NavigateTo($"/logistician/couriers/{id}");
+    }
+
+    private async Task StartShiftFromModal(int courierId)
+    {
+        await StartShift(courierId);
+        _modalShiftCourier = _couriers.FirstOrDefault(x => x.ID_CourierProfile == courierId);
+        StateHasChanged();
+    }
+
+    private async Task EndShiftFromModal(int courierId)
+    {
+        await EndShift(courierId);
+        _modalShiftCourier = _couriers.FirstOrDefault(x => x.ID_CourierProfile == courierId);
+        StateHasChanged();
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

@@ -1282,7 +1282,6 @@ namespace APIDeliveryCRM.Migrations
                         .HasColumnType("text");
 
                     b.Property<int?>("Order_id")
-                        .IsRequired()
                         .HasColumnType("integer");
 
                     b.Property<byte>("Priority")
@@ -2287,7 +2286,6 @@ namespace APIDeliveryCRM.Migrations
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_User"));
 
                     b.Property<string>("Avatar")
-                        .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
@@ -3058,8 +3056,7 @@ namespace APIDeliveryCRM.Migrations
                     b.HasOne("APIDeliveryCRM.Model.Order", "Order")
                         .WithMany()
                         .HasForeignKey("Order_id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("APIDeliveryCRM.Model.NotificationType", "NotificationType")
                         .WithMany()

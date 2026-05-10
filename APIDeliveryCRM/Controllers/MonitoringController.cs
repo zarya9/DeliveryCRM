@@ -14,6 +14,7 @@ namespace APIDeliveryCRM.Controllers;
 [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
 public class MonitoringController : Controller
 {
+    private static readonly TimeSpan LiveLocationFreshness = TimeSpan.FromSeconds(45);
     private readonly ContextDB _db;
 
     public MonitoringController(ContextDB db)
@@ -71,42 +72,34 @@ public class MonitoringController : Controller
             .OrderBy(h => h.Name)
             .ToListAsync();
 
-        var fallbackHub = hubs.FirstOrDefault(h =>
-            h.Address?.Latitude is not null && h.Address.Longitude is not null &&
-            h.Address.Latitude != 0 && h.Address.Longitude != 0);
-
         var couriers = await _db.CourierProfiles.AsNoTracking()
             .Where(c => c.Company_id == companyId.Value)
             .Include(c => c.User)
             .ToListAsync();
 
+        var now = DateTime.UtcNow;
         var courierMarkers = couriers.Select(c =>
         {
-            var started = shiftsByCourier.FirstOrDefault(x => x.CourierId == c.ID_CourierProfile)?.StartedAt;
-            var onlineText = c.Is_online ? "онлайн" : "офлайн";
+            var started = shiftsByCourier.FirstOrDefault(x => x.CourierId == c.ID_CourierProfile);
+            var hasActiveShift = started is not null;
             var hasCoords = c.Current_lat != 0 || c.Current_lon != 0;
-            var markerLat = hasCoords
-                ? (double)c.Current_lat
-                : (double?)(fallbackHub?.Address?.Latitude ?? 0m) ?? 0d;
-            var markerLon = hasCoords
-                ? (double)c.Current_lon
-                : (double?)(fallbackHub?.Address?.Longitude ?? 0m) ?? 0d;
-            var fallbackSuffix = !hasCoords && c.Is_online && markerLat != 0d && markerLon != 0d
-                ? " · координаты уточняются"
-                : string.Empty;
+            var isFresh = now - c.LastActivity_at <= LiveLocationFreshness;
+
+            if (!c.Is_online || !hasActiveShift || !hasCoords || !isFresh)
+                return null;
 
             return new
             {
                 kind = "courier",
                 id = c.ID_CourierProfile,
-                lat = markerLat,
-                lon = markerLon,
+                lat = (double)c.Current_lat,
+                lon = (double)c.Current_lon,
                 online = c.Is_online,
-                title = $"{c.User.FName} {c.User.Name}".Trim() + $" · {onlineText}" + (started.HasValue
-                    ? $" · смена с {started.Value:dd.MM HH:mm} UTC"
-                    : "") + fallbackSuffix
+                title = $"{c.User.FName} {c.User.Name}".Trim() + $" · онлайн · смена с {started!.StartedAt:dd.MM HH:mm} UTC"
             };
-        }).ToList();
+        })
+        .Where(x => x != null)
+        .ToList();
 
         var hubMarkers = hubs
             .Where(h => h.Address?.Latitude != null && h.Address.Longitude != null && h.Address.Latitude != 0 && h.Address.Longitude != 0)

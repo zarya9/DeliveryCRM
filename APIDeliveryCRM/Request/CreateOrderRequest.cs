@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel.DataAnnotations;
 
 namespace APIDeliveryCRM.Request
@@ -51,7 +51,7 @@ namespace APIDeliveryCRM.Request
 
         public DateTime? RequestedDeliveryAtUtc { get; set; }
 
-        [Range(0, 2)]
+        [Range(0, 3)]
         public byte Priority { get; set; } = 0;
 
         public int? OriginHub_id { get; set; }

@@ -1,5 +1,6 @@
 @page "/manager/notifications"
 @layout ManagerLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Менеджер,Администратор,Админ")]
 @using Microsoft.AspNetCore.SignalR.Client
 @using WebBlazorDeliveryCRM.Components.Shared
 @using WebBlazorDeliveryCRM.Services

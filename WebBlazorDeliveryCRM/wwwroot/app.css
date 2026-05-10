@@ -1190,6 +1190,65 @@ body.bg-gradient {
     min-height: 88px;
 }
 
+/* Courier cards: avatar top-right, text uses remaining width */
+.courier-hub-card-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.courier-hub-card-head__main {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Аватар пользователя (глобально — чтобы размеры не терялись из-за CSS isolation) */
+.user-avatar-thumb {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    border: 1px solid var(--dms-card-border, #e2e8f0);
+    background: var(--dms-card-bg, #fff);
+}
+
+.user-avatar-thumb--lg {
+    width: 3.5rem;
+    height: 3.5rem;
+}
+
+.user-avatar-thumb--fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+}
+
+.user-avatar-thumb__icon {
+    width: 1.35rem;
+    height: 1.35rem;
+    opacity: 0.72;
+}
+
+.user-avatar-thumb__icon--lg {
+    width: 1.55rem;
+    height: 1.55rem;
+}
+
+/* Модалки ТС (автопарк): как «Добавить авто» — 520px, длинная форма прокручивается */
+.employee-modal--fleet-form {
+    max-width: 520px;
+    width: 100%;
+    max-height: min(88vh, 720px);
+    overflow-y: auto;
+}
+
+/* Карточка «Автомобиль» на странице курьера — плотнее, как форма в автопарке */
+.courier-vehicle-assign-card {
+    max-width: 520px;
+}
+
 .hub-mini-map {
     width: 100%;
     height: 150px;

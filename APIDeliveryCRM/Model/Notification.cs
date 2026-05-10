@@ -26,10 +26,9 @@ namespace APIDeliveryCRM.Model
         public string Title { get; set; }
         public string Message { get; set; }
 
-        [Required]
         [ForeignKey(nameof(Order))]
         public int? Order_id { get; set; }
-        public Order Order { get; set; }
+        public Order? Order { get; set; }
 
         public bool Is_read { get; set; }
         public byte Priority { get; set; } = 0;

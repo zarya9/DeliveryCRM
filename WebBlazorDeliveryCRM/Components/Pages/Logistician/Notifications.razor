@@ -1,0 +1,35 @@
+@page "/logistician/notifications"
+@layout LogisticianLayout
+@using Microsoft.AspNetCore.SignalR.Client
+@using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Services
+@inject ChatHubClientService ChatHub
+
+<PageTitle>Уведомления</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Уведомления</h1>
+    <p class="subtitle"></p>
+</div>
+
+<NotificationsInbox />
+
+@code {
+    private bool _hubConnected;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var conn = await ChatHub.GetConnectionAsync();
+            await ChatHub.StartAsync();
+            _hubConnected = conn.State == HubConnectionState.Connected;
+        }
+        catch
+        {
+            _hubConnected = false;
+        }
+        StateHasChanged();
+    }
+}

@@ -2,6 +2,7 @@
 @layout LogisticianLayout
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
 @inject CouriersApiService CouriersApi
 @inject NavigationManager Navigation
 @inject AppNotificationService Notify
@@ -10,9 +11,15 @@
 
 <div class="dms-page-header">
     <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-        <a href="/logistician/couriers" class="btn btn-outline-secondary btn-sm">← К списку</a>
+        <a href="/logistician/couriers" class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1">
+            <HugeIcon Name="user-group" CssClass="dms-icon-sm" />
+            К списку
+        </a>
     </div>
-    <h1>Карточка курьера</h1>
+    <h1 class="courier-detail-page-title">
+        <HugeIcon Name="user-03" CssClass="courier-detail-page-title-icon" />
+        Карточка курьера
+    </h1>
     <p class="subtitle">Транспорт, документы и заказы</p>
 </div>
 
@@ -29,54 +36,97 @@ else
     <div class="row g-3">
         <div class="col-lg-6">
             <div class="dms-card h-100">
-                <h2 class="dms-card-title">Профиль</h2>
-                <p class="mb-1"><strong>ФИО:</strong> @FullName(_courier)</p>
-                <p class="mb-1"><strong>Рейтинг:</strong> @_courier.Rating</p>
-                <p class="mb-1"><strong>Статус:</strong> @(_courier.CourierStatus?.Name ?? "—")</p>
-                <p class="mb-1"><strong>Онлайн:</strong> @(_courier.Is_online ? "Да" : "Нет")</p>
-                <p class="mb-1"><strong>Доставок всего:</strong> @_courier.Total_deliveries</p>
-                <p class="mb-1"><strong>Последняя активность:</strong> @_courier.LastActivity_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</p>
-                <p class="mb-0"><strong>Координаты:</strong> @_courier.Current_lat.ToString("0.00"), @_courier.Current_lon.ToString("0.00")</p>
+                <h2 class="dms-card-title courier-detail-card-title">
+                    <HugeIcon Name="user-03" CssClass="courier-detail-card-title-icon" />
+                    Профиль
+                </h2>
+                <div class="d-flex align-items-start gap-3 mb-3">
+                    <UserAvatarThumb UserId="_courier.User_id" Large="true" Alt="@FullName(_courier)" />
+                    <div class="flex-grow-1 min-w-0">
+                        <p class="mb-1 courier-detail-row">
+                            <span class="courier-detail-row__label"><HugeIcon Name="user-03" CssClass="dms-icon-sm" /><strong>ФИО</strong></span>
+                            <span>@FullName(_courier)</span>
+                        </p>
+                        <p class="mb-1 courier-detail-row">
+                            <span class="courier-detail-row__label"><HugeIcon Name="analytics-up" CssClass="dms-icon-sm" /><strong>Рейтинг</strong></span>
+                            <span>@_courier.Rating</span>
+                        </p>
+                        <p class="mb-1 courier-detail-row">
+                            <span class="courier-detail-row__label"><HugeIcon Name="activity-01" CssClass="dms-icon-sm" /><strong>Статус</strong></span>
+                            <span>@(_courier.CourierStatus?.Name ?? "—")</span>
+                        </p>
+                        <p class="mb-1 courier-detail-row">
+                            <span class="courier-detail-row__label"><HugeIcon Name="package-moving" CssClass="dms-icon-sm" /><strong>Доставок всего</strong></span>
+                            <span>@_courier.Total_deliveries</span>
+                        </p>
+                        <p class="mb-0 courier-detail-row">
+                            <span class="courier-detail-row__label"><HugeIcon Name="clock-01" CssClass="dms-icon-sm" /><strong>Последняя активность</strong></span>
+                            <span>@_courier.LastActivity_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                        </p>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="col-lg-6">
             <div class="dms-card h-100">
                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-                    <h2 class="dms-card-title mb-0">Документы и допуски</h2>
+                    <h2 class="dms-card-title courier-detail-card-title mb-0">
+                        <HugeIcon Name="audit-01" CssClass="courier-detail-card-title-icon" />
+                        Документы и допуски
+                    </h2>
                     @if (!_editingDocs)
                     {
                         @if (DocsIncomplete)
                         {
-                            <button type="button" class="btn btn-sm btn-primary" @onclick="() => _editingDocs = true">Заполнить</button>
+                            <button type="button" class="btn btn-sm btn-primary d-inline-flex align-items-center gap-1" @onclick="() => _editingDocs = true">
+                                <HugeIcon Name="plus-sign" CssClass="dms-icon-sm" />
+                                Заполнить
+                            </button>
                         }
                         else
                         {
-                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => _editingDocs = true">Редактировать</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1" @onclick="() => _editingDocs = true">
+                                <HugeIcon Name="edit-01" CssClass="dms-icon-sm" />
+                                Редактировать
+                            </button>
                         }
                     }
                     else
                     {
-                        <button type="button" class="btn btn-sm btn-primary" disabled="@_savingDocs" @onclick="SaveDocumentsAsync">
+                        <button type="button" class="btn btn-sm btn-primary d-inline-flex align-items-center gap-1" disabled="@_savingDocs" @onclick="SaveDocumentsAsync">
+                            <HugeIcon Name="sent" CssClass="dms-icon-sm" />
                             @(_savingDocs ? "Сохранение…" : "Сохранить")
                         </button>
                     }
                 </div>
                 @if (!_editingDocs)
                 {
-                    <p class="mb-1"><strong>Категория ТС (допуск):</strong> @(CategoryName(_courier))</p>
-                    <p class="mb-1"><strong>График работы:</strong> @(ScheduleName(_courier))</p>
-                    <p class="mb-1"><strong>Водительское удостоверение:</strong> @(string.IsNullOrWhiteSpace(_courier.DriverLicense) ? "—" : _courier.DriverLicense)</p>
-                    <p class="mb-0"><strong>Паспорт / данные:</strong> @(string.IsNullOrWhiteSpace(_courier.Passport_data) ? "—" : _courier.Passport_data)</p>
+                    <p class="mb-1 courier-detail-row">
+                        <span class="courier-detail-row__label"><HugeIcon Name="car-01" CssClass="dms-icon-sm" /><strong>Категория ТС (допуск)</strong></span>
+                        <span>@(CategoryName(_courier))</span>
+                    </p>
+                    <p class="mb-1 courier-detail-row">
+                        <span class="courier-detail-row__label"><HugeIcon Name="calendar-03" CssClass="dms-icon-sm" /><strong>График работы</strong></span>
+                        <span>@(ScheduleName(_courier))</span>
+                    </p>
+                    <p class="mb-1 courier-detail-row">
+                        <span class="courier-detail-row__label"><HugeIcon Name="invoice-01" CssClass="dms-icon-sm" /><strong>Водительское удостоверение</strong></span>
+                        <span>@(string.IsNullOrWhiteSpace(_courier.DriverLicense) ? "—" : _courier.DriverLicense)</span>
+                    </p>
+                    <p class="mb-0 courier-detail-row">
+                        <span class="courier-detail-row__label"><HugeIcon Name="briefcase-01" CssClass="dms-icon-sm" /><strong>Паспорт / данные</strong></span>
+                        <span>@(string.IsNullOrWhiteSpace(_courier.Passport_data) ? "—" : _courier.Passport_data)</span>
+                    </p>
                 }
                 else
                 {
                     <p class="small text-muted">Категория ТС и график — в справочниках; здесь можно внести ВУ и паспортные данные.</p>
                     <div class="mb-2">
-                        <label class="form-label">Водительское удостоверение</label>
+                        <label class="form-label courier-detail-form-label"><HugeIcon Name="invoice-01" CssClass="dms-icon-sm" />Водительское удостоверение</label>
                         <input class="form-control" @bind="_editDriverLicense" />
                     </div>
                     <div class="mb-2">
-                        <label class="form-label">Паспорт / данные</label>
+                        <label class="form-label courier-detail-form-label"><HugeIcon Name="briefcase-01" CssClass="dms-icon-sm" />Паспорт / данные</label>
                         <textarea class="form-control" rows="3" @bind="_editPassport"></textarea>
                     </div>
                     <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CancelEditDocs">Отмена</button>
@@ -85,51 +135,90 @@ else
         </div>
     </div>
 
-    <div class="dms-card mt-3">
-        <h2 class="dms-card-title">Автомобиль</h2>
+    <div class="dms-card mt-3 courier-vehicle-assign-card">
+        <h2 class="dms-card-title courier-detail-card-title">
+            <HugeIcon Name="car-01" CssClass="courier-detail-card-title-icon" />
+            Автомобиль
+        </h2>
         @if (_assignedVehicles.Count > 0)
         {
-            <p class="mb-2"><strong>Сейчас закреплено:</strong></p>
+            <p class="mb-2 courier-detail-row">
+                <span class="courier-detail-row__label"><HugeIcon Name="delivery-truck-01" CssClass="dms-icon-sm" /><strong>Сейчас закреплено</strong></span>
+            </p>
             <ul class="mb-3">
                 @foreach (var v in _assignedVehicles)
                 {
-                    <li>@FormatVehicleLabel(v)</li>
+                    <li class="d-flex align-items-center gap-2">
+                        <HugeIcon Name="car-01" CssClass="dms-icon-sm opacity-75" />
+                        @FormatVehicleLabel(v)
+                    </li>
                 }
             </ul>
         }
         else
         {
-            <p class="text-muted mb-3">За курьером не закреплено ни одного ТС в системе.</p>
+            <p class="text-muted mb-3 d-flex align-items-start gap-2">
+                <HugeIcon Name="car-01" CssClass="dms-icon-sm flex-shrink-0 mt-1" />
+                За курьером не закреплено ни одного ТС в системе.
+            </p>
         }
 
-        <label class="form-label">Назначить / сменить автомобиль</label>
-        <div class="d-flex flex-wrap gap-2 align-items-center">
-            <select class="form-select" style="max-width: 420px;" @bind="_selectedVehicleId">
-                <option value="0">— выберите ТС компании —</option>
-                @foreach (var v in _vehicles.OrderBy(x => x.License_plate))
-                {
-                    <option value="@v.ID_Vehicle">@FormatVehicleLabel(v)</option>
-                }
-            </select>
-            <button type="button" class="btn btn-primary dms-btn-primary" disabled="@(_assigning || _selectedVehicleId == 0)" @onclick="AssignVehicle">
-                @(_assigning ? "Сохранение…" : "Назначить")
-            </button>
+        <label class="form-label courier-detail-form-label"><HugeIcon Name="route-02" CssClass="dms-icon-sm" />Назначить / сменить автомобиль</label>
+        <div class="row g-2 align-items-end">
+            <div class="col-md-8">
+                <select class="form-select" @bind="_selectedVehicleId">
+                    <option value="0">— выберите ТС компании —</option>
+                    @foreach (var v in _vehicles.OrderBy(x => x.License_plate))
+                    {
+                        <option value="@v.ID_Vehicle">@FormatVehicleLabel(v)</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-4">
+                <button type="button" class="btn btn-primary dms-btn-primary w-100 d-inline-flex align-items-center justify-content-center gap-1" disabled="@(_assigning || _selectedVehicleId == 0)" @onclick="AssignVehicle">
+                    <HugeIcon Name="delivery-truck-01" CssClass="dms-icon-sm" />
+                    @(_assigning ? "Сохранение…" : "Назначить")
+                </button>
+            </div>
         </div>
         <p class="text-muted small mt-2 mb-0">Выбирается транспорт вашей компании; текущий водитель на ТС будет заменён на этого курьера.</p>
     </div>
 
     <div class="dms-card mt-3">
-        <h2 class="dms-card-title">Заказы, назначенные курьеру</h2>
+        <h2 class="dms-card-title courier-detail-card-title">
+            <HugeIcon Name="package-moving" CssClass="courier-detail-card-title-icon" />
+            Заказы, назначенные курьеру
+        </h2>
         @if (_orders is { Count: > 0 })
         {
             <div class="table-responsive">
                 <table class="table table-sm">
                     <thead>
                         <tr>
-                            <th>№</th>
-                            <th>Название</th>
-                            <th>Статус</th>
-                            <th>Создан</th>
+                            <th>
+                                <span class="courier-detail-th">
+                                    <span>№</span>
+                                    <HugeIcon Name="invoice-01" CssClass="courier-detail-th-icon" />
+                                </span>
+                            </th>
+                            <th>
+                                <span class="courier-detail-th">
+                                    <span>Название</span>
+                                    <HugeIcon Name="task-01" CssClass="courier-detail-th-icon" />
+                                </span>
+                            </th>
+                            <th>
+                                <span class="courier-detail-th">
+                                    <span>Статус</span>
+                                    <HugeIcon Name="activity-01" CssClass="courier-detail-th-icon" />
+                                </span>
+                            </th>
+                            <th>
+                                <span class="courier-detail-th">
+                                    <span>Создан</span>
+                                    <HugeIcon Name="clock-01" CssClass="courier-detail-th-icon" />
+                                </span>
+                            </th>
                         </tr>
                     </thead>
                     <tbody>
@@ -148,10 +237,71 @@ else
         }
         else
         {
-            <p class="text-muted mb-0">Нет заказов в работе у этого курьера.</p>
+            <p class="text-muted mb-0 d-flex align-items-center gap-2">
+                <HugeIcon Name="package-moving" CssClass="dms-icon-sm flex-shrink-0" />
+                Нет заказов в работе у этого курьера.
+            </p>
         }
     </div>
 }
+
+<style>
+    .courier-detail-page-title,
+    .courier-detail-card-title {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .courier-detail-page-title-icon,
+    .courier-detail-card-title-icon {
+        width: 1.5rem;
+        height: 1.5rem;
+        flex-shrink: 0;
+        opacity: 0.92;
+    }
+
+    .courier-detail-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.35rem 0.75rem;
+    }
+
+    .courier-detail-row__label {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        min-width: 11rem;
+        color: var(--dms-text-muted, #64748b);
+    }
+
+    .courier-detail-row__label strong {
+        color: var(--dms-text, #0f172a);
+        font-weight: 600;
+    }
+
+    .courier-detail-form-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        font-weight: 600;
+    }
+
+    .courier-detail-th {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        white-space: nowrap;
+    }
+
+    .courier-detail-th-icon {
+        width: 1.125rem;
+        height: 1.125rem;
+        flex-shrink: 0;
+        opacity: 0.9;
+    }
+</style>
 
 @code {
     [Parameter] public int CourierId { get; set; }
