@@ -1,0 +1,13 @@
+@using WebBlazorDeliveryCRM.Components.Shared
+<th scope="col" class="@CssClass">
+    <span class="dms-th-with-icon">
+        <HugeIcon Name="@Icon" CssClass="dms-th-icon" />
+        <span>@ChildContent</span>
+    </span>
+</th>
+
+@code {
+    [Parameter] public string Icon { get; set; } = "task-01";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+}

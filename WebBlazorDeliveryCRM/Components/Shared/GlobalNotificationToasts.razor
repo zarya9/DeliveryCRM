@@ -1,0 +1,75 @@
+@implements IDisposable
+@using WebBlazorDeliveryCRM.Services
+@inject NotificationPopupService PopupService
+@inject NotificationsApiService NotificationsApi
+@inject NavigationManager Navigation
+
+@if (_items.Count > 0)
+{
+    <div class="global-notification-stack">
+        @foreach (var item in _items.OrderByDescending(x => x.CreatedAt).Take(4).ToList())
+        {
+            <div class="global-notification-toast" role="button" tabindex="0" @onclick="() => Open(item)">
+                <button type="button"
+                        class="global-notification-close"
+                        title="Отметить прочитанным"
+                        @onclick="(e) => Dismiss(item)"
+                        @onclick:stopPropagation="true">
+                    ×
+                </button>
+                <div class="global-notification-title">@item.Title</div>
+                <div class="global-notification-message">@item.Message</div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private readonly List<ToastVm> _items = new();
+
+    protected override void OnInitialized()
+    {
+        PopupService.Raised += OnRaised;
+    }
+
+    private void OnRaised(NotificationPopupService.PopupNotification n)
+    {
+        _items.Add(new ToastVm
+        {
+            NotificationId = n.NotificationId,
+            TargetUrl = string.IsNullOrWhiteSpace(n.TargetUrl) ? "/manager/notifications" : n.TargetUrl,
+            Title = string.IsNullOrWhiteSpace(n.Title) ? "Уведомление" : n.Title!,
+            Message = string.IsNullOrWhiteSpace(n.Message) ? "Новое событие в системе." : n.Message!,
+            CreatedAt = DateTime.UtcNow
+        });
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void Open(ToastVm item)
+    {
+        Navigation.NavigateTo(item.TargetUrl);
+    }
+
+    private async Task Dismiss(ToastVm item)
+    {
+        if (item.NotificationId > 0)
+            await NotificationsApi.MarkAsReadAsync(item.NotificationId);
+        _items.Remove(item);
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        PopupService.Raised -= OnRaised;
+    }
+
+    private sealed class ToastVm
+    {
+        public int NotificationId { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public string TargetUrl { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
+    }
+}
+

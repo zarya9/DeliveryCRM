@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
 using APIDeliveryCRM.Interfaces;
+using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -65,6 +66,108 @@ public class VehiclesController : Controller
                 })
                 .ToListAsync();
             return Ok(list);
+        }
+
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+        [HttpPost("catalog/brands")]
+        public async Task<IActionResult> CreateCatalogBrand([FromBody] CreateCatalogBrandRequest dto)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(new { message = "Проверьте название марки." });
+
+            var name = (dto.Name ?? string.Empty).Trim();
+            if (name.Length == 0)
+                return BadRequest(new { message = "Укажите название марки." });
+
+            var exists = await _db.VehicleBrands.AsNoTracking()
+                .AnyAsync(b => b.Name.ToLower() == name.ToLower());
+            if (exists)
+                return Conflict(new { message = "Марка с таким названием уже есть в справочнике." });
+
+            var entity = new VehicleBrand { Name = name };
+            _db.VehicleBrands.Add(entity);
+            await _db.SaveChangesAsync();
+
+            return Ok(new IdNameDto { Id = entity.ID_Brand, Name = entity.Name });
+        }
+
+        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
+        [HttpPost("catalog/models")]
+        public async Task<IActionResult> CreateCatalogModel([FromBody] CreateCatalogModelRequest dto)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(new { message = "Проверьте данные модели." });
+
+            var modelName = (dto.Name ?? string.Empty).Trim();
+            if (modelName.Length == 0)
+                return BadRequest(new { message = "Укажите название модели." });
+
+            var brand = await _db.VehicleBrands.AsNoTracking()
+                .FirstOrDefaultAsync(b => b.ID_Brand == dto.BrandId);
+            if (brand is null)
+                return BadRequest(new { message = "Марка не найдена. Сначала выберите или создайте марку." });
+
+            var year = dto.Year is >= 1980 and <= 2100
+                ? new DateOnly(dto.Year.Value, 1, 1)
+                : new DateOnly(DateTime.UtcNow.Year, 1, 1);
+
+            var duplicate = await _db.VehicleModels.AsNoTracking()
+                .AnyAsync(m => m.Brand_id == dto.BrandId &&
+                    m.Name.ToLower() == modelName.ToLower() &&
+                    m.Year == year);
+            if (duplicate)
+                return Conflict(new { message = "Такая модель для этой марки и года уже есть в справочнике." });
+
+            var transmissionId = await _db.TransmissionTypes.AsNoTracking()
+                .OrderBy(t => t.ID_TransmisType)
+                .Select(t => t.ID_TransmisType)
+                .FirstOrDefaultAsync();
+            if (transmissionId == 0)
+                return StatusCode(500, new { message = "Справочник типов КПП пуст." });
+
+            var driveId = await _db.DriveTypes.AsNoTracking()
+                .OrderBy(d => d.ID_DriveType)
+                .Select(d => d.ID_DriveType)
+                .FirstOrDefaultAsync();
+            if (driveId == 0)
+                return StatusCode(500, new { message = "Справочник типов привода пуст." });
+
+            var entity = new VehicleModel
+            {
+                Brand_id = dto.BrandId,
+                Name = modelName,
+                Year = year,
+                AvgFuelCity = 9,
+                AvgFuelHighWay = 6.5m,
+                EngineCapacity = 1.6m,
+                HorsePower = 110,
+                TransmissionType_id = transmissionId,
+                DriveType_id = driveId
+            };
+            _db.VehicleModels.Add(entity);
+            await _db.SaveChangesAsync();
+
+            var row = await _db.VehicleModels.AsNoTracking()
+                .Where(m => m.ID_Model == entity.ID_Model)
+                .Select(m => new VehicleCatalogModelDto
+                {
+                    Id = m.ID_Model,
+                    BrandId = m.Brand_id,
+                    BrandName = m.VehicleBrand.Name,
+                    Name = m.Name,
+                    Year = m.Year,
+                    AvgFuelCity = m.AvgFuelCity,
+                    AvgFuelHighWay = m.AvgFuelHighWay,
+                    EngineCapacity = m.EngineCapacity,
+                    HorsePower = m.HorsePower,
+                    TransmissionTypeId = m.TransmissionType_id,
+                    DriveTypeId = m.DriveType_id,
+                    TransmissionTypeName = m.TransmissionType.Name,
+                    DriveTypeName = m.VehicleDriveType.Name
+                })
+                .FirstAsync();
+
+            return Ok(row);
         }
 
         [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]

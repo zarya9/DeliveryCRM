@@ -31,25 +31,16 @@ public class AddressSuggestApiService
         if (string.IsNullOrWhiteSpace(query) || query.Trim().Length < 2)
             return new List<AddressSuggestItemDto>();
         var trimmedQuery = query.Trim();
-        var cappedLimit = Math.Clamp(limit, 1, 10);
+        var cappedLimit = Math.Clamp(limit, 1, 15);
 
-        async Task<List<AddressSuggestItemDto>> CallAsync(string? cityFilter)
-        {
-            var url = $"/api/AddressSuggest?q={Uri.EscapeDataString(trimmedQuery)}&limit={cappedLimit}";
-            if (!string.IsNullOrWhiteSpace(cityFilter))
-                url += $"&city={Uri.EscapeDataString(cityFilter.Trim())}";
-            var resp = await _http.GetAsync(url);
-            if (!resp.IsSuccessStatusCode)
-                return new List<AddressSuggestItemDto>();
-            await using var stream = await resp.Content.ReadAsStreamAsync();
-            var list = await JsonSerializer.DeserializeAsync<List<AddressSuggestItemDto>>(stream, JsonOpts);
-            return list ?? new List<AddressSuggestItemDto>();
-        }
-
-        var byCity = await CallAsync(city);
-        if (byCity.Count > 0 || string.IsNullOrWhiteSpace(city))
-            return byCity;
-
-        return await CallAsync(null);
+        var url = $"/api/AddressSuggest?q={Uri.EscapeDataString(trimmedQuery)}&limit={cappedLimit}";
+        if (!string.IsNullOrWhiteSpace(city))
+            url += $"&city={Uri.EscapeDataString(city.Trim())}";
+        var resp = await _http.GetAsync(url);
+        if (!resp.IsSuccessStatusCode)
+            return new List<AddressSuggestItemDto>();
+        await using var stream = await resp.Content.ReadAsStreamAsync();
+        var list = await JsonSerializer.DeserializeAsync<List<AddressSuggestItemDto>>(stream, JsonOpts);
+        return list ?? new List<AddressSuggestItemDto>();
     }
 }

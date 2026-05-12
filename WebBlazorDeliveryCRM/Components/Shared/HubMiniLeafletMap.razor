@@ -1,0 +1,60 @@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="@CssClass">
+    <div id="@ElementId" class="hub-mini-map-canvas" aria-hidden="true"></div>
+</div>
+
+@code {
+    /// <summary>Уникальный id DOM (например hub-leaflet-42).</summary>
+    [Parameter]
+    public string ElementId { get; set; } = "";
+
+    [Parameter]
+    public double Lat { get; set; }
+
+    [Parameter]
+    public double Lon { get; set; }
+
+    [Parameter]
+    public string CssClass { get; set; } = "hub-mini-map";
+
+    private string? _initKey;
+    private bool _disposed;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_disposed || string.IsNullOrWhiteSpace(ElementId))
+            return;
+
+        var key = $"{ElementId}|{Lat:R8}|{Lon:R8}";
+        if (key == _initKey)
+            return;
+
+        _initKey = key;
+        await Task.Delay(1);
+        try
+        {
+            await JS.InvokeVoidAsync("hubMiniMap.init", ElementId, Lat, Lon);
+        }
+        catch (JSDisconnectedException)
+        {
+            // circuit ended
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed || string.IsNullOrWhiteSpace(ElementId))
+            return;
+        _disposed = true;
+        try
+        {
+            await JS.InvokeVoidAsync("hubMiniMap.dispose", ElementId);
+        }
+        catch (JSDisconnectedException)
+        {
+            // ignore
+        }
+    }
+}

@@ -1,0 +1,306 @@
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Utilities
+@inject IJSRuntime JS
+@inject IConfiguration Configuration
+@inject ForwardGeocodeService Geocode
+
+@if (Order is not null)
+{
+    <div class="employee-modal-backdrop customer-order-detail-backdrop" @onclick="CloseAsync">
+        <div class="employee-modal employee-modal--order-detail" @onclick:stopPropagation="true" @key="Order.ID_Order">
+            <div class="d-flex justify-content-between align-items-start flex-shrink-0 gap-2 mb-3">
+                <div>
+                    <h2 class="h5 mb-1 d-inline-flex align-items-center gap-2">
+                        <HugeIcon Name="invoice-01" CssClass="dms-icon-sm" />
+                        Заказ №@Order.Order_Number
+                    </h2>
+                    <div class="text-muted small">@Order.Name</div>
+                </div>
+                <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseAsync"></button>
+            </div>
+
+            <div class="customer-order-detail-grid mb-3">
+                <div>
+                    <div class="mb-2">
+                        <StatusBadge Text="@(Order.OrderStatus?.Name ?? "—")" Tone="@OrderStatusUi.ToneForStatusName(Order.OrderStatus?.Name)" />
+                        @if (Order.OrderType is not null)
+                        {
+                            <span class="text-muted small ms-2">@Order.OrderType.Name</span>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(Order.Description))
+                    {
+                        <p class="small mb-2">@Order.Description</p>
+                    }
+                    <dl class="row small mb-0 customer-order-detail-dl">
+                        <dt class="col-sm-4 text-muted">Создан</dt>
+                        <dd class="col-sm-8 mb-1">@Order.Created_at.ToString("dd.MM.yyyy HH:mm")</dd>
+                        <dt class="col-sm-4 text-muted">Сумма</dt>
+                        <dd class="col-sm-8 mb-1">@FormatMoneyRub(Order.Final_cost > 0 ? Order.Final_cost : Order.Estimated_cost)</dd>
+                        <dt class="col-sm-4 text-muted">Оплата</dt>
+                        <dd class="col-sm-8 mb-1">@(Order.Is_paid ? "Оплачен" : "Не оплачен")</dd>
+                        @if (Order.CourierProfile is not null)
+                        {
+                            <dt class="col-sm-4 text-muted">Курьер</dt>
+                            <dd class="col-sm-8 mb-1">@CourierDisplay(Order.CourierProfile)</dd>
+                        }
+                    </dl>
+                </div>
+                <div class="customer-order-detail-addresses">
+                    <div class="mb-2">
+                        <div class="text-uppercase text-muted small fw-semibold mb-1 d-inline-flex align-items-center gap-1">
+                            <HugeIcon Name="store-01" CssClass="dms-icon-sm" />
+                            Откуда забрать
+                        </div>
+                        <div class="customer-order-detail-address-text">@AddressFormat.OneLine(Order.PickupAddress)</div>
+                    </div>
+                    <div>
+                        <div class="text-uppercase text-muted small fw-semibold mb-1 d-inline-flex align-items-center gap-1">
+                            <HugeIcon Name="delivery-truck-01" CssClass="dms-icon-sm" />
+                            Куда доставить
+                        </div>
+                        <div class="customer-order-detail-address-text">@AddressFormat.OneLine(Order.DeliveryAddress)</div>
+                    </div>
+                </div>
+            </div>
+
+            <h3 class="h6 mb-2 d-inline-flex align-items-center gap-2">
+                <HugeIcon Name="maps-location-01" CssClass="dms-icon-sm" />
+                Карта маршрута
+            </h3>
+            @if (!string.IsNullOrWhiteSpace(_mapFootnote))
+            {
+                <p class="small text-muted mb-2">@_mapFootnote</p>
+            }
+            <div id="@_mapElementId" class="customer-order-detail-map"></div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public OrderDto? Order { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private string _mapElementId = "customer-order-detail-map";
+    private int _renderedForOrderId;
+    private bool _mapInitialized;
+    private string? _mapFootnote;
+
+    protected override void OnParametersSet()
+    {
+        if (Order is not null)
+            _mapElementId = $"customer-order-detail-map-{Order.ID_Order}";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Order is null)
+        {
+            if (_mapInitialized)
+            {
+                try
+                {
+                    await JS.InvokeVoidAsync("leafletMap.dispose");
+                }
+                catch (JSDisconnectedException)
+                {
+                    // circuit gone
+                }
+
+                _mapInitialized = false;
+            }
+
+            _renderedForOrderId = 0;
+            _mapFootnote = null;
+            return;
+        }
+
+        if (_renderedForOrderId == Order.ID_Order && _mapInitialized)
+            return;
+
+        _renderedForOrderId = Order.ID_Order;
+        _mapFootnote = null;
+        await Task.Delay(1);
+
+        if (_mapInitialized)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("leafletMap.dispose");
+            }
+            catch (JSDisconnectedException)
+            {
+                // ignore
+            }
+
+            _mapInitialized = false;
+        }
+
+        var coords = await ResolveMapCoordinatesAsync(Order);
+        var (lat, lon, zoom) = DefaultMapView(coords);
+        var osrmUrl = Configuration["Osrm:RouterBaseUrl"];
+        try
+        {
+            await JS.InvokeVoidAsync("leafletMap.init", _mapElementId, lat, lon, zoom, null, osrmUrl, false, "ru");
+            _mapInitialized = true;
+        }
+        catch
+        {
+            return;
+        }
+
+        await ApplyMarkersAsync(coords, Order);
+    }
+
+    private async Task<MapCoords> ResolveMapCoordinatesAsync(OrderDto o, CancellationToken cancellationToken = default)
+    {
+        var pLat = o.PickupAddress?.Latitude;
+        var pLon = o.PickupAddress?.Longitude;
+        var dLat = o.DeliveryAddress?.Latitude;
+        var dLon = o.DeliveryAddress?.Longitude;
+        var usedGeocode = false;
+        var didRemoteLookup = false;
+
+        if ((!pLat.HasValue || !pLon.HasValue) && o.PickupAddress is not null)
+        {
+            var q = AddressFormat.GeocodeSearchQuery(o.PickupAddress);
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                var (la, lo) = await Geocode.TryGeocodeAsync(q, cancellationToken);
+                if (la.HasValue && lo.HasValue)
+                {
+                    pLat = la;
+                    pLon = lo;
+                    usedGeocode = true;
+                }
+
+                didRemoteLookup = true;
+            }
+        }
+
+        if ((!dLat.HasValue || !dLon.HasValue) && o.DeliveryAddress is not null)
+        {
+            if (didRemoteLookup)
+                await Task.Delay(1100, cancellationToken);
+
+            var q = AddressFormat.GeocodeSearchQuery(o.DeliveryAddress);
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                var (la, lo) = await Geocode.TryGeocodeAsync(q, cancellationToken);
+                if (la.HasValue && lo.HasValue)
+                {
+                    dLat = la;
+                    dLon = lo;
+                    usedGeocode = true;
+                }
+            }
+        }
+
+        var coords = new MapCoords(pLat, pLon, dLat, dLon);
+        var hasPickup = coords.PickupLat.HasValue && coords.PickupLon.HasValue;
+        var hasDelivery = coords.DeliveryLat.HasValue && coords.DeliveryLon.HasValue;
+
+        if (usedGeocode)
+            _mapFootnote = "Точки на карте уточнены по адресу (геокодинг OpenStreetMap).";
+        else if (!hasPickup && !hasDelivery)
+            _mapFootnote = "Не удалось определить координаты по адресу — для новых заказов координаты сохраняются при выборе из подсказки.";
+        else
+            _mapFootnote = null;
+
+        return coords;
+    }
+
+    private readonly record struct MapCoords(decimal? PickupLat, decimal? PickupLon, decimal? DeliveryLat, decimal? DeliveryLon);
+
+    private static (double lat, double lon, int zoom) DefaultMapView(MapCoords c)
+    {
+        double? pLat = c.PickupLat is { } pl ? (double)pl : null;
+        double? pLon = c.PickupLon is { } plo ? (double)plo : null;
+        double? dLat = c.DeliveryLat is { } dl ? (double)dl : null;
+        double? dLon = c.DeliveryLon is { } dlo ? (double)dlo : null;
+
+        if (pLat is not null && pLon is not null && dLat is not null && dLon is not null)
+            return ((pLat.Value + dLat.Value) / 2, (pLon.Value + dLon.Value) / 2, 11);
+        if (pLat is not null && pLon is not null)
+            return (pLat.Value, pLon.Value, 13);
+        if (dLat is not null && dLon is not null)
+            return (dLat.Value, dLon.Value, 13);
+        return (55.7558, 37.6173, 11);
+    }
+
+    private async Task ApplyMarkersAsync(MapCoords c, OrderDto o)
+    {
+        var markers = new List<object>();
+        var points = new List<object>();
+        if (c.PickupLat is { } pLat && c.PickupLon is { } pLon)
+        {
+            markers.Add(new { lat = (double)pLat, lon = (double)pLon, title = "Забор", kind = "pickup" });
+            points.Add(new { lat = (double)pLat, lon = (double)pLon, title = "Забор" });
+        }
+
+        if (c.DeliveryLat is { } dLat && c.DeliveryLon is { } dLon)
+        {
+            markers.Add(new { lat = (double)dLat, lon = (double)dLon, title = "Доставка", kind = "delivery" });
+            points.Add(new { lat = (double)dLat, lon = (double)dLon, title = "Доставка" });
+        }
+
+        if (o.CourierProfile is not null &&
+            (o.CourierProfile.Current_lat != 0 || o.CourierProfile.Current_lon != 0))
+        {
+            markers.Add(new
+            {
+                lat = (double)o.CourierProfile.Current_lat,
+                lon = (double)o.CourierProfile.Current_lon,
+                title = "Курьер",
+                kind = "courier"
+            });
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("leafletMap.clearMarkers");
+            await JS.InvokeVoidAsync("leafletMap.clearRoute");
+            if (markers.Count > 0)
+                await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
+            if (points.Count >= 2)
+                await JS.InvokeVoidAsync("leafletMap.setRouteWaypoints", points, false);
+        }
+        catch (JSDisconnectedException)
+        {
+            // ignore
+        }
+    }
+
+    private static string FormatMoneyRub(decimal v) => $"{v:N2} ₽";
+
+    private static string CourierDisplay(CourierProfileDto c)
+    {
+        var u = c.User;
+        if (u is null)
+            return "Назначен";
+        var name = $"{u.FName} {u.Name}".Trim();
+        return string.IsNullOrEmpty(name) ? "Назначен" : name;
+    }
+
+    private async Task CloseAsync()
+    {
+        if (_mapInitialized)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("leafletMap.dispose");
+            }
+            catch (JSDisconnectedException)
+            {
+                // ignore
+            }
+
+            _mapInitialized = false;
+        }
+
+        _renderedForOrderId = 0;
+        _mapFootnote = null;
+        await OnClose.InvokeAsync();
+    }
+}

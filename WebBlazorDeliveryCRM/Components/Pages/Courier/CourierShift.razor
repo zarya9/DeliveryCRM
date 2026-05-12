@@ -15,7 +15,10 @@
 <PageTitle>Смена и геолокация — Курьер</PageTitle>
 
 <div class="dms-page-header">
-    <h1>Смена и координаты</h1>
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="calendar-03" CssClass="dms-page-title-icon" />
+        Смена и координаты
+    </h1>
     <p class="subtitle">
         Сначала начните смену. В сеть и передача координат доступны только при активной смене. Разрешите доступ к геолокации в браузере.
         Позиция обновляется непрерывно (GPS watch) и отправляется на сервер каждые несколько секунд при движении.
@@ -33,21 +36,33 @@ else if (_profileId is null)
 else
 {
     <div class="dms-card mb-3">
-        <h2 class="dms-card-title">Статус смены</h2>
+        <h2 class="dms-card-title dms-card-title-with-icon">
+            <HugeIcon Name="clock-01" CssClass="dms-card-title-icon" />
+            Статус смены
+        </h2>
         @if (_shiftActive && _shiftId.HasValue)
         {
             <p class="mb-2">Смена открыта @( _shiftStartedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—" ).</p>
-            <button type="button" class="btn btn-outline-danger" disabled="@_busy" @onclick="EndShiftAsync">Завершить смену</button>
+            <button type="button" class="btn btn-outline-danger d-inline-flex align-items-center gap-1" disabled="@_busy" @onclick="EndShiftAsync">
+                <HugeIcon Name="moon-02" CssClass="dms-icon-sm" />
+                <span>Завершить смену</span>
+            </button>
         }
         else
         {
             <p class="text-muted mb-2">Смена не начата.</p>
-            <button type="button" class="btn btn-primary dms-btn-primary" disabled="@_busy" @onclick="StartShiftAsync">Начать смену</button>
+            <button type="button" class="btn btn-primary dms-btn-primary d-inline-flex align-items-center gap-1" disabled="@_busy" @onclick="StartShiftAsync">
+                <HugeIcon Name="sun-03" CssClass="dms-icon-sm" />
+                <span>Начать смену</span>
+            </button>
         }
     </div>
 
     <div class="dms-card mb-3">
-        <h2 class="dms-card-title">В сеть и координаты</h2>
+        <h2 class="dms-card-title dms-card-title-with-icon">
+            <HugeIcon Name="location-01" CssClass="dms-card-title-icon" />
+            В сеть и координаты
+        </h2>
         @if (!_shiftActive)
         {
             <p class="text-muted mb-0">Начните смену, чтобы включить «В сеть» и передачу координат.</p>
@@ -57,12 +72,18 @@ else
             <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
                 @if (_online)
                 {
-                    <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="GoOfflineAsync">Выйти из сети</button>
+                    <button type="button" class="btn btn-outline-secondary d-inline-flex align-items-center gap-1" disabled="@_busy" @onclick="GoOfflineAsync">
+                        <HugeIcon Name="moon-02" CssClass="dms-icon-sm" />
+                        <span>Выйти из сети</span>
+                    </button>
                     <span class="text-success small">Координаты отправляются в реальном времени при движении.</span>
                 }
                 else
                 {
-                    <button type="button" class="btn btn-primary dms-btn-primary" disabled="@_busy" @onclick="GoOnlineAsync">В сеть + геолокация</button>
+                    <button type="button" class="btn btn-primary dms-btn-primary d-inline-flex align-items-center gap-1" disabled="@_busy" @onclick="GoOnlineAsync">
+                        <HugeIcon Name="activity-01" CssClass="dms-icon-sm" />
+                        <span>В сеть + геолокация</span>
+                    </button>
                 }
             </div>
             @if (_lastGeoError is not null)
@@ -79,10 +100,14 @@ else
     @if (!string.IsNullOrWhiteSpace(_mapRouteUrl))
     {
         <div class="dms-card mb-3">
-            <h2 class="dms-card-title">Маршрут смены</h2>
+            <h2 class="dms-card-title dms-card-title-with-icon">
+                <HugeIcon Name="route-02" CssClass="dms-card-title-icon" />
+                Маршрут смены
+            </h2>
             <p class="small text-muted mb-2">Можно открыть маршрут в внешнем приложении карт.</p>
-            <a href="@_mapRouteUrl" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary">
-                Открыть в Яндекс Картах
+            <a href="@_mapRouteUrl" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary d-inline-flex align-items-center gap-1">
+                <HugeIcon Name="route-02" CssClass="dms-icon-sm" />
+                <span>Открыть в Яндекс Картах</span>
             </a>
         </div>
     }

@@ -1,12 +1,18 @@
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
+@using System.Globalization
 @using System.Net
 @using System.Text.RegularExpressions
 @using Microsoft.AspNetCore.Components
 @implements IAsyncDisposable
 @inject OrdersApiService OrdersApi
 @inject AddressSuggestApiService AddressSuggestApi
+@inject ClientsApiService ClientsApi
+@inject CompaniesApiService CompaniesApi
+@inject AuthenticationStateProvider AuthState
 @inject AppNotificationService Notify
+@using System.Security.Claims
 
 <style>
     .order-wizard-root { overflow-x: hidden; }
@@ -51,6 +57,24 @@
     @if (_step == 1)
     {
         <div class="row g-2">
+            <div class="col-12">
+                <label class="form-label small mb-0">Компания-исполнитель</label>
+                @if (_orderCompanies.Count > 0)
+                {
+                    <select class="form-select form-select-sm" @bind="_form.CompanyId">
+                        @foreach (var c in _orderCompanies)
+                        {
+                            <option value="@c.Id">@c.Name</option>
+                        }
+                    </select>
+                    <div class="small text-muted mt-1">Кому направить заказ: выбранная компания обработает доставку.</div>
+                }
+                else
+                {
+                    <div class="form-control form-control-sm bg-body-secondary text-muted">По умолчанию (ваша учётная запись)</div>
+                    <div class="small text-muted mt-1">Список служб недоступен — заказ уйдёт в компанию вашего профиля.</div>
+                }
+            </div>
             <div class="col-12">
                 <label class="form-label small mb-0">Название</label>
                 <input class="form-control form-control-sm" @bind="_form.Name" />
@@ -221,12 +245,23 @@
         }
         @if (_step < 3)
         {
-            <button type="button" class="btn btn-primary btn-sm dms-btn-primary" disabled="@_saving" @onclick="StepNextAsync">Далее</button>
+            <button type="button" class="btn btn-primary btn-sm dms-btn-primary d-inline-flex align-items-center gap-1" disabled="@_saving" @onclick="StepNextAsync">
+                <HugeIcon Name="analytics-up" CssClass="dms-icon-sm" />
+                <span>Далее</span>
+            </button>
         }
         else
         {
-            <button type="button" class="btn btn-primary btn-sm dms-btn-primary" disabled="@_saving" @onclick="SubmitAsync">
-                @(_saving ? "Создание…" : "Создать заказ")
+            <button type="button" class="btn btn-primary btn-sm dms-btn-primary d-inline-flex align-items-center gap-1" disabled="@_saving" @onclick="SubmitAsync">
+                @if (_saving)
+                {
+                    <span>Создание…</span>
+                }
+                else
+                {
+                    <HugeIcon Name="invoice-01" CssClass="dms-icon-sm" />
+                    <span>Создать заказ</span>
+                }
             </button>
         }
         @if (ShowCancel)
@@ -262,6 +297,8 @@
     private bool _deliverySuggestLoading;
     private CancellationTokenSource? _pickupDebounceCts;
     private CancellationTokenSource? _deliveryDebounceCts;
+    private List<CompanyOrderTargetDto> _orderCompanies = new();
+    private int _defaultCompanyId;
 
     private string StepTitle => _step switch
     {
@@ -270,11 +307,37 @@
         _ => "габариты"
     };
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         _form.Name = "Новый заказ";
         _form.PickupCity = "Казань";
         _form.DeliveryCity = "Казань";
+
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var userIdStr = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!int.TryParse(userIdStr, out var userId))
+                return;
+
+            var profileTask = ClientsApi.GetByUserIdAsync(userId);
+            var companiesTask = CompaniesApi.GetForCustomerOrderAsync();
+            await Task.WhenAll(profileTask, companiesTask);
+            var profile = await profileTask;
+            _orderCompanies = await companiesTask;
+            if (profile != null)
+            {
+                _defaultCompanyId = profile.Company_id;
+                if (_form.CompanyId == 0)
+                    _form.CompanyId = _defaultCompanyId;
+            }
+            if (_orderCompanies.Count > 0 && !_orderCompanies.Any(c => c.Id == _form.CompanyId))
+                _form.CompanyId = _orderCompanies[0].Id;
+        }
+        catch
+        {
+            /* оставляем CompanyId = 0 — сервер подставит компанию профиля */
+        }
     }
 
     public void ResetForm()
@@ -285,7 +348,8 @@
         {
             Name = "Новый заказ",
             PickupCity = "Казань",
-            DeliveryCity = "Казань"
+            DeliveryCity = "Казань",
+            CompanyId = _defaultCompanyId > 0 ? _defaultCompanyId : 0
         };
         _pickupSearchText = "";
         _deliverySearchText = "";
@@ -340,7 +404,8 @@
 
     private string? ValidateStep(int step) => step switch
     {
-        1 => string.IsNullOrWhiteSpace(_form.Name) ? "Укажите название заказа." : null,
+        1 => string.IsNullOrWhiteSpace(_form.Name) ? "Укажите название заказа." :
+            (_orderCompanies.Count > 0 && !_orderCompanies.Any(c => c.Id == _form.CompanyId)) ? "Выберите компанию-исполнителя." : null,
         2 =>
             string.IsNullOrWhiteSpace(_form.PickupCity) ? "Укажите город забора." :
             string.IsNullOrWhiteSpace(_form.DeliveryCity) ? "Укажите город доставки." :
@@ -449,7 +514,7 @@
                 _pickupSuggestLoading = true;
                 await InvokeAsync(StateHasChanged);
                 var city = string.IsNullOrWhiteSpace(_form.PickupCity) ? null : _form.PickupCity.Trim();
-                var list = await AddressSuggestApi.SuggestAsync(q, 10, city);
+                var list = await AddressSuggestApi.SuggestAsync(q, 15, city);
                 _pickupSuggestions = list;
                 _pickupOpen = list.Count > 0;
                 _pickupSuggestLoading = false;
@@ -482,7 +547,7 @@
                 _deliverySuggestLoading = true;
                 await InvokeAsync(StateHasChanged);
                 var city = string.IsNullOrWhiteSpace(_form.DeliveryCity) ? null : _form.DeliveryCity.Trim();
-                var list = await AddressSuggestApi.SuggestAsync(q, 10, city);
+                var list = await AddressSuggestApi.SuggestAsync(q, 15, city);
                 _deliverySuggestions = list;
                 _deliveryOpen = list.Count > 0;
                 _deliverySuggestLoading = false;
@@ -529,6 +594,7 @@
             _form.PickupHouse = house;
             if (!string.IsNullOrWhiteSpace(city))
                 _form.PickupCity = city;
+            ApplySuggestCoords(s, pickup: true);
         }
         else
         {
@@ -536,7 +602,49 @@
             _form.DeliveryHouse = house;
             if (!string.IsNullOrWhiteSpace(city))
                 _form.DeliveryCity = city;
+            ApplySuggestCoords(s, pickup: false);
         }
+    }
+
+    private void ApplySuggestCoords(AddressSuggestItemDto s, bool pickup)
+    {
+        if (TryParseSuggestCoords(s, out var la, out var lo))
+        {
+            if (pickup)
+            {
+                _form.PickupLatitude = la;
+                _form.PickupLongitude = lo;
+            }
+            else
+            {
+                _form.DeliveryLatitude = la;
+                _form.DeliveryLongitude = lo;
+            }
+        }
+        else if (pickup)
+        {
+            _form.PickupLatitude = null;
+            _form.PickupLongitude = null;
+        }
+        else
+        {
+            _form.DeliveryLatitude = null;
+            _form.DeliveryLongitude = null;
+        }
+    }
+
+    private static bool TryParseSuggestCoords(AddressSuggestItemDto s, out decimal? lat, out decimal? lon)
+    {
+        lat = null;
+        lon = null;
+        if (string.IsNullOrWhiteSpace(s.Lat) || string.IsNullOrWhiteSpace(s.Lon))
+            return false;
+        if (!decimal.TryParse(s.Lat, NumberStyles.Float, CultureInfo.InvariantCulture, out var la) ||
+            !decimal.TryParse(s.Lon, NumberStyles.Float, CultureInfo.InvariantCulture, out var lo))
+            return false;
+        lat = la;
+        lon = lo;
+        return true;
     }
 
     private static bool TryParseHouseFromQuery(string query, out string house)
@@ -581,6 +689,8 @@
         _form.PickupStreet = "";
         _form.PickupHouse = "";
         _form.PickupFlat = null;
+        _form.PickupLatitude = null;
+        _form.PickupLongitude = null;
         if (string.IsNullOrWhiteSpace(_form.PickupCity))
             _form.PickupCity = "Казань";
         _pickupSuggestions.Clear();
@@ -594,6 +704,8 @@
         _form.DeliveryStreet = "";
         _form.DeliveryHouse = "";
         _form.DeliveryFlat = null;
+        _form.DeliveryLatitude = null;
+        _form.DeliveryLongitude = null;
         if (string.IsNullOrWhiteSpace(_form.DeliveryCity))
             _form.DeliveryCity = "Казань";
         _deliverySuggestions.Clear();

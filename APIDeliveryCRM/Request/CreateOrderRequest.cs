@@ -58,6 +58,9 @@ namespace APIDeliveryCRM.Request
         public int? DestinationHub_id { get; set; }
 
         public bool AutoSelectRouteKind { get; set; } = true;
+
+        /// <summary>Если задано — заказ и адреса привязываются к этой компании (создание от клиента). Иначе — к компании из профиля клиента.</summary>
+        public int? OrderCompany_id { get; set; }
     }
 }
 

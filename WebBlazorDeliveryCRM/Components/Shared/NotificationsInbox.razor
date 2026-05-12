@@ -7,15 +7,22 @@
 @inject AppNotificationService Notify
 
 <div class="dms-card">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2 class="dms-card-title mb-0">Входящие</h2>
-        <div class="d-flex gap-2">
-            <label class="d-flex align-items-center gap-1 small"><input type="checkbox" @bind="_onlyUnread" /> Непрочитанные</label>
-            <label class="d-flex align-items-center gap-1 small"><input type="checkbox" @bind="_onlyCritical" /> Критичные</label>
-            <label class="d-flex align-items-center gap-1 small"><input type="checkbox" @bind="_onlyAckRequired" /> Требуют подтверждения</label>
-            <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_loading" @onclick="@(async () => await Reload())">
-                @(_loading ? "…" : "Обновить")
-            </button>
+    <div class="notifications-inbox-toolbar d-flex justify-content-between align-items-center mb-3">
+        <h2 class="dms-card-title @(string.IsNullOrEmpty(ToolbarTitleIconName) ? null : "dms-card-title-with-icon") mb-0">
+            @if (!string.IsNullOrEmpty(ToolbarTitleIconName))
+            {
+                <HugeIcon Name="@ToolbarTitleIconName" CssClass="dms-card-title-icon" />
+            }
+            Входящие
+        </h2>
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+            <label class="small text-muted mb-0" for="notif-filter-select">Фильтр</label>
+            <select id="notif-filter-select" class="form-select form-select-sm notifications-filter-select" value="@_selectedFilter" @onchange="OnFilterChanged">
+                <option value="all">Все уведомления</option>
+                <option value="unread">Только непрочитанные</option>
+                <option value="critical">Только критичные</option>
+                <option value="ack">Требуют подтверждения</option>
+            </select>
         </div>
     </div>
 
@@ -29,13 +36,13 @@
     }
     else
     {
-        <div class="list-group">
+        <div class="list-group notifications-list">
             @foreach (var n in _items.OrderByDescending(x => x.SentAt))
             {
-                <div class="list-group-item list-group-item-action d-flex flex-column flex-md-row gap-2 @(n.IsRead ? "" : "list-group-item-primary bg-opacity-10")">
+                <div class="list-group-item list-group-item-action d-flex flex-column flex-md-row gap-2 notifications-item @(n.IsRead ? "" : "notifications-item--unread")">
                     <div class="flex-grow-1">
                         <div class="d-flex flex-wrap gap-2 align-items-baseline">
-                            <strong>@n.Title</strong>
+                            <strong class="notifications-title">@n.Title</strong>
                             @if (!string.IsNullOrEmpty(n.TypeName))
                             {
                                 <StatusBadge Text="@n.TypeName" Tone="neutral" />
@@ -53,8 +60,8 @@
                                 <StatusBadge Text="Нужно подтвердить" Tone="warning" />
                             }
                         </div>
-                        <p class="mb-1 mt-1 small">@n.Message</p>
-                        <div class="text-muted small">
+                        <p class="mb-1 mt-1 small notifications-message">@n.Message</p>
+                        <div class="text-muted small notifications-meta">
                             @n.SentAt.ToString("dd.MM.yyyy")
                             @if (n.OrderId.HasValue)
                             {
@@ -83,13 +90,14 @@
 </div>
 
 @code {
+    /// <summary>Иконка слева от «Входящие»; null — без иконки (старый вид).</summary>
+    [Parameter] public string? ToolbarTitleIconName { get; set; }
+
     private List<NotificationItemDto>? _items;
     private bool _loading = true;
     private bool _marking;
     private IDisposable? _hubSub;
-    private bool _onlyUnread;
-    private bool _onlyCritical;
-    private bool _onlyAckRequired;
+    private string _selectedFilter = "all";
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -103,7 +111,6 @@
             await ChatHub.StartAsync();
             _hubSub = conn.On<NotificationReceivedSignalDto>("NotificationReceived", _ =>
             {
-                Notify.ShowInfo("Новое уведомление");
                 return Reload(showSpinner: false);
             });
         }
@@ -122,10 +129,13 @@
         }
         try
         {
+            var onlyUnread = _selectedFilter == "unread";
+            var onlyCritical = _selectedFilter == "critical";
+            var onlyAckRequired = _selectedFilter == "ack";
             _items = await NotificationsApi.GetMineAsync(
-                onlyCritical: _onlyCritical,
-                onlyUnread: _onlyUnread,
-                onlyRequiresAck: _onlyAckRequired) ?? new();
+                onlyCritical: onlyCritical,
+                onlyUnread: onlyUnread,
+                onlyRequiresAck: onlyAckRequired) ?? new();
         }
         finally
         {
@@ -133,6 +143,12 @@
                 _loading = false;
             StateHasChanged();
         }
+    }
+
+    private async Task OnFilterChanged(ChangeEventArgs e)
+    {
+        _selectedFilter = e.Value?.ToString() ?? "all";
+        await Reload();
     }
 
     private async Task MarkRead(NotificationItemDto n)

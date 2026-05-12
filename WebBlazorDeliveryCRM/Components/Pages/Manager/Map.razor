@@ -257,14 +257,25 @@
     {
         var markers = (_couriers ?? new List<CourierProfileDto>())
             .Where(c => c.Current_lat != 0 || c.Current_lon != 0)
-            .Select(c => new { lat = (double)c.Current_lat, lon = (double)c.Current_lon, title = $"{c.User?.FName} {c.User?.Name} — {c.CourierStatus?.Name}" })
+            .Select(c => new
+            {
+                id = c.ID_CourierProfile,
+                lat = (double)c.Current_lat,
+                lon = (double)c.Current_lon,
+                title = $"{c.User?.FName} {c.User?.Name} — {c.CourierStatus?.Name}",
+                kind = "courier",
+                online = c.Is_online
+            })
             .Concat(_hubs
                 .Where(h => h.Latitude.HasValue && h.Longitude.HasValue)
                 .Select(h => new
                 {
+                    id = h.Id,
                     lat = (double)h.Latitude!.Value,
                     lon = (double)h.Longitude!.Value,
-                    title = $"Склад: {(string.IsNullOrWhiteSpace(h.Name) ? "Склад" : h.Name)}"
+                    title = $"Склад: {(string.IsNullOrWhiteSpace(h.Name) ? "Склад" : h.Name)}",
+                    kind = "hub",
+                    online = false
                 }))
             .ToList();
 

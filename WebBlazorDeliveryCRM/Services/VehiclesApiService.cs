@@ -46,6 +46,44 @@ public class VehiclesApiService
         return list ?? new List<VehicleCatalogModelDto>();
     }
 
+    public async Task<(bool ok, string? error, IdNameDto? created)> CreateCatalogBrandAsync(string name)
+    {
+        var body = new CreateCatalogBrandApiRequest { Name = name.Trim() };
+        var json = JsonSerializer.Serialize(body);
+        var resp = await _http.PostAsync("/api/Vehicles/catalog/brands", new StringContent(json, Encoding.UTF8, "application/json"));
+        if (resp.IsSuccessStatusCode)
+        {
+            var created = await resp.Content.ReadFromJsonAsync<IdNameDto>(JsonOpts);
+            return (true, null, created);
+        }
+        return (false, await ReadApiMessageAsync(resp), null);
+    }
+
+    public async Task<(bool ok, string? error, VehicleCatalogModelDto? created)> CreateCatalogModelAsync(
+        int brandId, string modelName, int? modelYear)
+    {
+        var body = new CreateCatalogModelApiRequest
+        {
+            BrandId = brandId,
+            Name = modelName.Trim(),
+            Year = modelYear is >= 1980 and <= 2100 ? modelYear : null
+        };
+        var json = JsonSerializer.Serialize(body);
+        var resp = await _http.PostAsync("/api/Vehicles/catalog/models", new StringContent(json, Encoding.UTF8, "application/json"));
+        if (resp.IsSuccessStatusCode)
+        {
+            var created = await resp.Content.ReadFromJsonAsync<VehicleCatalogModelDto>(JsonOpts);
+            return (true, null, created);
+        }
+        return (false, await ReadApiMessageAsync(resp), null);
+    }
+
+    private static async Task<string?> ReadApiMessageAsync(HttpResponseMessage resp)
+    {
+        var err = await resp.Content.ReadAsStringAsync();
+        return TryParseErrorMessage(err) ?? (string.IsNullOrWhiteSpace(err) ? $"HTTP {(int)resp.StatusCode}" : err);
+    }
+
     public async Task<(bool ok, string? error, int? id)> CreateVehicleAsync(CreateVehicleApiRequest body)
     {
         var json = JsonSerializer.Serialize(body);

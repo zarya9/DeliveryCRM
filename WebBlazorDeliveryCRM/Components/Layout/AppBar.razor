@@ -3,6 +3,7 @@
 @inject ChatApiService ChatApi
 @inject ChatUnreadStateService ChatUnreadState
 @inject AppNotificationService Notify
+@inject NotificationPopupService PopupNotifications
 @inject IJSRuntime JS
 @using WebBlazorDeliveryCRM.Components.Shared
 @using System.Security.Claims
@@ -205,11 +206,12 @@
 
         ChatHub.Connection.On<IncomingNotificationSignal>("NotificationReceived", payload =>
         {
-            return InvokeAsync(() =>
+            return InvokeAsync(async () =>
             {
                 var title = string.IsNullOrWhiteSpace(payload.title) ? "Уведомление" : payload.title!;
                 var body = string.IsNullOrWhiteSpace(payload.message) ? "Новое событие в системе." : payload.message!;
-                Notify.ShowInfo($"{title}: {body}", pushWhenHidden: true);
+                PopupNotifications.Raise(new NotificationPopupService.PopupNotification(payload.id, title, body, NotificationsHref));
+                await Notify.ShowPushWhenHiddenAsync(title, body);
             });
         });
 

@@ -3,6 +3,7 @@
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
 @using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Utilities
 @inject OrdersApiService OrdersApi
 @inject CouriersApiService CouriersApi
 @inject AppNotificationService Notify
@@ -130,7 +131,7 @@
     else
     {
         <div class="table-responsive">
-            <table class="table table-hover align-middle orders-table">
+            <table class="table table-hover align-middle orders-table dms-data-table">
                 <thead>
                     <tr>
                         <th class="orders-th-check">
@@ -163,7 +164,7 @@
                             <td>@o.Name</td>
                             <td>@FormatClientName(o)</td>
                             <td>
-                                <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@GetOrderStatusTone(o.OrderStatus?.Name)" />
+                                <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@OrderStatusUi.ToneForStatusName(o.OrderStatus?.Name)" />
                             </td>
                             <td>
                                 @if (o.Sla_breached_at.HasValue)
@@ -512,16 +513,6 @@
     {
         var s = (statusName ?? string.Empty).ToLowerInvariant();
         return s.Contains("нов");
-    }
-
-    private static string GetOrderStatusTone(string? status)
-    {
-        var s = (status ?? string.Empty).ToLowerInvariant();
-        if (s.Contains("достав")) return "success";
-        if (s.Contains("отмен")) return "danger";
-        if (s.Contains("в пути") || s.Contains("назнач")) return "primary";
-        if (s.Contains("нов")) return "warning";
-        return "neutral";
     }
 
     private static string FormatClientName(OrderDto o)

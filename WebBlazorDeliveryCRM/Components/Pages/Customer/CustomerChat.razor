@@ -1,7 +1,16 @@
 @page "/customer/chat"
 @layout CustomerLayout
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Клиент")]
+@using WebBlazorDeliveryCRM.Components.Shared
 
 <PageTitle>Чат — Клиент</PageTitle>
+
+<div class="dms-page-header">
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="message-01" CssClass="dms-page-title-icon" />
+        Чат
+    </h1>
+    <p class="subtitle mb-0">Переписка с сотрудниками компании по заказам и вопросам доставки.</p>
+</div>
 
 <CompanyChatPanel />

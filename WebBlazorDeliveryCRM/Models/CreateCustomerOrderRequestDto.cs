@@ -16,6 +16,9 @@ public class CreateCustomerOrderRequestDto
     public string? PickupCity { get; set; }
     public string? PickupComment { get; set; }
 
+    public decimal? PickupLatitude { get; set; }
+    public decimal? PickupLongitude { get; set; }
+
     [Required]
     public string DeliveryStreet { get; set; } = string.Empty;
     [Required]
@@ -23,6 +26,9 @@ public class CreateCustomerOrderRequestDto
     public string? DeliveryFlat { get; set; }
     public string? DeliveryCity { get; set; }
     public string? DeliveryComment { get; set; }
+
+    public decimal? DeliveryLatitude { get; set; }
+    public decimal? DeliveryLongitude { get; set; }
 
     [Range(0.1, 100000)]
     public decimal Weight { get; set; } = 1;
@@ -35,4 +41,7 @@ public class CreateCustomerOrderRequestDto
 
     [Range(0, 3)]
     public byte Priority { get; set; } = 0;
+
+    /// <summary>Компания-исполнитель (0 — по умолчанию компания учётной записи на сервере).</summary>
+    public int CompanyId { get; set; }
 }

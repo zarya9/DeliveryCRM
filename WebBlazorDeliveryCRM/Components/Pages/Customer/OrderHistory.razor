@@ -3,6 +3,8 @@
 @using System.Security.Claims
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Utilities
 @inject ClientsApiService ClientsApi
 @inject AuthenticationStateProvider AuthState
 @inject OrdersApiService OrdersApi
@@ -12,9 +14,15 @@
 
 <div class="dms-page-header">
     <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-        <a href="/customer/orders" class="btn btn-outline-secondary btn-sm">← К списку заказов</a>
+        <a href="/customer/orders" class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1">
+            <HugeIcon Name="invoice-01" CssClass="dms-icon-sm" />
+            <span>К списку заказов</span>
+        </a>
     </div>
-    <h1>История заказов</h1>
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="clock-01" CssClass="dms-page-title-icon" />
+        История заказов
+    </h1>
     <p class="subtitle">Название, даты, статусы, оплата и суммы по всем заказам.</p>
 </div>
 
@@ -22,51 +30,65 @@
     @if (_orders != null && _orders.Count > 0)
     {
         <div class="table-responsive">
-            <table class="table table-sm align-middle mb-0">
+            <table class="table table-sm align-middle mb-0 dms-data-table">
                 <thead>
                     <tr>
-                        <th>№</th>
-                        <th>Название</th>
-                        <th>Создан</th>
-                        <th>Статус</th>
-                        <th>Оплата</th>
-                        <th class="text-nowrap">Действие</th>
-                        <th>Сумма</th>
-                        <th>Приоритет</th>
-                        <th>Окно доставки</th>
-                        <th>Маршрут</th>
-                        <th>Доставлен</th>
+                        <DmsTableThIcon Icon="invoice-01">№</DmsTableThIcon>
+                        <DmsTableThIcon Icon="calendar-03">Создан</DmsTableThIcon>
+                        <DmsTableThIcon Icon="task-01">Название</DmsTableThIcon>
+                        <DmsTableThIcon Icon="activity-01">Статус</DmsTableThIcon>
+                        <DmsTableThIcon Icon="analytics-up">Сумма</DmsTableThIcon>
+                        <DmsTableThIcon Icon="wallet-01">Оплата</DmsTableThIcon>
+                        <DmsTableThIcon Icon="pencil-edit-01" CssClass="text-nowrap">Действие</DmsTableThIcon>
+                        <DmsTableThIcon Icon="briefcase-01">Приоритет</DmsTableThIcon>
+                        <DmsTableThIcon Icon="clock-01">Окно доставки</DmsTableThIcon>
+                        <DmsTableThIcon Icon="route-02">Маршрут</DmsTableThIcon>
+                        <DmsTableThIcon Icon="delivery-truck-01">Доставлен</DmsTableThIcon>
                     </tr>
                 </thead>
                 <tbody>
                     @foreach (var o in _orders.OrderByDescending(x => x.Created_at))
                     {
-                        <tr>
+                        <tr class="customer-order-table-row" @onclick="() => OpenOrderDetail(o)">
                             <td>@o.Order_Number</td>
+                            <td class="text-nowrap">@o.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
                             <td>@o.Name</td>
-                            <td>@o.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
-                            <td>@(o.OrderStatus?.Name ?? "—")</td>
+                            <td>
+                                <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@OrderStatusUi.ToneForStatusName(o.OrderStatus?.Name)" />
+                            </td>
+                            <td class="text-nowrap">@FormatMoneyRub(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost)</td>
                             <td>
                                 @if (o.Is_paid)
                                 {
-                                    <span class="badge text-bg-success">Оплачен</span>
+                                    <span class="badge text-bg-success d-inline-flex align-items-center gap-1">
+                                        <HugeIcon Name="wallet-01" CssClass="dms-icon-sm" />
+                                        <span>Оплачен</span>
+                                    </span>
                                 }
                                 else
                                 {
-                                    <span class="badge rounded-pill bg-warning text-dark">Не оплачен</span>
+                                    <span class="badge rounded-pill bg-warning text-dark d-inline-flex align-items-center gap-1 px-2 py-1">
+                                        <HugeIcon Name="wallet-01" CssClass="dms-icon-sm flex-shrink-0" />
+                                        <span>Не оплачен</span>
+                                    </span>
                                 }
                             </td>
                             <td>
                                 @if (!o.Is_paid)
                                 {
-                                    <button type="button" class="btn btn-sm btn-primary" disabled="@IsPaying(o.ID_Order)" @onclick="() => PayAsync(o)">Оплатить</button>
+                                    <button type="button" class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
+                                            disabled="@IsPaying(o.ID_Order)"
+                                            @onclick:stopPropagation="true"
+                                            @onclick="() => PayAsync(o)">
+                                        <HugeIcon Name="wallet-01" CssClass="dms-icon-sm flex-shrink-0" />
+                                        <span>Оплатить</span>
+                                    </button>
                                 }
                             </td>
-                            <td>@FormatMoneyRub(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost)</td>
                             <td>@PriorityLabel(o.Priority)</td>
                             <td>@FormatDeliveryWindow(o)</td>
                             <td>@FormatRouteKind(o.DeliveryRouteKind)</td>
-                            <td>@(o.Delivered_at.HasValue ? o.Delivered_at.Value.ToString("dd.MM.yyyy HH:mm") : "—")</td>
+                            <td class="text-nowrap">@(o.Delivered_at.HasValue ? o.Delivered_at.Value.ToString("dd.MM.yyyy HH:mm") : "—")</td>
                         </tr>
                     }
                 </tbody>
@@ -83,8 +105,14 @@
     }
 </div>
 
+@if (_detailOrder is not null)
+{
+    <CustomerOrderDetailModal Order="_detailOrder" OnClose="CloseOrderDetailAsync" />
+}
+
 @code {
     private List<OrderDto>? _orders;
+    private OrderDto? _detailOrder;
     private bool _loaded;
     private readonly HashSet<int> _payingIds = new();
 
@@ -109,6 +137,14 @@
         _orders = await ClientsApi.GetOrdersAsync(client.ID_ClientProfile) ?? new List<OrderDto>();
         _loaded = true;
         StateHasChanged();
+    }
+
+    private void OpenOrderDetail(OrderDto o) => _detailOrder = o;
+
+    private Task CloseOrderDetailAsync()
+    {
+        _detailOrder = null;
+        return Task.CompletedTask;
     }
 
     private bool IsPaying(int id) => _payingIds.Contains(id);

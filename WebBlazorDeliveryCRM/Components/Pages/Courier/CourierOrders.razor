@@ -5,6 +5,8 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Utilities
 @inject AuthenticationStateProvider AuthState
 @inject CouriersApiService CouriersApi
 @inject OrdersApiService OrdersApi
@@ -13,7 +15,10 @@
 <PageTitle>Мои заказы — Курьер</PageTitle>
 
 <div class="dms-page-header">
-    <h1>Мои заказы</h1>
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="invoice-01" CssClass="dms-page-title-icon" />
+        Мои заказы
+    </h1>
     <p class="subtitle">
         Активные назначения на вас. Можно сменить статус доставки (как в панели компании). Координаты точек — для навигации в картографических сервисах.
     </p>
@@ -31,9 +36,13 @@ else
 {
     <div class="dms-card mb-3">
         <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-2">
-            <h2 class="dms-card-title mb-0">Назначенные заказы</h2>
-            <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_reloadBusy" @onclick="ReloadAsync">
-                @(_reloadBusy ? "…" : "Обновить")
+            <h2 class="dms-card-title dms-card-title-with-icon mb-0">
+                <HugeIcon Name="task-01" CssClass="dms-card-title-icon" />
+                Назначенные заказы
+            </h2>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1" disabled="@_reloadBusy" @onclick="ReloadAsync">
+                <HugeIcon Name="activity-01" CssClass="dms-icon-sm" />
+                <span>@(_reloadBusy ? "…" : "Обновить")</span>
             </button>
         </div>
         @if (_orders.Count == 0)
@@ -43,13 +52,13 @@ else
         else
         {
             <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0">
+                <table class="table table-sm align-middle mb-0 dms-data-table">
                     <thead>
                     <tr>
                         <th>№</th>
+                        <th>Создан</th>
                         <th>Статус</th>
                         <th>Маршрут</th>
-                        <th>Создан</th>
                         <th>Сменить статус</th>
                     </tr>
                     </thead>
@@ -59,14 +68,16 @@ else
                         var sel = _pendingStatus.GetValueOrDefault(o.ID_Order, o.Status_id);
                         <tr>
                             <td><strong>#@o.Order_Number</strong></td>
-                            <td>@(o.OrderStatus?.Name ?? "—")</td>
+                            <td class="small text-nowrap">@o.Created_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                            <td>
+                                <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@OrderStatusUi.ToneForStatusName(o.OrderStatus?.Name)" />
+                            </td>
                             <td>
                                 <div class="small">@FormatRouteKind(o.DeliveryRouteKind)</div>
                                 <div class="small text-muted">@AddressLine(o)</div>
                             </td>
-                            <td class="small">@o.Created_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
                             <td>
-                                <div class="d-flex flex-wrap gap-1">
+                                <div class="d-flex flex-wrap gap-2">
                                     <select class="form-select form-select-sm" style="min-width: 10rem;"
                                             value="@sel"
                                             @onchange="e => OnStatusSelect(o.ID_Order, e.Value?.ToString())">
@@ -75,10 +86,11 @@ else
                                             <option value="@s.Id">@(s.Name ?? $"#{s.Id}")</option>
                                         }
                                     </select>
-                                    <button type="button" class="btn btn-sm btn-primary dms-btn-primary"
+                                    <button type="button" class="btn btn-sm btn-primary dms-btn-primary d-inline-flex align-items-center gap-1"
                                             disabled="@(_statusBusyId == o.ID_Order || sel == o.Status_id)"
                                             @onclick="() => ApplyStatusAsync(o.ID_Order, sel)">
-                                        OK
+                                        <HugeIcon Name="sent" CssClass="dms-icon-sm" />
+                                        <span>OK</span>
                                     </button>
                                 </div>
                             </td>

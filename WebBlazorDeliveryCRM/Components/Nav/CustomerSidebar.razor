@@ -4,7 +4,10 @@
 @inject NavigationManager Navigation
 
 <div class="sidebar-header">
-    <h2 class="sidebar-title">Клиент</h2>
+    <div class="d-flex align-items-center gap-2">
+        <HugeIcon Name="store-01" CssClass="sidebar-title-icon" />
+        <h2 class="sidebar-title">Клиент</h2>
+    </div>
 </div>
 <nav class="sidebar-nav">
     <NavLink href="/customer" class="sidebar-link" Match="NavLinkMatch.Prefix">
@@ -18,9 +21,6 @@
     </NavLink>
     <NavLink href="/customer/tracking" class="sidebar-link">
         <HugeIcon Name="location-01" CssClass="icon" /> <span class="sidebar-label">Отслеживание</span>
-    </NavLink>
-    <NavLink href="/customer/notifications" class="sidebar-link">
-        <HugeIcon Name="notification-01" CssClass="icon" /> <span class="sidebar-label">Уведомления</span>
     </NavLink>
     <NavLink href="/customer/profile" class="sidebar-link">
         <HugeIcon Name="user-03" CssClass="icon" /> <span class="sidebar-label">Профиль</span>

@@ -86,6 +86,7 @@ namespace APIDeliveryCRM.Controllers
                 return StatusCode(402, new { message = "Тариф компании неактивен. Оформите или продлите подписку." });
             try
             {
+                request.OrderCompany_id = null;
                 var created = await _orderService.CreateAsync(request);
                 return new OkObjectResult(created);
             }
@@ -107,8 +108,14 @@ namespace APIDeliveryCRM.Controllers
                 .FirstOrDefaultAsync(c => c.User_id == userId.Value);
             if (client == null)
                 return BadRequest(new { message = "Профиль клиента не найден для текущего пользователя." });
-            if (!await HasActiveSubscriptionAsync(client.Company_id))
-                return StatusCode(402, new { message = "Тариф компании неактивен. Создание заказов временно недоступно." });
+
+            var targetCompanyId = request.CompanyId > 0 ? request.CompanyId : client.Company_id;
+            var targetCompany = await _context.Companies.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.ID_Company == targetCompanyId);
+            if (targetCompany == null)
+                return BadRequest(new { message = "Указанная компания не найдена." });
+            if (!await HasActiveSubscriptionAsync(targetCompanyId))
+                return StatusCode(402, new { message = "Тариф выбранной компании неактивен. Создание заказов временно недоступно." });
 
             var orderTypeId = await _context.OrderTypes
                 .AsNoTracking()
@@ -139,7 +146,9 @@ namespace APIDeliveryCRM.Controllers
                 Flat = string.IsNullOrWhiteSpace(request.PickupFlat) ? null : request.PickupFlat.Trim(),
                 City = string.IsNullOrWhiteSpace(request.PickupCity) ? null : request.PickupCity.Trim(),
                 Comment = string.IsNullOrWhiteSpace(request.PickupComment) ? null : request.PickupComment.Trim(),
-                Company_id = client.Company_id,
+                Latitude = request.PickupLatitude,
+                Longitude = request.PickupLongitude,
+                Company_id = targetCompanyId,
                 User_id = userId.Value
             };
             var deliveryAddress = new Address
@@ -149,7 +158,9 @@ namespace APIDeliveryCRM.Controllers
                 Flat = string.IsNullOrWhiteSpace(request.DeliveryFlat) ? null : request.DeliveryFlat.Trim(),
                 City = string.IsNullOrWhiteSpace(request.DeliveryCity) ? null : request.DeliveryCity.Trim(),
                 Comment = string.IsNullOrWhiteSpace(request.DeliveryComment) ? null : request.DeliveryComment.Trim(),
-                Company_id = client.Company_id,
+                Latitude = request.DeliveryLatitude,
+                Longitude = request.DeliveryLongitude,
+                Company_id = targetCompanyId,
                 User_id = userId.Value
             };
 
@@ -176,7 +187,8 @@ namespace APIDeliveryCRM.Controllers
                 DeliveryRouteKind = 1,
                 AutoSelectRouteKind = true,
                 Priority = request.Priority,
-                RequestedDeliveryAtUtc = request.RequestedDeliveryAtUtc
+                RequestedDeliveryAtUtc = request.RequestedDeliveryAtUtc,
+                OrderCompany_id = targetCompanyId
             };
 
             try

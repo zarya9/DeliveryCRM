@@ -184,23 +184,6 @@
     </div>
 }
 
-<style>
-    .dms-page-title-with-icon,
-    .logistician-card-title-with-icon {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .logistician-page-title-icon,
-    .logistician-card-title-icon {
-        width: 1.5rem;
-        height: 1.5rem;
-        flex-shrink: 0;
-        opacity: 0.92;
-    }
-</style>
-
 @if (_planner?.Plans?.Count > 0)
 {
     @foreach (var plan in _planner.Plans.OrderBy(p => p.CourierName))

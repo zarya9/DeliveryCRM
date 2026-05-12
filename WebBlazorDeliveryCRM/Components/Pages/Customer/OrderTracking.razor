@@ -1,22 +1,24 @@
 @page "/customer/tracking"
 @layout CustomerLayout
 @using System.Security.Claims
+@using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Utilities
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ClientsApiService ClientsApi
 @inject OrdersApiService OrdersApi
 @inject AppNotificationService Notify
-@inject IJSRuntime JS
-@inject IConfiguration Configuration
 
 <PageTitle>Отслеживание заказа — Клиент</PageTitle>
 
 <div class="dms-page-header">
-    <h1>Отслеживание заказа</h1>
-    <p class="subtitle">Актуальный статус и история изменений по заказам</p>
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="location-01" CssClass="dms-page-title-icon" />
+        Отслеживание заказа
+    </h1>
+    <p class="subtitle">Нажмите строку заказа, чтобы открыть карточку с адресами и картой. Таймлайн — кнопкой справа.</p>
 </div>
 
 <div class="dms-card">
-    <h2 class="dms-card-title">Статусы заказов</h2>
     @if (_loading)
     {
         <p class="text-muted mb-0">Загрузка заказов...</p>
@@ -32,28 +34,33 @@
     else
     {
         <div class="table-responsive">
-            <table class="table table-sm">
+            <table class="table table-sm dms-data-table align-middle mb-0">
                 <thead>
                     <tr>
-                        <th>№</th>
-                        <th>Название</th>
-                        <th>Статус</th>
-                        <th>Создан</th>
-                        <th></th>
+                        <DmsTableThIcon Icon="invoice-01">№</DmsTableThIcon>
+                        <DmsTableThIcon Icon="calendar-03">Создан</DmsTableThIcon>
+                        <DmsTableThIcon Icon="task-01">Название</DmsTableThIcon>
+                        <DmsTableThIcon Icon="activity-01">Статус</DmsTableThIcon>
+                        <DmsTableThIcon Icon="audit-01" CssClass="text-nowrap text-end">Действие</DmsTableThIcon>
                     </tr>
                 </thead>
                 <tbody>
                     @foreach (var o in _orders.OrderByDescending(x => x.Created_at))
                     {
-                        <tr>
+                        <tr class="customer-order-table-row" @onclick="() => OpenOrderDetail(o)">
                             <td>@o.Order_Number</td>
+                            <td class="text-nowrap">@o.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
                             <td>@o.Name</td>
-                            <td>@(o.OrderStatus?.Name ?? "Статус уточняется")</td>
-                            <td>@o.Created_at.ToString("dd.MM.yyyy HH:mm")</td>
                             <td>
-                                <button class="btn btn-sm btn-outline-primary"
+                                <StatusBadge Text="@(o.OrderStatus?.Name ?? "Статус уточняется")" Tone="@OrderStatusUi.ToneForStatusName(o.OrderStatus?.Name)" />
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
+                                        type="button"
+                                        @onclick:stopPropagation="true"
                                         @onclick="() => LoadTimeline(o.ID_Order)">
-                                    Таймлайн
+                                    <HugeIcon Name="audit-01" CssClass="dms-icon-sm" />
+                                    <span>Таймлайн</span>
                                 </button>
                             </td>
                         </tr>
@@ -67,16 +74,28 @@
 @if (_selectedOrder is not null)
 {
     <div class="dms-card mb-3">
-        <h2 class="dms-card-title">Оплата</h2>
+        <h2 class="dms-card-title dms-card-title-with-icon">
+            <HugeIcon Name="wallet-01" CssClass="dms-card-title-icon" />
+            Оплата
+        </h2>
         <div class="d-flex flex-wrap align-items-center gap-2">
             @if (_selectedOrder.Is_paid)
             {
-                <span class="badge rounded-pill bg-success">Оплачен</span>
+                <span class="badge rounded-pill bg-success d-inline-flex align-items-center gap-1">
+                    <HugeIcon Name="wallet-01" CssClass="dms-icon-sm flex-shrink-0" />
+                    <span>Оплачен</span>
+                </span>
             }
             else
             {
-                <span class="badge rounded-pill bg-warning text-dark">Не оплачен</span>
-                <button type="button" class="btn btn-sm btn-primary" disabled="@_paying" @onclick="PaySelectedAsync">Оплатить</button>
+                <span class="badge rounded-pill bg-warning text-dark d-inline-flex align-items-center gap-1 px-2 py-1">
+                    <HugeIcon Name="wallet-01" CssClass="dms-icon-sm flex-shrink-0" />
+                    <span>Не оплачен</span>
+                </span>
+                <button type="button" class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2" disabled="@_paying" @onclick="PaySelectedAsync">
+                    <HugeIcon Name="wallet-01" CssClass="dms-icon-sm flex-shrink-0" />
+                    <span>Оплатить</span>
+                </button>
                 <span class="small text-muted">К оплате: @FormatMoneyRub(_selectedOrder.Final_cost > 0 ? _selectedOrder.Final_cost : _selectedOrder.Estimated_cost)</span>
             }
         </div>
@@ -86,7 +105,10 @@
 @if (_timeline.Count > 0)
 {
     <div class="dms-card">
-        <h2 class="dms-card-title">Таймлайн выбранного заказа</h2>
+        <h2 class="dms-card-title dms-card-title-with-icon">
+            <HugeIcon Name="clock-01" CssClass="dms-card-title-icon" />
+            Таймлайн выбранного заказа
+        </h2>
         <ul class="mb-0">
             @foreach (var e in _timeline.OrderByDescending(x => x.Created_at))
             {
@@ -103,12 +125,9 @@
     </div>
 }
 
-@if (_selectedOrder is not null)
+@if (_detailOrder is not null)
 {
-    <div class="dms-card mt-3">
-        <h2 class="dms-card-title">Карта заказа</h2>
-        <div id="customer-order-tracking-map" style="height: 360px; width: 100%; border-radius: 8px;"></div>
-    </div>
+    <CustomerOrderDetailModal Order="_detailOrder" OnClose="CloseOrderDetailAsync" />
 }
 
 @code {
@@ -118,8 +137,8 @@
     private List<OrderTimelineEventDto> _timeline = new();
     private int _selectedOrderId;
     private OrderDto? _selectedOrder;
+    private OrderDto? _detailOrder;
     private bool _paying;
-    private bool _mapReady;
 
     protected override async Task OnInitializedAsync()
     {
@@ -158,8 +177,14 @@
         _selectedOrder = _orders.FirstOrDefault(o => o.ID_Order == orderId);
         _timeline = await OrdersApi.GetTimelineAsync(orderId);
         StateHasChanged();
-        await Task.Delay(1);
-        await RefreshTrackingMapAsync();
+    }
+
+    private void OpenOrderDetail(OrderDto o) => _detailOrder = o;
+
+    private Task CloseOrderDetailAsync()
+    {
+        _detailOrder = null;
+        return Task.CompletedTask;
     }
 
     private static string FormatMoneyRub(decimal v) => $"{v:N2} ₽";
@@ -204,8 +229,6 @@
                 _selectedOrder = _orders.FirstOrDefault(o => o.ID_Order == _selectedOrderId);
                 _timeline = await OrdersApi.GetTimelineAsync(_selectedOrderId);
                 StateHasChanged();
-                await Task.Delay(1);
-                await RefreshTrackingMapAsync();
             }
         }
         finally
@@ -213,48 +236,5 @@
             _paying = false;
             StateHasChanged();
         }
-    }
-
-    private async Task RefreshTrackingMapAsync()
-    {
-        if (_selectedOrder is null)
-            return;
-        if (!_mapReady)
-        {
-            var osrmUrl = Configuration["Osrm:RouterBaseUrl"];
-            await JS.InvokeVoidAsync("leafletMap.init", "customer-order-tracking-map", 55.7558, 37.6173, 11, null, osrmUrl, false, "ru");
-            _mapReady = true;
-        }
-
-        var markers = new List<object>();
-        var points = new List<object>();
-        if (_selectedOrder.PickupAddress?.Latitude is { } pLat && _selectedOrder.PickupAddress.Longitude is { } pLon)
-        {
-            markers.Add(new { lat = (double)pLat, lon = (double)pLon, title = "Точка A: Забор", kind = "hub" });
-            points.Add(new { lat = (double)pLat, lon = (double)pLon, title = "Точка A" });
-        }
-        if (_selectedOrder.DeliveryAddress?.Latitude is { } dLat && _selectedOrder.DeliveryAddress.Longitude is { } dLon)
-        {
-            markers.Add(new { lat = (double)dLat, lon = (double)dLon, title = "Точка Б: Доставка", kind = "hub" });
-            points.Add(new { lat = (double)dLat, lon = (double)dLon, title = "Точка Б" });
-        }
-        if (_selectedOrder.CourierProfile is not null &&
-            (_selectedOrder.CourierProfile.Current_lat != 0 || _selectedOrder.CourierProfile.Current_lon != 0))
-        {
-            markers.Add(new
-            {
-                lat = (double)_selectedOrder.CourierProfile.Current_lat,
-                lon = (double)_selectedOrder.CourierProfile.Current_lon,
-                title = "Курьер",
-                kind = "courier"
-            });
-        }
-
-        await JS.InvokeVoidAsync("leafletMap.clearMarkers");
-        await JS.InvokeVoidAsync("leafletMap.clearRoute");
-        if (markers.Count > 0)
-            await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
-        if (points.Count >= 2)
-            await JS.InvokeVoidAsync("leafletMap.setRouteWaypoints", points);
     }
 }

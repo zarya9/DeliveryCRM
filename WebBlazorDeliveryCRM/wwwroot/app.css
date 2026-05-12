@@ -1,3 +1,106 @@
+.global-notification-stack {
+    position: fixed;
+    top: 78px;
+    right: 18px;
+    z-index: 1600;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: min(380px, calc(100vw - 24px));
+}
+
+.global-notification-toast {
+    position: relative;
+    border: 1px solid rgba(0, 139, 139, 0.28);
+    border-radius: 12px;
+    background: var(--bs-body-bg, #fff);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, .18);
+    padding: 12px 14px 11px;
+    cursor: pointer;
+}
+
+.global-notification-toast:hover {
+    border-color: rgba(0, 139, 139, 0.52);
+    transform: translateY(-1px);
+}
+
+.global-notification-title {
+    font-weight: 700;
+    font-size: .94rem;
+    margin-right: 26px;
+    line-height: 1.25;
+}
+
+.global-notification-message {
+    margin-top: 4px;
+    color: var(--bs-secondary-color, #64748b);
+    font-size: .87rem;
+    line-height: 1.25;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+}
+
+.global-notification-close {
+    position: absolute;
+    top: 7px;
+    right: 9px;
+    border: none;
+    background: transparent;
+    color: var(--bs-secondary-color, #64748b);
+    font-size: 1.2rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.global-notification-close:hover {
+    color: var(--bs-danger, #dc3545);
+}
+
+.notifications-inbox-toolbar {
+    border-bottom: 1px solid var(--bs-border-color);
+    padding-bottom: .65rem;
+}
+
+.notifications-filter {
+    padding: .2rem .45rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 999px;
+    user-select: none;
+}
+
+.notifications-filter-select {
+    min-width: 240px;
+    border-radius: 10px;
+}
+
+.notifications-list {
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.notifications-item {
+    border-left: 4px solid transparent;
+    transition: background-color .15s ease, border-color .15s ease;
+}
+
+.notifications-item--unread {
+    background: color-mix(in srgb, var(--bs-primary, #0d6efd) 7%, transparent);
+    border-left-color: var(--bs-primary, #0d6efd);
+}
+
+.notifications-title {
+    letter-spacing: .1px;
+}
+
+.notifications-message {
+    font-size: .9rem;
+}
+
+.notifications-meta {
+    opacity: .9;
+}
 html, body {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
 }
@@ -62,6 +165,12 @@ h1:focus {
     font-weight: 700;
     margin: 0;
     letter-spacing: -0.02em;
+}
+.sidebar-title-icon {
+    width: 1.125rem;
+    height: 1.125rem;
+    flex-shrink: 0;
+    opacity: 0.9;
 }
 .sidebar-nav {
     display: flex;
@@ -134,8 +243,8 @@ h1:focus {
 }
 .sidebar-link .icon {
     opacity: 0.9;
-    width: 18px;
-    height: 18px;
+    width: 1.125rem;
+    height: 1.125rem;
     flex-shrink: 0;
     display: block;
 }
@@ -215,7 +324,9 @@ h1:focus {
     font-weight: 600;
 }
 .mobile-nav .mobile-nav-item .mobile-nav-icon {
-    font-size: 1.25rem;
+    width: 1.125rem;
+    height: 1.125rem;
+    font-size: 1.125rem;
 }
 
 @media (max-width: 900px) {
@@ -414,6 +525,43 @@ h1:focus {
     max-width: min(580px, calc(100vw - 1.5rem));
     min-height: min(320px, 85vh);
     padding: 1.85rem 2rem 1.75rem;
+}
+
+/* Карточка заказа (клиент): адреса + карта */
+.employee-modal--order-detail {
+    max-width: min(720px, calc(100vw - 1.5rem));
+    width: calc(100vw - 1.5rem);
+    max-height: min(92vh, 900px);
+    overflow-y: auto;
+}
+
+.customer-order-detail-map {
+    height: min(320px, 42vh);
+    width: 100%;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--dms-card-border, rgba(148, 163, 184, 0.35));
+}
+
+.customer-order-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.customer-order-detail-address-text {
+    font-size: 0.95rem;
+    line-height: 1.45;
+}
+
+.customer-order-detail-dl dt {
+    font-weight: 500;
+}
+
+@media (max-width: 640px) {
+    .customer-order-detail-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 .employee-detail-header {
@@ -1034,8 +1182,8 @@ body.bg-gradient {
 }
 
 .dms-icon {
-    width: 20px;
-    height: 20px;
+    width: 1.125rem;
+    height: 1.125rem;
     display: block;
 }
 
@@ -1255,13 +1403,30 @@ body.bg-gradient {
     border: 1px solid var(--dms-card-border);
     border-radius: 8px;
     margin-top: auto;
+    overflow: hidden;
     pointer-events: none;
+}
+
+.hub-mini-map .hub-mini-map-canvas {
+    width: 100%;
+    height: 100%;
+    min-height: 148px;
+    pointer-events: auto;
 }
 
 .hub-mini-map--details {
     margin-top: 0.6rem;
     height: 220px;
     pointer-events: auto;
+}
+
+.hub-mini-map--details .hub-mini-map-canvas {
+    min-height: 218px;
+}
+
+/* Без нижней панели Leaflet (атрибуция не используется на мини-карте склада) */
+.hub-mini-map .leaflet-control-container .leaflet-bottom {
+    display: none;
 }
 
 .employee-modal--hub-create {
@@ -1437,13 +1602,19 @@ p, .form-label, .form-control, .form-select, .btn, .badge {
 
 .orders-th {
     display: inline-flex;
+    flex-direction: row;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.45rem;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    line-height: 1.2;
 }
 
 .orders-th-icon {
     width: 14px;
     height: 14px;
+    flex-shrink: 0;
+    align-self: center;
     color: var(--dms-text-muted);
     opacity: 0.85;
 }
@@ -1469,9 +1640,9 @@ p, .form-label, .form-control, .form-select, .btn, .badge {
 }
 
 .dms-icon-sm {
-    width: 14px;
-    height: 14px;
-    vertical-align: -2px;
+    width: 0.875rem;
+    height: 0.875rem;
+    vertical-align: -0.125rem;
 }
 
 .orders-timeline-header {

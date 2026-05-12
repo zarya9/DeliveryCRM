@@ -14,7 +14,10 @@
 <PageTitle>Позиция на карте — Курьер</PageTitle>
 
 <div class="dms-page-header">
-    <h1>Позиция на карте</h1>
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="maps-location-01" CssClass="dms-page-title-icon" />
+        Позиция на карте
+    </h1>
     <p class="subtitle">
         Здесь не подменяется GPS устройства: вы задаёте точку сами и она отправляется на сервер так же, как координаты с геолокации.
         Удобно для тестов и демо. Для отображения на мониторинге логиста будьте <strong>на смене</strong> и по возможности <strong>в сети</strong> (как на странице «Смена»).
@@ -32,19 +35,28 @@ else if (_profileId is null)
 else if (!_shiftActive)
 {
     <div class="alert alert-info mb-3">Сервер принимает координаты только при <strong>активной смене</strong>. Сначала откройте «Смена и геолокация» и начните смену.</div>
-    <a class="btn btn-outline-primary" href="/courier/shift">Перейти к смене</a>
+    <a class="btn btn-outline-primary d-inline-flex align-items-center gap-1" href="/courier/shift">
+        <HugeIcon Name="calendar-03" CssClass="dms-icon-sm" />
+        <span>Перейти к смене</span>
+    </a>
 }
 else
 {
     <div class="dms-card mb-3">
         <div class="row g-3 align-items-start">
             <div class="col-lg-8">
-                <h2 class="dms-card-title">Карта</h2>
+                <h2 class="dms-card-title dms-card-title-with-icon">
+                    <HugeIcon Name="maps-location-01" CssClass="dms-card-title-icon" />
+                    Карта
+                </h2>
                 <p class="small text-muted mb-2">Перетащите синюю точку или кликните по карте. Кнопки — сдвиг на выбранное число метров.</p>
                 <div id="courier-manual-map" class="courier-manual-map-wrap"></div>
             </div>
             <div class="col-lg-4">
-                <h2 class="dms-card-title">Джойстик</h2>
+                <h2 class="dms-card-title dms-card-title-with-icon">
+                    <HugeIcon Name="route-02" CssClass="dms-card-title-icon" />
+                    Джойстик
+                </h2>
                 <p class="small text-muted mb-2">Зажмите кнопку направления — шаг будет повторяться.</p>
                 <div class="mb-3">
                     <label class="form-label small mb-1">Шаг, метры (@_stepMeters.ToString("0", CultureInfo.InvariantCulture))</label>

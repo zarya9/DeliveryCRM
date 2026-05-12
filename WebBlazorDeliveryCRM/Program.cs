@@ -57,10 +57,16 @@ builder.Services.AddScoped<GeoAnalyticsApiService>();
 builder.Services.AddScoped<MonitoringApiService>();
 builder.Services.AddScoped<ReportsApiService>();
 builder.Services.AddScoped<CompanySettingsApiService>();
+builder.Services.AddScoped<CompaniesApiService>();
 builder.Services.AddScoped<AddressSuggestApiService>();
+builder.Services.AddHttpClient<ForwardGeocodeService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(14);
+});
 builder.Services.AddScoped<AccountApiService>();
 builder.Services.AddScoped<UserPresenceApiService>();
 builder.Services.AddScoped<NotificationsApiService>();
+builder.Services.AddScoped<NotificationPopupService>();
 builder.Services.AddScoped<SupportTicketsApiService>();
 builder.Services.AddScoped<ServiceAreaZonesApiService>();
 builder.Services.AddScoped<BillingApiService>();

@@ -12,7 +12,10 @@
 <PageTitle>Уведомления клиента</PageTitle>
 
 <div class="dms-page-header">
-    <h1>Уведомления</h1>
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="notification-01" CssClass="dms-page-title-icon" />
+        Уведомления
+    </h1>
     <p class="subtitle">
         Здесь отображаются важные события по заказам и сообщениям.
     </p>
@@ -22,11 +25,15 @@
 
 <div class="dms-card">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2 class="dms-card-title mb-0">Мои уведомления</h2>
+        <h2 class="dms-card-title dms-card-title-with-icon mb-0">
+            <HugeIcon Name="notification-01" CssClass="dms-card-title-icon" />
+            Мои уведомления
+        </h2>
         <div class="d-flex gap-2">
             <label class="d-flex align-items-center gap-1 small"><input type="checkbox" @bind="_onlyUnread" /> Непрочитанные</label>
-            <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_loading" @onclick="@(async () => await Reload())">
-                @(_loading ? "…" : "Обновить")
+            <button type="button" class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1" disabled="@_loading" @onclick="@(async () => await Reload())">
+                <HugeIcon Name="activity-01" CssClass="dms-icon-sm" />
+                <span>@(_loading ? "…" : "Обновить")</span>
             </button>
         </div>
     </div>
@@ -69,8 +76,9 @@
                     @if (!n.IsRead)
                     {
                         <div>
-                            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_marking" @onclick="() => MarkRead(n)">
-                                Прочитано
+                            <button type="button" class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1" disabled="@_marking" @onclick="() => MarkRead(n)">
+                                <HugeIcon Name="mail-01" CssClass="dms-icon-sm" />
+                                <span>Прочитано</span>
                             </button>
                         </div>
                     }

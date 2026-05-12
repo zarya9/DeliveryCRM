@@ -60,6 +60,20 @@ public class ClientsApiService
                 using var doc = JsonDocument.Parse(body);
                 if (doc.RootElement.TryGetProperty("message", out var msg))
                     return (false, msg.GetString());
+                if (doc.RootElement.TryGetProperty("title", out var title) && doc.RootElement.TryGetProperty("errors", out var errors)
+                    && errors.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var prop in errors.EnumerateObject())
+                    {
+                        if (prop.Value.ValueKind == JsonValueKind.Array && prop.Value.GetArrayLength() > 0)
+                        {
+                            var first = prop.Value[0].GetString();
+                            if (!string.IsNullOrWhiteSpace(first))
+                                return (false, first);
+                        }
+                    }
+                    return (false, title.GetString());
+                }
             }
             catch
             {

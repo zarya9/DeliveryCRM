@@ -4,6 +4,7 @@
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
 @using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Utilities
 @inject OrdersApiService OrdersApi
 @inject CouriersApiService CouriersApi
 @inject AppNotificationService Notify
@@ -56,7 +57,7 @@
                     <h3 class="hub-card-title mb-1">№@o.Order_Number · @(string.IsNullOrWhiteSpace(o.Name) ? "Без названия" : o.Name)</h3>
                     <div class="small text-muted mb-1">@RouteKindLabel(o.DeliveryRouteKind)</div>
                     <div class="mb-2">
-                        <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@GetOrderStatusTone(o.OrderStatus?.Name)" />
+                        <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@OrderStatusUi.ToneForStatusName(o.OrderStatus?.Name)" />
                     </div>
                     @if (o.RouteStops is { Count: > 0 })
                     {
@@ -181,7 +182,7 @@
             </div>
             <div class="mb-2"><strong>Название:</strong> @(string.IsNullOrWhiteSpace(mo.Name) ? "—" : mo.Name)</div>
             <div class="mb-2"><strong>Маршрут:</strong> @RouteKindLabel(mo.DeliveryRouteKind)</div>
-            <div class="mb-2"><strong>Статус:</strong> <StatusBadge Text="@(mo.OrderStatus?.Name ?? "—")" Tone="@GetOrderStatusTone(mo.OrderStatus?.Name)" /></div>
+            <div class="mb-2"><strong>Статус:</strong> <StatusBadge Text="@(mo.OrderStatus?.Name ?? "—")" Tone="@OrderStatusUi.ToneForStatusName(mo.OrderStatus?.Name)" /></div>
             @if (mo.RouteStops is { Count: > 0 })
             {
                 <div class="mb-2">
@@ -243,23 +244,6 @@
         </div>
     </div>
 }
-
-<style>
-    .dms-page-title-with-icon,
-    .logistician-card-title-with-icon {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .logistician-page-title-icon,
-    .logistician-card-title-icon {
-        width: 1.5rem;
-        height: 1.5rem;
-        flex-shrink: 0;
-        opacity: 0.92;
-    }
-</style>
 
 @code {
     private List<OrderDto>? _orders;
@@ -522,17 +506,4 @@
         return string.IsNullOrWhiteSpace(s) ? $"ТС #{v.ID_Vehicle}" : s;
     }
 
-    private static string GetOrderStatusTone(string? status)
-    {
-        var s = (status ?? string.Empty).ToLowerInvariant();
-        if (s.Contains("достав"))
-            return "success";
-        if (s.Contains("отмен"))
-            return "danger";
-        if (s.Contains("в пути") || s.Contains("назнач"))
-            return "primary";
-        if (s.Contains("нов"))
-            return "warning";
-        return "neutral";
-    }
 }

@@ -1,7 +1,10 @@
 @page "/customer"
 @layout CustomerLayout
+@using Microsoft.AspNetCore.Components.Web
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Utilities
 @using System.Security.Claims
 @inject ClientsApiService ClientsApi
 @inject AuthenticationStateProvider AuthState
@@ -9,33 +12,14 @@
 <PageTitle>Главная — Клиент</PageTitle>
 
 <div class="dms-page-header">
-    <h1>Главная</h1>
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="home-01" CssClass="dms-page-title-icon" />
+        Главная
+    </h1>
     <p class="subtitle">Быстрые действия и активные заказы</p>
 </div>
 
-<div class="dms-card mb-3">
-    <h2 class="dms-card-title">Активные заказы</h2>
-    @if (_orders != null && _orders.Count > 0)
-    {
-        <ul class="list-group list-group-flush">
-            @foreach (var o in _orders.Take(5))
-            {
-                <li class="list-group-item d-flex justify-content-between">
-                    <span>№@o.Order_Number — @o.Name</span>
-                    <span class="badge bg-secondary">@(o.OrderStatus?.Name ?? "—")</span>
-                </li>
-            }
-        </ul>
-        <a href="/customer/orders" class="btn btn-outline-primary mt-2">Все заказы</a>
-    }
-    else
-    {
-        <p class="text-muted">Нет активных заказов.</p>
-    }
-    <a href="/customer/orders?new=1" class="btn btn-primary dms-btn-primary mt-2">Создать заказ</a>
-</div>
-
-<div class="dms-stat-grid">
+<div class="dms-stat-grid mb-3">
     <div class="dms-stat-card">
         <div class="dms-stat-value">@(_orders?.Count ?? 0)</div>
         <div class="dms-stat-label">Активных заказов</div>
@@ -46,8 +30,51 @@
     </div>
 </div>
 
+<div class="dms-card mb-3">
+    <h2 class="dms-card-title dms-card-title-with-icon">
+        <HugeIcon Name="task-01" CssClass="dms-card-title-icon" />
+        Активные заказы
+    </h2>
+    @if (_orders != null && _orders.Count > 0)
+    {
+        <div class="customer-home-order-list">
+            @foreach (var o in _orders.Take(5))
+            {
+                <div class="customer-home-order-row" @onclick="() => OpenOrderDetail(o)" role="button" tabindex="0"
+                     @onkeydown="e => OnHomeOrderKeyAsync(e, o)">
+                    <span>№@o.Order_Number — @o.Name</span>
+                    <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@OrderStatusUi.ToneForStatusName(o.OrderStatus?.Name)" />
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <p class="text-muted">Нет активных заказов.</p>
+    }
+    <div class="d-flex flex-wrap gap-2 mt-3">
+        @if (_orders != null && _orders.Count > 0)
+        {
+            <a href="/customer/orders" class="btn btn-outline-primary d-inline-flex align-items-center gap-1">
+                <HugeIcon Name="invoice-01" CssClass="dms-icon-sm" />
+                <span>Все заказы</span>
+            </a>
+        }
+        <a href="/customer/orders?new=1" class="btn btn-primary dms-btn-primary d-inline-flex align-items-center gap-1">
+            <HugeIcon Name="plus-sign" CssClass="dms-icon-sm" />
+            <span>Создать заказ</span>
+        </a>
+    </div>
+</div>
+
+@if (_detailOrder is not null)
+{
+    <CustomerOrderDetailModal Order="_detailOrder" OnClose="CloseOrderDetailAsync" />
+}
+
 @code {
     private List<OrderDto>? _orders;
+    private OrderDto? _detailOrder;
     private int _deliveredCount;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -62,5 +89,22 @@
         var monthStart = new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1);
         _deliveredCount = _orders.Count(o => o.Delivered_at >= monthStart);
         StateHasChanged();
+    }
+
+    private void OpenOrderDetail(OrderDto o) => _detailOrder = o;
+
+    private Task CloseOrderDetailAsync()
+    {
+        _detailOrder = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task OnHomeOrderKeyAsync(KeyboardEventArgs e, OrderDto o)
+    {
+        if (e.Key == "Enter" || e.Key == " ")
+        {
+            OpenOrderDetail(o);
+            await InvokeAsync(StateHasChanged);
+        }
     }
 }

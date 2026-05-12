@@ -44,18 +44,22 @@
                     {
                         <p class="small text-muted mb-0 mt-2">Нет заказов на этом складе по маршруту.</p>
                     }
-                    @if (!string.IsNullOrWhiteSpace(BuildMapUrl(h)))
+                    @if (HasHubCoordinates(h))
                     {
-                        <iframe class="hub-mini-map"
-                                src="@BuildMapUrl(h)"
-                                loading="lazy"
-                                title="Карта склада"
-                                tabindex="-1"
-                                aria-hidden="true"></iframe>
+                        <HubMiniLeafletMap ElementId="@($"hub-leaflet-{h.Id}")"
+                                           Lat="@((double)h.Latitude!.Value)"
+                                           Lon="@((double)h.Longitude!.Value)" />
                     }
                 </div>
             }
         </div>
+        @if (_list.Any(h => HasHubCoordinates(h)))
+        {
+            <p class="small text-muted mt-3 mb-0">
+                Картография:
+                <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>
+            </p>
+        }
     }
     else
     {
@@ -76,6 +80,9 @@
         StateHasChanged();
     }
 
+    private static bool HasHubCoordinates(LogisticsHubListItemDto h)
+        => h.Latitude.HasValue && h.Longitude.HasValue;
+
     private static string FormatAddress(LogisticsHubListItemDto h)
     {
         var parts = new[]
@@ -89,20 +96,6 @@
         }.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim());
         var text = string.Join(", ", parts);
         return string.IsNullOrWhiteSpace(text) ? "Адрес не указан" : text;
-    }
-
-    private static string BuildMapUrl(LogisticsHubListItemDto h)
-    {
-        if (!h.Latitude.HasValue || !h.Longitude.HasValue)
-            return string.Empty;
-        var lat = h.Latitude.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var lon = h.Longitude.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var delta = 0.01m;
-        var left = (h.Longitude.Value - delta).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var right = (h.Longitude.Value + delta).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var top = (h.Latitude.Value + delta).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var bottom = (h.Latitude.Value - delta).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        return $"https://www.openstreetmap.org/export/embed.html?bbox={left}%2C{bottom}%2C{right}%2C{top}&layer=mapnik&marker={lat}%2C{lon}";
     }
 
     private void StartAutoRefreshLoop()

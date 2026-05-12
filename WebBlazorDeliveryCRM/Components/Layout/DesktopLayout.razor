@@ -35,6 +35,7 @@
     </nav>
 }
 <BlazoredToasts />
+<GlobalNotificationToasts />
 
 @code {
     private ErrorBoundary? _errorBoundary;
@@ -110,7 +111,7 @@
         if (path.StartsWith("customer") || role == "Клиент")
             return
             [
-                new("/customer", "home-09", "Главная", true),
+                new("/customer", "home-01", "Главная", true),
                 new("/customer/orders", "invoice-01", "Заказы", false),
                 new("/customer/tracking", "maps-location-01", "Трекинг", false),
                 new("/customer/chat", "message-01", "Чат", false),

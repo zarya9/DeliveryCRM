@@ -1,0 +1,76 @@
+@* Марки платёжных систем для UI (цвета близки к бренд-гайдам; «Мир» — упрощённая заглушка, не официальный знак). *@
+@if (_kind == BrandKind.Visa)
+{
+    <svg class="payment-brand-mark @CssClass" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 20" aria-hidden="true">
+        <rect width="48" height="20" rx="3" fill="#1A1F71" />
+        <text x="24" y="14" text-anchor="middle" fill="#ffffff" font-family="system-ui, Segoe UI, Arial, sans-serif" font-size="11" font-weight="700">VISA</text>
+    </svg>
+}
+else if (_kind == BrandKind.Mastercard)
+{
+    <svg class="payment-brand-mark @CssClass" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 24" aria-hidden="true">
+        <circle cx="15" cy="12" r="10" fill="#EB001B" />
+        <circle cx="25" cy="12" r="10" fill="#F79E1B" fill-opacity="0.95" />
+    </svg>
+}
+else if (_kind == BrandKind.Mir)
+{
+    <svg class="payment-brand-mark @CssClass" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 20" aria-hidden="true">
+        <rect width="44" height="20" rx="3" fill="#0F9545" />
+        <text x="22" y="14" text-anchor="middle" fill="#ffffff" font-family="system-ui, Segoe UI, Arial, sans-serif" font-size="10" font-weight="700">МИР</text>
+    </svg>
+}
+else if (_kind == BrandKind.UnionPay)
+{
+    <svg class="payment-brand-mark @CssClass" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 20" aria-hidden="true">
+        <rect width="56" height="20" rx="3" fill="#ffffff" stroke="rgba(15,23,42,0.12)" stroke-width="0.5" />
+        <rect x="4" y="4" width="6" height="12" rx="1" fill="#E21836" />
+        <rect x="13" y="4" width="6" height="12" rx="1" fill="#004986" />
+        <rect x="22" y="4" width="6" height="12" rx="1" fill="#007B4E" />
+        <text x="38" y="13.5" fill="#004986" font-family="system-ui, Segoe UI, Arial, sans-serif" font-size="6.5" font-weight="700">UnionPay</text>
+    </svg>
+}
+else
+{
+    <svg class="payment-brand-mark payment-brand-mark--generic @CssClass" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 20" aria-hidden="true">
+        <rect x="1" y="3" width="30" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.25" opacity="0.55" />
+        <rect x="4" y="12" width="10" height="2" rx="0.5" fill="currentColor" opacity="0.35" />
+    </svg>
+}
+
+@code {
+    [Parameter] public string? System { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+
+    private BrandKind _kind;
+
+    protected override void OnParametersSet()
+    {
+        _kind = Resolve(System);
+    }
+
+    private static BrandKind Resolve(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return BrandKind.Unknown;
+        var s = raw.Trim();
+        if (s.Equals("Visa", StringComparison.OrdinalIgnoreCase))
+            return BrandKind.Visa;
+        if (s.Equals("Mastercard", StringComparison.OrdinalIgnoreCase))
+            return BrandKind.Mastercard;
+        if (s.Equals("Мир", StringComparison.OrdinalIgnoreCase))
+            return BrandKind.Mir;
+        if (s.Equals("UnionPay", StringComparison.OrdinalIgnoreCase))
+            return BrandKind.UnionPay;
+        return BrandKind.Unknown;
+    }
+
+    private enum BrandKind
+    {
+        Unknown,
+        Visa,
+        Mastercard,
+        Mir,
+        UnionPay
+    }
+}

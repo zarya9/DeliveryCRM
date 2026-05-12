@@ -5,12 +5,12 @@ namespace APIDeliveryCRM.Request
     public class BindClientCardRequest
     {
         [Required]
-        [MaxLength(19)]
+        [MaxLength(64)]
         public string CardNumber { get; set; } = string.Empty;
 
         [Required]
         [MaxLength(5)]
-        public string Expiry { get; set; } = string.Empty; // MM/YY
+        public string Expiry { get; set; } = string.Empty; 
 
         [Required]
         [MaxLength(120)]

@@ -3,6 +3,7 @@
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
 @using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Utilities
 @using System.Security.Claims
 @inject ClientsApiService ClientsApi
 @inject AuthenticationStateProvider AuthState
@@ -12,52 +13,53 @@
 
 <div class="dms-page-header d-flex flex-wrap justify-content-between align-items-start gap-2">
     <div>
-        <h1 class="mb-1">Мои заказы</h1>
-        <p class="subtitle mb-0">Список заказов. Новый заказ — кнопка справа.</p>
+        <h1 class="dms-page-title-with-icon mb-1">
+            <HugeIcon Name="invoice-01" CssClass="dms-page-title-icon" />
+            Мои заказы
+        </h1>
+        <p class="subtitle mb-0">Новый заказ — кнопка справа. Подробная история: <a href="/customer/orders/history">История заказов</a>.</p>
     </div>
     <button type="button"
-            class="btn btn-outline-primary dms-icon-btn"
+            class="btn btn-outline-primary dms-icon-btn d-inline-flex align-items-center justify-content-center"
             title="Добавить заказ"
             aria-label="Добавить заказ"
             @onclick="OpenCreateModal">
-        <HugeIcon Name="plus-sign" CssClass="dms-icon" />
+        <HugeIcon Name="plus-sign" CssClass="dms-icon-sm" />
     </button>
 </div>
 
 <div class="dms-card">
-    <h2 class="dms-card-title">Список заказов</h2>
     @if (_orders != null && _orders.Count > 0)
     {
         <div class="table-responsive">
-            <table class="table table-sm align-middle mb-0">
+            <table class="table table-sm align-middle mb-0 dms-data-table">
                 <thead>
                     <tr>
-                        <th>№</th>
-                        <th>Название</th>
-                        <th>Статус</th>
-                        <th>Сумма</th>
-                        <th>Окно доставки</th>
-                        <th>Дата</th>
+                        <DmsTableThIcon Icon="invoice-01">№</DmsTableThIcon>
+                        <DmsTableThIcon Icon="calendar-03">Дата</DmsTableThIcon>
+                        <DmsTableThIcon Icon="task-01">Название</DmsTableThIcon>
+                        <DmsTableThIcon Icon="activity-01">Статус</DmsTableThIcon>
+                        <DmsTableThIcon Icon="analytics-up">Сумма</DmsTableThIcon>
+                        <DmsTableThIcon Icon="clock-01">Окно доставки</DmsTableThIcon>
                     </tr>
                 </thead>
                 <tbody>
                     @foreach (var o in _orders)
                     {
-                        <tr>
+                        <tr class="customer-order-table-row" @onclick="() => OpenOrderDetail(o)">
                             <td>@o.Order_Number</td>
+                            <td class="text-nowrap">@o.Created_at.ToString("dd.MM.yyyy")</td>
                             <td>@o.Name</td>
-                            <td>@(o.OrderStatus?.Name ?? "—")</td>
-                            <td>@($"{(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost):N2} ₽")</td>
+                            <td>
+                                <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@OrderStatusUi.ToneForStatusName(o.OrderStatus?.Name)" />
+                            </td>
+                            <td class="text-nowrap">@($"{(o.Final_cost > 0 ? o.Final_cost : o.Estimated_cost):N2} ₽")</td>
                             <td>@FormatDeliveryWindow(o)</td>
-                            <td>@o.Created_at.ToString("dd.MM.yyyy")</td>
                         </tr>
                     }
                 </tbody>
             </table>
         </div>
-        <p class="small text-muted mt-2 mb-0">
-            Подробная история с оплатой и приоритетом: <a href="/customer/orders/history">История заказов</a>.
-        </p>
     }
     else if (_dataLoaded)
     {
@@ -74,7 +76,10 @@
     <div class="employee-modal-backdrop" @onclick="CloseCreateModal">
         <div class="employee-modal employee-modal--order-wizard" @onclick:stopPropagation="true">
             <div class="d-flex justify-content-between align-items-center flex-shrink-0 mb-2">
-                <h2 class="h6 mb-0">Новый заказ</h2>
+                <h2 class="h6 mb-0 d-inline-flex align-items-center gap-2">
+                    <HugeIcon Name="plus-sign" CssClass="dms-icon-sm" />
+                    Новый заказ
+                </h2>
                 <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseCreateModal"></button>
             </div>
             <div class="order-wizard-fill">
@@ -87,8 +92,14 @@
     </div>
 }
 
+@if (_detailOrder is not null)
+{
+    <CustomerOrderDetailModal Order="_detailOrder" OnClose="CloseOrderDetailAsync" />
+}
+
 @code {
     private List<OrderDto>? _orders;
+    private OrderDto? _detailOrder;
     private bool _showCreateModal;
     private int _formMountKey;
     private bool _dataLoaded;
@@ -149,6 +160,14 @@
     private void CloseCreateModal()
     {
         _showCreateModal = false;
+    }
+
+    private void OpenOrderDetail(OrderDto o) => _detailOrder = o;
+
+    private Task CloseOrderDetailAsync()
+    {
+        _detailOrder = null;
+        return Task.CompletedTask;
     }
 
     private async Task AfterOrderCreatedAsync()

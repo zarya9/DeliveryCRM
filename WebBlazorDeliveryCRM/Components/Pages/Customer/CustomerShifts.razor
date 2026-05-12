@@ -1,18 +1,25 @@
 @page "/customer/shifts"
 @layout CustomerLayout
 @using System.Security.Claims
+@using WebBlazorDeliveryCRM.Components.Shared
 @inject AuthenticationStateProvider AuthStateProvider
 @inject CouriersApiService CouriersApi
 
 <PageTitle>Смены — Клиент</PageTitle>
 
 <div class="dms-page-header">
-    <h1>Смены и доступность</h1>
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="calendar-03" CssClass="dms-page-title-icon" />
+        Смены и доступность
+    </h1>
     <p class="subtitle">Текущая доступность курьерской службы компании</p>
 </div>
 
 <div class="dms-card">
-    <h2 class="dms-card-title">График работы службы</h2>
+    <h2 class="dms-card-title dms-card-title-with-icon">
+        <HugeIcon Name="analytics-up" CssClass="dms-card-title-icon" />
+        График работы службы
+    </h2>
     @if (_loading)
     {
         <p class="text-muted mb-0">Загрузка данных...</p>

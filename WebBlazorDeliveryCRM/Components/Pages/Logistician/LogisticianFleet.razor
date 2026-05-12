@@ -103,24 +103,67 @@
                     {
                         <div class="col-md-6">
                             <label class="form-label">Марка *</label>
-                            <select class="form-select" @bind="_selectedBrandId" @bind:after="OnCatalogBrandChangedAfter">
+                            <select class="form-select" value="@_selectedBrandId" @onchange="OnBrandSelectChanged">
                                 <option value="0">— любая марка (или выберите первой) —</option>
                                 @foreach (var b in _catalogBrands)
                                 {
                                     <option value="@b.Id">@b.Name</option>
                                 }
+                                <option value="@AddCatalogEntrySentinel">+ Добавить новую марку…</option>
                             </select>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Модель *</label>
-                            <select class="form-select" @bind="_selectedModelId" @bind:after="OnCatalogModelChangedAfter">
+                            <select class="form-select" value="@_selectedModelId" @onchange="OnModelSelectChanged">
                                 <option value="0">— выберите модель —</option>
                                 @foreach (var m in GetFilteredCatalogModels())
                                 {
                                     <option value="@m.Id">@FormatCatalogModelOption(m)</option>
                                 }
+                                <option value="@AddCatalogEntrySentinel" disabled="@(_selectedBrandId <= 0)">+ Добавить новую модель…</option>
                             </select>
+                            @if (_selectedBrandId <= 0)
+                            {
+                                <div class="form-text">Чтобы добавить модель в справочник, сначала выберите марку.</div>
+                            }
                         </div>
+                        @if (_showAddBrandPanel)
+                        {
+                            <div class="col-12 border rounded p-3 bg-light">
+                                <div class="fw-semibold mb-2">Новая марка в справочнике</div>
+                                <div class="row g-2 align-items-end">
+                                    <div class="col-md-8">
+                                        <label class="form-label mb-0">Название</label>
+                                        <input class="form-control" maxlength="120" @bind="_newCatalogBrandName" placeholder="Например: Exeed" />
+                                    </div>
+                                    <div class="col-md-4 d-flex gap-2 flex-wrap">
+                                        <button type="button" class="btn btn-primary btn-sm" disabled="@_savingCatalogBrand" @onclick="SaveNewCatalogBrandAsync">@(_savingCatalogBrand ? "…" : "Сохранить марку")</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_savingCatalogBrand" @onclick="CancelAddCatalogBrand">Отмена</button>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                        @if (_showAddModelPanel)
+                        {
+                            <div class="col-12 border rounded p-3 bg-light">
+                                <div class="fw-semibold mb-2">Новая модель для марки «@(_catalogBrands.FirstOrDefault(b => b.Id == _selectedBrandId)?.Name ?? "?")»</div>
+                                <div class="row g-2 align-items-end">
+                                    <div class="col-md-5">
+                                        <label class="form-label mb-0">Название модели</label>
+                                        <input class="form-control" maxlength="200" @bind="_newCatalogModelName" placeholder="Например: TXL" />
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label mb-0">Год в справочнике</label>
+                                        <input type="number" class="form-control" min="1980" max="2100" @bind="_newCatalogModelYear" />
+                                    </div>
+                                    <div class="col-md-4 d-flex gap-2 flex-wrap">
+                                        <button type="button" class="btn btn-primary btn-sm" disabled="@_savingCatalogModel" @onclick="SaveNewCatalogModelAsync">@(_savingCatalogModel ? "…" : "Сохранить модель")</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_savingCatalogModel" @onclick="CancelAddCatalogModel">Отмена</button>
+                                    </div>
+                                </div>
+                                <div class="form-text mt-1">Технические поля (КПП, привод, расход) заполняются значениями по умолчанию; при необходимости их можно уточнить в БД.</div>
+                            </div>
+                        }
                         @if (!string.IsNullOrWhiteSpace(_catalogHint))
                         {
                             <div class="col-12">
@@ -403,21 +446,6 @@
         align-items: baseline;
         font-size: 0.95rem;
     }
-
-    .dms-page-title-with-icon,
-    .logistician-card-title-with-icon {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .logistician-page-title-icon,
-    .logistician-card-title-icon {
-        width: 1.5rem;
-        height: 1.5rem;
-        flex-shrink: 0;
-        opacity: 0.92;
-    }
 </style>
 
 @code {
@@ -446,6 +474,14 @@
     private int _selectedBrandId;
     private int _selectedModelId;
     private string _catalogHint = string.Empty;
+    private const int AddCatalogEntrySentinel = -1;
+    private bool _showAddBrandPanel;
+    private bool _showAddModelPanel;
+    private string _newCatalogBrandName = "";
+    private string _newCatalogModelName = "";
+    private int _newCatalogModelYear = DateTime.UtcNow.Year;
+    private bool _savingCatalogBrand;
+    private bool _savingCatalogModel;
 
     private bool _hasCatalogData;
     private bool UseVehicleCatalog => _hasCatalogData;
@@ -749,11 +785,147 @@
         _selectedBrandId = 0;
         _selectedModelId = 0;
         _catalogHint = string.Empty;
+        _showAddBrandPanel = false;
+        _showAddModelPanel = false;
+        _newCatalogBrandName = "";
+        _newCatalogModelName = "";
+        _newCatalogModelYear = _newVehicleYear;
         _showAddVehicleModal = true;
+    }
+
+    private async Task OnBrandSelectChanged(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var id))
+            return;
+        if (id == AddCatalogEntrySentinel)
+        {
+            _newCatalogBrandName = "";
+            _showAddBrandPanel = true;
+            StateHasChanged();
+            return;
+        }
+
+        _showAddBrandPanel = false;
+        _selectedBrandId = id;
+        await OnCatalogBrandChangedAfter();
+    }
+
+    private async Task OnModelSelectChanged(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var id))
+            return;
+        if (id == AddCatalogEntrySentinel)
+        {
+            if (_selectedBrandId <= 0)
+            {
+                Notify.ShowWarning("Сначала выберите марку в списке, затем добавьте модель.");
+                return;
+            }
+
+            _newCatalogModelName = "";
+            _newCatalogModelYear = _newVehicleYear;
+            _showAddModelPanel = true;
+            StateHasChanged();
+            return;
+        }
+
+        _showAddModelPanel = false;
+        _selectedModelId = id;
+        await OnCatalogModelChangedAfter();
+    }
+
+    private void CancelAddCatalogBrand() => _showAddBrandPanel = false;
+
+    private void CancelAddCatalogModel() => _showAddModelPanel = false;
+
+    private async Task SaveNewCatalogBrandAsync()
+    {
+        var name = (_newCatalogBrandName ?? string.Empty).Trim();
+        if (name.Length == 0)
+        {
+            Notify.ShowWarning("Введите название марки.");
+            return;
+        }
+
+        _savingCatalogBrand = true;
+        try
+        {
+            var (ok, err, created) = await VehiclesApi.CreateCatalogBrandAsync(name);
+            if (!ok || created is null)
+            {
+                Notify.ShowError(string.IsNullOrWhiteSpace(err) ? "Не удалось создать марку." : err!);
+                return;
+            }
+
+            _catalogBrands = _catalogBrands
+                .Where(b => b.Id != created.Id)
+                .Append(created)
+                .OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            _hasCatalogData = _catalogBrands.Count > 0 || _allCatalogModels.Count > 0;
+            _selectedBrandId = created.Id;
+            _showAddBrandPanel = false;
+            Notify.ShowSuccess("Марка добавлена в справочник.");
+            await OnCatalogBrandChangedAfter();
+        }
+        finally
+        {
+            _savingCatalogBrand = false;
+        }
+    }
+
+    private async Task SaveNewCatalogModelAsync()
+    {
+        if (_selectedBrandId <= 0)
+        {
+            Notify.ShowWarning("Сначала выберите марку.");
+            return;
+        }
+
+        var name = (_newCatalogModelName ?? string.Empty).Trim();
+        if (name.Length == 0)
+        {
+            Notify.ShowWarning("Введите название модели.");
+            return;
+        }
+
+        var year = Math.Clamp(_newCatalogModelYear, 1980, 2100);
+
+        _savingCatalogModel = true;
+        try
+        {
+            var (ok, err, created) = await VehiclesApi.CreateCatalogModelAsync(_selectedBrandId, name, year);
+            if (!ok || created is null)
+            {
+                Notify.ShowError(string.IsNullOrWhiteSpace(err) ? "Не удалось создать модель." : err!);
+                return;
+            }
+
+            if (_selectedBrandId > 0)
+                _allCatalogModels = await VehiclesApi.GetCatalogModelsAsync(_selectedBrandId);
+            else
+                _allCatalogModels = await VehiclesApi.GetCatalogModelsAsync(null);
+
+            _selectedModelId = created.Id;
+            _newVehicle.Model_id = created.Id;
+            _newVehicleYear = created.Year.Year;
+            _newVehicle.Brand_name = created.BrandName ?? string.Empty;
+            _newVehicle.Model_name = created.Name ?? string.Empty;
+            _catalogHint = BuildCatalogHint(created);
+            _showAddModelPanel = false;
+            Notify.ShowSuccess("Модель добавлена в справочник и выбрана.");
+            SyncBrandNameFromSelection();
+            StateHasChanged();
+        }
+        finally
+        {
+            _savingCatalogModel = false;
+        }
     }
 
     private async Task OnCatalogBrandChangedAfter()
     {
+        _showAddModelPanel = false;
         _selectedModelId = 0;
         _newVehicle.Model_id = null;
         _newVehicle.Model_name = string.Empty;
@@ -871,6 +1043,8 @@
     private void CloseAddVehicleModal()
     {
         _showAddVehicleModal = false;
+        _showAddBrandPanel = false;
+        _showAddModelPanel = false;
     }
 
     private async Task CreateVehicleAsync()
@@ -905,11 +1079,6 @@
         if (_newVehicle.Category_id <= 0 || _newVehicle.BodyType_id <= 0 || _newVehicle.FuelType_id <= 0)
         {
             Notify.ShowWarning("Выберите категорию, кузов и топливо.");
-            return;
-        }
-        if (UseVehicleCatalog && _selectedBrandId > 0 && GetFilteredCatalogModels().Count == 0)
-        {
-            Notify.ShowWarning("Для выбранной марки в справочнике нет моделей. Выберите другую марку или заполните вручную.");
             return;
         }
 

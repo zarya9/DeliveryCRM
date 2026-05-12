@@ -1,6 +1,7 @@
 @page "/manager/clients"
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Utilities
 @inject ClientsDetailsApiService ClientsDetailsApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject AppNotificationService Notify
@@ -74,7 +75,7 @@ else if (_client != null)
             else
             {
                 <div class="table-responsive">
-                    <table class="table table-sm table-striped align-middle">
+                    <table class="table table-sm table-striped align-middle dms-data-table">
                         <thead>
                             <tr>
                                 <th>Номер</th>
@@ -92,7 +93,7 @@ else if (_client != null)
                                 <tr>
                                     <td>@o.OrderNumber</td>
                                     <td>@o.Name</td>
-                                    <td><StatusBadge Text="@o.Status" Tone="@GetOrderStatusTone(o.Status)" /></td>
+                                    <td><StatusBadge Text="@o.Status" Tone="@OrderStatusUi.ToneForStatusName(o.Status)" /></td>
                                     <td>@o.CreatedAt.ToString("g")</td>
                                     <td>@(o.DeliveredAt?.ToString("g") ?? "-")</td>
                                     <td>@o.EstimatedCost.ToString("N2")</td>
@@ -253,20 +254,6 @@ else if (_client != null)
             return "success";
         if (s.Contains("проблем") || s.Contains("блок"))
             return "danger";
-        if (s.Contains("нов"))
-            return "warning";
-        return "neutral";
-    }
-
-    private static string GetOrderStatusTone(string? status)
-    {
-        var s = (status ?? string.Empty).ToLowerInvariant();
-        if (s.Contains("достав"))
-            return "success";
-        if (s.Contains("отмен"))
-            return "danger";
-        if (s.Contains("в пути") || s.Contains("назнач"))
-            return "primary";
         if (s.Contains("нов"))
             return "warning";
         return "neutral";

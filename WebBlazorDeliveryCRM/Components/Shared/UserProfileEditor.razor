@@ -10,7 +10,13 @@
 <PageTitle>@Title</PageTitle>
 
 <div class="dms-page-header">
-    <h1>@Title</h1>
+    <h1 class="@(string.IsNullOrEmpty(TitleIconName) ? null : "dms-page-title-with-icon")">
+        @if (!string.IsNullOrEmpty(TitleIconName))
+        {
+            <HugeIcon Name="@TitleIconName" CssClass="dms-page-title-icon" />
+        }
+        @Title
+    </h1>
     <p class="subtitle">Личный кабинет, данные аккаунта и безопасность</p>
 </div>
 
@@ -71,7 +77,13 @@
 </div>
 
 <div class="dms-card mt-3 profile-shell">
-    <h2 class="dms-card-title mb-1">Смена пароля</h2>
+    <h2 class="dms-card-title @(string.IsNullOrEmpty(TitleIconName) ? "mb-1" : "dms-card-title-with-icon mb-1")">
+        @if (!string.IsNullOrEmpty(TitleIconName))
+        {
+            <HugeIcon Name="settings-01" CssClass="dms-card-title-icon" />
+        }
+        Смена пароля
+    </h2>
     <p class="text-muted small mb-2">Если не помните пароль, откройте форму восстановления.</p>
     <button type="button" class="btn btn-link p-0" @onclick="OpenPasswordModal">Забыли пароль?</button>
 </div>
@@ -100,78 +112,10 @@
     </div>
 }
 
-<style>
-    .profile-shell {
-        border: 1px solid rgba(148, 163, 184, 0.25);
-        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-    }
-
-    .profile-avatar-card {
-        border: 1px solid rgba(148, 163, 184, 0.22);
-        border-radius: 14px;
-        padding: 1rem;
-        text-align: left;
-        background: linear-gradient(180deg, rgba(15, 23, 42, 0.04) 0%, rgba(15, 23, 42, 0.01) 100%);
-    }
-    .profile-column {
-        display: flex;
-        flex-direction: column;
-        gap: .75rem;
-    }
-
-    .profile-avatar-img {
-        width: 136px;
-        height: 136px;
-        border-radius: 10px;
-        object-fit: cover;
-        border: 3px solid rgba(255, 255, 255, 0.9);
-        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.18);
-        margin-bottom: .75rem;
-        display: block;
-    }
-
-    .profile-name {
-        font-weight: 700;
-        font-size: 1.05rem;
-        line-height: 1.25;
-    }
-
-    .profile-email {
-        color: var(--bs-secondary-color);
-        font-size: .9rem;
-        margin-top: .25rem;
-        word-break: break-all;
-    }
-    .profile-meta {
-        font-size: .93rem;
-        margin-top: .3rem;
-    }
-    .profile-modal-backdrop {
-        position: fixed;
-        inset: 0;
-        background: rgba(15, 23, 42, 0.45);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1200;
-    }
-    .profile-modal-card {
-        width: min(95vw, 520px);
-        background: var(--dms-card-bg, #fff);
-        color: var(--dms-text, #0f172a);
-        border: 1px solid var(--dms-card-border, #e2e8f0);
-        border-radius: 12px;
-        padding: 1rem;
-        box-shadow: 0 20px 50px rgba(2, 6, 23, 0.3);
-    }
-
-    .profile-modal-card .text-muted {
-        color: var(--dms-text-muted, #64748b) !important;
-    }
-</style>
-
 @code {
     [Parameter] public string Title { get; set; } = "Данные о сотруднике";
+    /// <summary>Имя иконки HugeIcon для заголовка страницы; при null — без иконки.</summary>
+    [Parameter] public string? TitleIconName { get; set; }
 
     private bool _loading = true;
     private string? _error;

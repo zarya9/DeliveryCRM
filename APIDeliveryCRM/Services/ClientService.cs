@@ -46,7 +46,11 @@ namespace APIDeliveryCRM.Services
             return await _context.Orders
                 .Where(o => o.Client_id == clientProfileId)
                 .Include(o => o.OrderStatus)
+                .Include(o => o.OrderType)
+                .Include(o => o.PickupAddress)
+                .Include(o => o.DeliveryAddress)
                 .Include(o => o.CourierProfile)
+                    .ThenInclude(c => c!.User)
                 .ToListAsync();
         }
 
@@ -120,8 +124,8 @@ namespace APIDeliveryCRM.Services
                 return new BadRequestObjectResult(new { message = "Не найден пользователь клиента." });
 
             var digits = new string((request.CardNumber ?? string.Empty).Where(char.IsDigit).ToArray());
-            if (digits.Length != 16)
-                return new BadRequestObjectResult(new { message = "Номер карты должен содержать 16 цифр." });
+            if (digits.Length is < 15 or > 19)
+                return new BadRequestObjectResult(new { message = "Номер карты должен содержать от 15 до 19 цифр." });
 
             var masked = $"**** **** **** {digits[^4..]}";
             var expiry = (request.Expiry ?? string.Empty).Trim();
@@ -133,11 +137,8 @@ namespace APIDeliveryCRM.Services
                 return new BadRequestObjectResult(new { message = "Срок действия укажите в формате MM/YY." });
             var paymentSystem = DetectPaymentSystem(digits);
             var securityLabel = GetSecurityCodeLabel(paymentSystem);
-            var expectedLength = paymentSystem == "UnionPay" ? 3 : 3;
             if (!Regex.IsMatch(cvv, "^\\d{3,4}$"))
-                return new BadRequestObjectResult(new { message = $"{securityLabel} должен содержать только цифры." });
-            if (cvv.Length != expectedLength)
-                return new BadRequestObjectResult(new { message = $"{securityLabel} для {paymentSystem} должен содержать {expectedLength} цифры." });
+                return new BadRequestObjectResult(new { message = $"{securityLabel} должен содержать 3 или 4 цифры." });
 
             var noteType = await EnsureCardNoteTypeAsync();
             var token = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();

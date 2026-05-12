@@ -107,6 +107,13 @@ public class OrderStatusOptionDto
 public class AddressShortDto
 {
     public int ID_Address { get; set; }
+    public string Street { get; set; } = "";
+    public string House { get; set; } = "";
+    public string? Flat { get; set; }
+    public string? City { get; set; }
+    public string? Region { get; set; }
+    public string? PostalCode { get; set; }
+    public string? Comment { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
 }

@@ -120,10 +120,15 @@ namespace APIDeliveryCRM.Services
             if (client == null)
                 throw new InvalidOperationException("Клиент не найден.");
 
+            var orderCompanyId = request.OrderCompany_id ?? client.Company_id;
+
             var company = await _context.Companies.AsNoTracking()
-                .FirstOrDefaultAsync(c => c.ID_Company == client.Company_id);
+                .FirstOrDefaultAsync(c => c.ID_Company == orderCompanyId);
             if (company == null)
-                throw new InvalidOperationException("Компания клиента не найдена.");
+                throw new InvalidOperationException("Компания для заказа не найдена.");
+
+            if (!company.Is_Active)
+                throw new InvalidOperationException("Компания деактивирована.");
 
             if (company.SubscriptionExpiresAt != default && company.SubscriptionExpiresAt < DateTime.UtcNow)
                 throw new InvalidOperationException("Подписка компании истекла. Продлите тариф для создания заказов.");
@@ -131,25 +136,25 @@ namespace APIDeliveryCRM.Services
             var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);
             var monthlyOrders = await _context.Orders
                 .AsNoTracking()
-                .CountAsync(o => o.Company_id == client.Company_id && o.Created_at >= monthStart);
+                .CountAsync(o => o.Company_id == orderCompanyId && o.Created_at >= monthStart);
             if (monthlyOrders >= company.MaxOrdersPerMonth)
                 throw new InvalidOperationException("Достигнут лимит заказов по тарифу за текущий месяц.");
 
             var pickup = await _context.Addresses.FirstOrDefaultAsync(a =>
-                a.ID_Address == request.PickupAddress_id && a.Company_id == client.Company_id);
+                a.ID_Address == request.PickupAddress_id && a.Company_id == orderCompanyId);
             var delivery = await _context.Addresses.FirstOrDefaultAsync(a =>
-                a.ID_Address == request.DeliveryAddress_id && a.Company_id == client.Company_id);
+                a.ID_Address == request.DeliveryAddress_id && a.Company_id == orderCompanyId);
             if (pickup == null || delivery == null)
-                throw new InvalidOperationException("Адреса забора или доставки не найдены или не принадлежат компании клиента.");
+                throw new InvalidOperationException("Адреса забора или доставки не найдены или не принадлежат компании заказа.");
 
-            var routeChoice = await ResolveRouteChoiceAsync(request, client.Company_id, pickup, delivery);
+            var routeChoice = await ResolveRouteChoiceAsync(request, orderCompanyId, pickup, delivery);
             var routeKind = routeChoice.RouteKind;
             var originHub = routeChoice.OriginHub;
             var destHub = routeChoice.DestinationHub;
             var stops = OrderRoutePlanner.BuildStops(routeKind, pickup, delivery, originHub, destHub);
             var distanceKm = EstimateRouteDistanceKm(routeKind, pickup, delivery, originHub, destHub);
             var fuelCostRub = await EstimateFuelCostRubAsync(
-                companyId: client.Company_id,
+                companyId: orderCompanyId,
                 courierProfileId: request.Courier_id,
                 routeKind: routeKind,
                 distanceKm: distanceKm);
@@ -178,7 +183,7 @@ namespace APIDeliveryCRM.Services
                 Name = request.Name,
                 Description = request.Description,
                 Order_Number = maxOrderNumber + 1,
-                Company_id = client.Company_id,
+                Company_id = orderCompanyId,
                 Client_id = request.Client_id,
                 OrderType_id = request.OrderType_id,
                 Status_id = request.Status_id,

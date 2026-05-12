@@ -7,7 +7,6 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ClientsApiService ClientsApi
 @inject OrdersApiService OrdersApi
-@inject AccountApiService AccountApi
 @inject AddressSuggestApiService AddressSuggestApi
 @inject AppNotificationService Notify
 @inject IJSRuntime JS
@@ -16,14 +15,14 @@
 <PageTitle>Профиль — Клиент</PageTitle>
 
 <div class="dms-page-header">
-    <h1>Профиль клиента</h1>
-    <p class="subtitle">Данные, адреса, настройки</p>
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="user-03" CssClass="dms-page-title-icon" />
+        Профиль клиента
+    </h1>
+    <p class="subtitle">Личный кабинет и данные профиля</p>
 </div>
 
-<div class="dms-card">
-    <div class="d-flex justify-content-between align-items-start mb-2">
-        <h2 class="dms-card-title mb-0">Личные данные</h2>
-    </div>
+<div class="dms-card profile-shell">
     @if (_loading)
     {
         <p class="text-muted mb-0">Загрузка профиля...</p>
@@ -38,90 +37,104 @@
     }
     else
     {
-        <div class="row g-3">
-            <div class="col-md-3">
-                <div class="d-flex flex-column gap-2">
-                    <img src="@AvatarUrl" alt="Аватар" class="rounded border" style="width:120px;height:120px;object-fit:cover;" @onerror="OnAvatarError" />
-                    <InputFile OnChange="OnAvatarSelected" />
+        <div class="profile-column">
+            <div class="profile-avatar-card">
+                <img src="@AvatarUrl" alt="Аватар" class="profile-avatar-img" @onerror="OnAvatarError" />
+                <div class="profile-name">@DisplayName</div>
+                <div class="profile-meta"><strong>Должность:</strong> Клиент</div>
+                <div class="profile-meta"><strong>Рейтинг:</strong> @_profile.Rating.ToString("0.00")</div>
+                <div class="profile-meta"><strong>Заказов всего:</strong> @_ordersCount</div>
+                <div class="profile-meta"><strong>Последний заказ:</strong> @(_lastOrderAt?.ToString("dd.MM.yyyy HH:mm") ?? "—")</div>
+                <div class="profile-meta"><strong>Почтовый адрес:</strong> @(string.IsNullOrWhiteSpace(_loginEmail) ? "—" : _loginEmail)</div>
+                <div class="profile-meta"><strong>Адрес по умолчанию:</strong> @(string.IsNullOrWhiteSpace(_editDefaultAddress) ? "—" : _editDefaultAddress)</div>
+                <div class="profile-meta"><strong>Предпочтительная оплата:</strong> @SelectedPaymentMethodName</div>
+                <div class="mt-2 d-flex gap-2 justify-content-start flex-wrap">
+                    <label class="btn btn-outline-secondary btn-sm mb-0">
+                        Загрузить аватар
+                        <InputFile class="d-none" OnChange="OnAvatarSelected" accept=".jpg,.jpeg,.png,.gif,.webp,image/*" />
+                    </label>
+                    <button type="button" class="btn btn-outline-primary btn-sm" @onclick="ToggleEditProfile">
+                        @(_isEditProfile ? "Отменить" : "Редактировать")
+                    </button>
                 </div>
             </div>
-            <div class="col-md-9">
-                <div class="row g-3">
-            <div class="col-md-6">
-                <label class="form-label">Имя</label>
-                <input class="form-control" @bind="_editFName" />
-            </div>
-            <div class="col-md-6">
-                <label class="form-label">Фамилия</label>
-                <input class="form-control" @bind="_editName" />
-            </div>
-            <div class="col-md-6">
-                <label class="form-label">Отчество</label>
-                <input class="form-control" @bind="_editPatronymic" />
-            </div>
-            <div class="col-md-6">
-                <label class="form-label">Email</label>
-                <input class="form-control" value="@_loginEmail" readonly />
-            </div>
-            <div class="col-md-8 position-relative">
-                <label class="form-label">Адрес по умолчанию</label>
-                <input class="form-control" value="@_editDefaultAddress" @oninput="OnProfileAddressInput" />
-                @if (_addressSuggestions.Count > 0)
-                {
-                    <div class="position-absolute bg-body border rounded shadow-sm w-100 mt-1" style="z-index:50;max-height:240px;overflow:auto;">
-                        @foreach (var s in _addressSuggestions)
+
+            @if (_isEditProfile)
+            {
+                <div class="row g-3 mt-1">
+                    <div class="col-md-6">
+                        <label class="form-label">Имя</label>
+                        <input class="form-control" @bind="_editFName" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Фамилия</label>
+                        <input class="form-control" @bind="_editName" />
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label">Отчество</label>
+                        <input class="form-control" @bind="_editPatronymic" />
+                    </div>
+                    <div class="col-md-8 position-relative">
+                        <label class="form-label">Адрес по умолчанию</label>
+                        <input class="form-control" value="@_editDefaultAddress" @oninput="OnProfileAddressInput" />
+                        @if (_addressSuggestions.Count > 0)
                         {
-                            <button type="button" class="w-100 text-start border-0 bg-transparent p-2" @onclick="@(() => PickAddressSuggestion(s))">
-                                <div>@(s.PrimaryLine ?? s.DisplayName ?? "Адрес")</div>
-                                @if (!string.IsNullOrWhiteSpace(s.SecondaryLine))
+                            <div class="position-absolute bg-body border rounded shadow-sm w-100 mt-1" style="z-index:50;max-height:240px;overflow:auto;">
+                                @foreach (var s in _addressSuggestions)
                                 {
-                                    <div class="small text-muted">@s.SecondaryLine</div>
+                                    <button type="button" class="w-100 text-start border-0 bg-transparent p-2" @onclick="@(() => PickAddressSuggestion(s))">
+                                        <div>@(s.PrimaryLine ?? s.DisplayName ?? "Адрес")</div>
+                                        @if (!string.IsNullOrWhiteSpace(s.SecondaryLine))
+                                        {
+                                            <div class="small text-muted">@s.SecondaryLine</div>
+                                        }
+                                    </button>
                                 }
-                            </button>
+                            </div>
                         }
                     </div>
-                }
-            </div>
-            <div class="col-md-4">
-                <label class="form-label">Предпочтительный способ оплаты</label>
-                <select class="form-select" @bind="_editPaymentMethodId">
-                    @foreach (var method in _paymentMethods)
-                    {
-                        <option value="@method.ID_PaymentMethod">@method.Name</option>
-                    }
-                </select>
-            </div>
-            <div class="col-md-4">
-                <div class="small text-muted">Рейтинг</div>
-                <div>@_profile.Rating.ToString("0.00")</div>
-            </div>
-            <div class="col-md-4">
-                <div class="small text-muted">Заказов всего</div>
-                <div>@_ordersCount</div>
-            </div>
-            <div class="col-md-4">
-                <div class="small text-muted">Последний заказ</div>
-                <div>@(_lastOrderAt?.ToString("dd.MM.yyyy HH:mm") ?? "—")</div>
-            </div>
-            <div class="col-12">
-                <button class="btn btn-primary" disabled="@_savingProfile" @onclick="SaveProfileAsync">
-                    @(_savingProfile ? "Сохранение..." : "Сохранить изменения")
-                </button>
-            </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Предпочтительный способ оплаты</label>
+                        <select class="form-select" @bind="_editPaymentMethodId">
+                            @foreach (var method in _paymentMethods)
+                            {
+                                <option value="@method.ID_PaymentMethod">@method.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <button type="button" class="btn btn-primary d-inline-flex align-items-center gap-1" disabled="@_savingProfile" @onclick="SaveProfileAsync">
+                            @if (_savingProfile)
+                            {
+                                <span>Сохранение...</span>
+                            }
+                            else
+                            {
+                                <HugeIcon Name="edit-01" CssClass="dms-icon-sm" />
+                                <span>Сохранить изменения</span>
+                            }
+                        </button>
+                    </div>
                 </div>
-            </div>
+            }
         </div>
+    }
+</div>
 
-        <hr />
+<div class="dms-card mt-3">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+        <h2 class="dms-card-title dms-card-title-with-icon mb-0">
+            <HugeIcon Name="wallet-01" CssClass="dms-card-title-icon" />
+            Привязанные карты
+        </h2>
+        <button type="button" class="btn btn-sm btn-primary d-inline-flex align-items-center gap-1" @onclick="OpenCardModal">
+            <HugeIcon Name="plus-sign" CssClass="dms-icon-sm" />
+            <span>Добавить карту</span>
+        </button>
+    </div>
 
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-            <h3 class="h5 mb-0">Привязанные карты</h3>
-            <button class="btn btn-sm btn-primary" @onclick="OpenCardModal">
-                <HugeIcon Name="plus-sign" CssClass="dms-icon me-1" />
-                Добавить карту
-            </button>
-        </div>
-
+    @if (_profile is not null)
+    {
         @if (_cards.Count == 0)
         {
             <p class="text-muted mb-0">Карт пока нет.</p>
@@ -133,8 +146,11 @@
                 {
                     <div class="col-md-6 col-lg-4">
                         <div class="border rounded p-3 h-100">
-                            <div class="d-flex justify-content-between align-items-start">
-                                <strong>@(c.PaymentSystem ?? "Карта")</strong>
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div class="d-flex align-items-center gap-2 flex-wrap">
+                                    <PaymentBrandMark System="@c.PaymentSystem" />
+                                    <strong>@(c.PaymentSystem ?? "Карта")</strong>
+                                </div>
                                 <span class="small text-muted">@c.Expiry</span>
                             </div>
                             <div class="mt-3 fs-5">@c.MaskedCard</div>
@@ -148,36 +164,15 @@
     }
 </div>
 
-<div class="dms-card mt-3">
-    <h2 class="dms-card-title">Учётная запись</h2>
-    <p class="small text-muted mb-2">Email отображается для справки. Пароль меняется отдельно.</p>
-    <div class="row g-3">
-        <div class="col-md-6">
-            <label class="form-label">Текущий email</label>
-            <input class="form-control" value="@_loginEmail" readonly />
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">Текущий пароль</label>
-            <input type="password" class="form-control" @bind="_currentPassword" autocomplete="current-password" />
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">Новый пароль</label>
-            <input type="password" class="form-control" @bind="_newPassword" autocomplete="new-password" />
-        </div>
-        <div class="col-md-4 d-flex align-items-end">
-            <button type="button" class="btn btn-primary w-100" disabled="@_savingAccount" @onclick="SaveAccountAsync">
-                @(_savingAccount ? "Сохранение…" : "Сменить пароль")
-            </button>
-        </div>
-    </div>
-</div>
-
 @if (_showCardModal)
 {
     <div class="employee-modal-backdrop" @onclick="CloseCardModal">
         <div class="employee-modal" @onclick:stopPropagation="true">
             <div class="d-flex justify-content-between align-items-start mb-3">
-                <h2 class="h5 mb-0">Добавить карту</h2>
+                <h2 class="h5 mb-0 d-inline-flex align-items-center gap-2">
+                    <HugeIcon Name="plus-sign" CssClass="dms-icon-sm" />
+                    Добавить карту
+                </h2>
                 <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseCardModal"></button>
             </div>
 
@@ -185,7 +180,10 @@
                 <div class="col-md-6">
                     <label class="form-label">Номер карты</label>
                     <input class="form-control" placeholder="0000 0000 0000 0000" value="@_cardNumber" @oninput="OnCardNumberInput" />
-                    <div class="small text-muted mt-1">Платёжная система: @_cardPaymentSystem</div>
+                    <div class="small text-muted mt-1 d-inline-flex align-items-center flex-wrap gap-2">
+                        <span>Платёжная система:</span>
+                        <PaymentBrandMark System="@_cardPaymentSystem" />
+                    </div>
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Срок</label>
@@ -193,17 +191,31 @@
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">@_cardSecurityCodeLabel</label>
-                    <input type="password" maxlength="4" class="form-control" value="@_cardCvv" @oninput="OnCardCvvInput" />
+                    <input type="text"
+                           inputmode="numeric"
+                           maxlength="4"
+                           autocomplete="cc-csc"
+                           class="form-control"
+                           value="@_cardCvv"
+                           @oninput="OnCardCvvInput" />
                 </div>
                 <div class="col-md-12">
                     <label class="form-label">Владелец</label>
-                    <input class="form-control" placeholder="IVAN IVANOV" @bind="_cardHolder" />
+                    <input class="form-control" placeholder="IVAN IVANOV" @bind="_cardHolder" @bind:event="oninput" />
                 </div>
             </div>
 
             <div class="d-flex gap-2 mt-3">
-                <button class="btn btn-primary" disabled="@_bindingCard" @onclick="BindCardAsync">
-                    @(_bindingCard ? "Сохранение..." : "Привязать")
+                <button class="btn btn-primary d-inline-flex align-items-center gap-1" disabled="@_bindingCard" @onclick="BindCardAsync">
+                    @if (_bindingCard)
+                    {
+                        <span>Сохранение...</span>
+                    }
+                    else
+                    {
+                        <HugeIcon Name="wallet-01" CssClass="dms-icon-sm" />
+                        <span>Привязать</span>
+                    }
                 </button>
                 <button class="btn btn-outline-secondary" disabled="@_bindingCard" @onclick="CloseCardModal">Отмена</button>
             </div>
@@ -239,10 +251,17 @@
     private string _cardSecurityCodeLabel = "CVV";
     private bool _bindingCard;
     private string _loginEmail = "";
-    private string _currentPassword = "";
-    private string _newPassword = "";
-    private bool _savingAccount;
     private int _currentUserId;
+    private bool _isEditProfile;
+
+    private string DisplayName
+    {
+        get
+        {
+            var v = $"{_editName} {_editFName} {_editPatronymic}".Trim();
+            return string.IsNullOrWhiteSpace(v) ? "Клиент" : v;
+        }
+    }
 
     private string SelectedPaymentMethodName =>
         _paymentMethods.FirstOrDefault(x => x.ID_PaymentMethod == _profile?.Preferred_payment_method_id)?.Name
@@ -310,46 +329,6 @@
         }
     }
 
-    private async Task SaveAccountAsync()
-    {
-        var changePass = !string.IsNullOrWhiteSpace(_newPassword);
-        if (!changePass)
-        {
-            Notify.ShowWarning("Введите новый пароль.");
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(_currentPassword))
-        {
-            Notify.ShowWarning("Введите текущий пароль.");
-            return;
-        }
-
-        _savingAccount = true;
-        try
-        {
-            var (ok, err) = await AccountApi.UpdateMyAccountAsync(new UpdateMyAccountRequestDto
-            {
-                NewEmail = null,
-                NewPassword = changePass ? _newPassword : null,
-                CurrentPassword = _currentPassword
-            });
-            if (!ok)
-            {
-                Notify.ShowError(err ?? "Не удалось сменить пароль.");
-                return;
-            }
-
-            Notify.ShowSuccess("Пароль обновлён.");
-            _currentPassword = "";
-            _newPassword = "";
-        }
-        finally
-        {
-            _savingAccount = false;
-        }
-    }
-
     private async Task SaveProfileAsync()
     {
         if (_profile is null)
@@ -373,7 +352,12 @@
                 return;
             }
 
-            _profile = await ClientsApi.GetProfileAsync(_profile.ID_ClientProfile);
+            var clientId = _profile.ID_ClientProfile;
+            _profile = await ClientsApi.GetProfileAsync(clientId);
+            var orders = await OrdersApi.GetByClientAsync(clientId) ?? new List<OrderDto>();
+            _ordersCount = orders.Count;
+            _lastOrderAt = orders.OrderByDescending(o => o.Created_at).FirstOrDefault()?.Created_at;
+            _isEditProfile = false;
             Notify.ShowSuccess("Профиль обновлён.");
         }
         catch (Exception ex)
@@ -404,7 +388,7 @@
 
     private void OnCardNumberInput(ChangeEventArgs e)
     {
-        var raw = new string((e.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(16).ToArray());
+        var raw = new string((e.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(19).ToArray());
         _cardNumber = string.Join(" ", Enumerable.Range(0, (raw.Length + 3) / 4).Select(i => raw.Substring(i * 4, Math.Min(4, raw.Length - i * 4))));
         _cardPaymentSystem = DetectPaymentSystem(raw);
         _cardSecurityCodeLabel = GetSecurityCodeLabel(_cardPaymentSystem);
@@ -412,7 +396,7 @@
 
     private void OnCardCvvInput(ChangeEventArgs e)
     {
-        _cardCvv = new string((e.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(3).ToArray());
+        _cardCvv = new string((e.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(4).ToArray());
     }
 
     private void OnCardExpiryInput(ChangeEventArgs e)
@@ -451,9 +435,15 @@
     {
         if (_profile is null)
             return;
-        if (string.IsNullOrWhiteSpace(_cardNumber) || string.IsNullOrWhiteSpace(_cardExpiryMonth) || string.IsNullOrWhiteSpace(_cardHolder) || string.IsNullOrWhiteSpace(_cardCvv))
+
+        var cardDigits = new string(_cardNumber.Where(char.IsDigit).ToArray());
+        var cvvDigits = new string(_cardCvv.Where(char.IsDigit).ToArray());
+        if (cardDigits.Length is < 15 or > 19
+            || string.IsNullOrWhiteSpace(_cardExpiryMonth)
+            || string.IsNullOrWhiteSpace(_cardHolder?.Trim())
+            || cvvDigits.Length is < 3 or > 4)
         {
-            Notify.ShowWarning("Заполните номер карты, срок, владельца и код безопасности.");
+            Notify.ShowWarning("Заполните номер карты (15–19 цифр), срок, владельца и код безопасности (3–4 цифры).");
             return;
         }
 
@@ -470,10 +460,10 @@
         {
             var (ok, err) = await ClientsApi.BindCardAsync(_profile.ID_ClientProfile, new BindCardRequestDto
             {
-                CardNumber = _cardNumber,
+                CardNumber = cardDigits,
                 Expiry = expiry,
                 CardHolder = _cardHolder.Trim().ToUpperInvariant(),
-                Cvv = _cardCvv
+                Cvv = cvvDigits
             });
             if (!ok)
             {
@@ -521,15 +511,24 @@
         var file = e.File;
         if (file is null || _currentUserId <= 0)
             return;
+        var ext = System.IO.Path.GetExtension(file.Name).ToLowerInvariant();
+        if (ext is not ".jpg" and not ".jpeg" and not ".png" and not ".gif" and not ".webp")
+        {
+            Notify.ShowWarning("Выберите изображение: JPG, PNG, GIF или WEBP.");
+            return;
+        }
         var (ok, error) = await ClientsApi.UploadAvatarAsync(_currentUserId, file);
         if (!ok)
         {
             Notify.ShowError(error ?? "Не удалось загрузить аватар.");
             return;
         }
+        _profileAvatarVer = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         Notify.ShowSuccess("Аватар обновлен.");
         StateHasChanged();
     }
+
+    private void ToggleEditProfile() => _isEditProfile = !_isEditProfile;
 
     private async Task OnProfileAddressInput(ChangeEventArgs e)
     {
@@ -578,7 +577,7 @@
     {
         "Mastercard" => "CVC",
         "Visa" => "CVV",
-        "Мир" => "CVP",
+        "Мир" => "CVC",
         "UnionPay" => "CVN",
         _ => "CVV"
     };

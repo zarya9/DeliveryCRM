@@ -31,6 +31,18 @@ public class VehicleCatalogModelDto
     public string? DriveTypeName { get; set; }
 }
 
+public class CreateCatalogBrandApiRequest
+{
+    public string Name { get; set; } = "";
+}
+
+public class CreateCatalogModelApiRequest
+{
+    public int BrandId { get; set; }
+    public string Name { get; set; } = "";
+    public int? Year { get; set; }
+}
+
 public class CreateVehicleApiRequest
 {
     public string License_plate { get; set; } = "";
