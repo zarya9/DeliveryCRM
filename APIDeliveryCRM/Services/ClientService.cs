@@ -400,6 +400,51 @@ namespace APIDeliveryCRM.Services
             "UnionPay" => "CVN",
             _ => "CVV"
         };
+
+        private static readonly string[] ChatContactRolePriority = ["Менеджер", "Администратор", "Админ", "Логист"];
+        private static readonly string[] ChatContactExcludedRoles = ["Клиент", "Курьер"];
+
+        public async Task<IActionResult> GetChatContactUserIdAsync(int clientUserId, int? orderId = null)
+        {
+            var client = await _context.ClientProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.User_id == clientUserId);
+            if (client == null)
+                return new NotFoundObjectResult(new { message = "Профиль клиента не найден." });
+
+            var companyId = client.Company_id;
+            if (orderId is > 0)
+            {
+                var order = await _context.Orders.AsNoTracking()
+                    .FirstOrDefaultAsync(o => o.ID_Order == orderId.Value && o.Client_id == client.ID_ClientProfile);
+                if (order != null)
+                    companyId = order.Company_id;
+            }
+
+            var users = await _context.Users
+                .AsNoTracking()
+                .Include(u => u.Role)
+                .Where(u => u.Company_id == companyId && u.Is_Active && u.ID_User != clientUserId)
+                .OrderBy(u => u.ID_User)
+                .ToListAsync();
+
+            var staff = users
+                .Where(u => !ChatContactExcludedRoles.Contains(u.Role.Name, StringComparer.OrdinalIgnoreCase))
+                .ToList();
+
+            if (staff.Count == 0)
+                return new NotFoundObjectResult(new { message = "В компании нет сотрудников для чата." });
+
+            foreach (var roleName in ChatContactRolePriority)
+            {
+                var match = staff.FirstOrDefault(u => string.Equals(u.Role.Name, roleName, StringComparison.OrdinalIgnoreCase));
+                if (match != null)
+                    return new OkObjectResult(new { userId = match.ID_User, role = match.Role.Name });
+            }
+
+            var fallback = staff[0];
+            return new OkObjectResult(new { userId = fallback.ID_User, role = fallback.Role.Name });
+        }
     }
 }
 

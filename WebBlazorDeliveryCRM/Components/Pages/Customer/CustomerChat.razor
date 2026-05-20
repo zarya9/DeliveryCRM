@@ -1,6 +1,7 @@
 @page "/customer/chat"
 @layout CustomerLayout
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Клиент")]
+@using Microsoft.AspNetCore.Components
 @using WebBlazorDeliveryCRM.Components.Shared
 
 <PageTitle>Чат — Клиент</PageTitle>
@@ -13,4 +14,15 @@
     <p class="subtitle mb-0">Переписка с сотрудниками компании по заказам и вопросам доставки.</p>
 </div>
 
-<CompanyChatPanel />
+<CompanyChatPanel TargetUserId="@UserId" TargetRoomId="@RoomId" AutoIntroOrderName="@OrderName" />
+
+@code {
+    [SupplyParameterFromQuery(Name = "userId")]
+    public int? UserId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "roomId")]
+    public int? RoomId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "orderName")]
+    public string? OrderName { get; set; }
+}

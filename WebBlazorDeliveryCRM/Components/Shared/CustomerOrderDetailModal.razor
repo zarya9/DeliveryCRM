@@ -1,9 +1,13 @@
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
 @using WebBlazorDeliveryCRM.Utilities
+@using Microsoft.AspNetCore.Components
 @inject IJSRuntime JS
 @inject IConfiguration Configuration
 @inject ForwardGeocodeService Geocode
+@inject NavigationManager Navigation
+@inject ClientsApiService ClientsApi
+@inject AppNotificationService Notify
 
 @if (Order is not null)
 {
@@ -46,6 +50,13 @@
                             <dd class="col-sm-8 mb-1">@CourierDisplay(Order.CourierProfile)</dd>
                         }
                     </dl>
+                    <button type="button"
+                            class="btn btn-outline-primary btn-sm d-inline-flex align-items-center gap-2 mt-2"
+                            @onclick="ContactManagerAboutOrderAsync"
+                            @onclick:stopPropagation="true">
+                        <HugeIcon Name="message-01" CssClass="dms-icon-sm" />
+                        Написать менеджеру по заказу
+                    </button>
                 </div>
                 <div class="customer-order-detail-addresses">
                     <div class="mb-2">
@@ -281,6 +292,23 @@
             return "Назначен";
         var name = $"{u.FName} {u.Name}".Trim();
         return string.IsNullOrEmpty(name) ? "Назначен" : name;
+    }
+
+    private async Task ContactManagerAboutOrderAsync()
+    {
+        if (Order is null)
+            return;
+
+        var contactUserId = await ClientsApi.GetChatContactUserIdAsync(Order.ID_Order);
+        if (!contactUserId.HasValue)
+        {
+            Notify.ShowWarning("Сейчас нет доступного сотрудника для чата. Попробуйте позже.");
+            return;
+        }
+
+        var orderNameEncoded = Uri.EscapeDataString(string.IsNullOrWhiteSpace(Order.Name) ? $"Заказ №{Order.Order_Number}" : Order.Name.Trim());
+        Navigation.NavigateTo($"/customer/chat?userId={contactUserId.Value}&orderName={orderNameEncoded}");
+        await CloseAsync();
     }
 
     private async Task CloseAsync()

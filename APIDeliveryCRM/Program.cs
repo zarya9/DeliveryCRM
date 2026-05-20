@@ -1,4 +1,5 @@
 using APIDeliveryCRM.ContextDb;
+using APIDeliveryCRM.Hubs;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -14,9 +15,15 @@ builder.Services.AddHttpClient();
 builder.Services.AddMemoryCache();
 
 builder.Services.AddScoped<IUserLoginService, UserLoginService>();
+if (builder.Configuration.GetValue<bool>("Smtp:Enabled"))
+    builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+else
+    builder.Services.AddSingleton<IEmailSender, LoggingOnlyEmailSender>();
+builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
 builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddScoped<ICourierService, CourierService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<ICompanyService, CompanyService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<ILogisticsHubService, LogisticsHubService>();
 builder.Services.AddScoped<IShiftService, ShiftService>();
@@ -47,6 +54,7 @@ builder.Services.AddHostedService<ShiftPlannerWorker>();
 
 // SignalR
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<Microsoft.AspNetCore.SignalR.IUserIdProvider, NameUserIdProvider>();
 
 var jwtKey = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key is not configured");
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("JWT Issuer is not configured");

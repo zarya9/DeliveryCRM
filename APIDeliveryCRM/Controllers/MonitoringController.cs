@@ -46,11 +46,34 @@ public class MonitoringController : Controller
                 x.e.EventType,
                 x.e.Title,
                 x.e.Message,
+                x.e.NewStatus_id,
                 x.e.Created_at
             })
             .ToListAsync();
 
-        return Ok(rows);
+        var statusIds = rows
+            .Where(r => r.NewStatus_id.HasValue)
+            .Select(r => r.NewStatus_id!.Value)
+            .Distinct()
+            .ToList();
+        var statusNames = statusIds.Count == 0
+            ? new Dictionary<int, string>()
+            : await _db.OrderStatuses.AsNoTracking()
+                .Where(s => statusIds.Contains(s.ID_OrderStatus))
+                .ToDictionaryAsync(s => s.ID_OrderStatus, s => s.Name);
+
+        var result = rows.Select(r => new
+        {
+            r.ID_OrderTimelineEvent,
+            r.Order_id,
+            r.orderNumber,
+            r.EventType,
+            r.Title,
+            message = FormatFeedMessage(r.EventType, r.Message, r.NewStatus_id, statusNames),
+            r.Created_at
+        }).ToList();
+
+        return Ok(result);
     }
 
     [HttpGet("live-map")]
@@ -153,6 +176,36 @@ public class MonitoringController : Controller
         }
 
         return Ok(new { couriers = courierMarkers, hubs = hubMarkers });
+    }
+
+    private static string? FormatFeedMessage(
+        string? eventType,
+        string? message,
+        int? newStatusId,
+        IReadOnlyDictionary<int, string> statusNames)
+    {
+        if (string.Equals(eventType, "STATUS_CHANGED", StringComparison.OrdinalIgnoreCase))
+        {
+            if (newStatusId is > 0 && statusNames.TryGetValue(newStatusId.Value, out var name)
+                && !string.IsNullOrWhiteSpace(name))
+                return $"Статус заказа изменен: {name.Trim()}";
+
+            if (!string.IsNullOrWhiteSpace(message)
+                && message.StartsWith("Статус заказа изменен:", StringComparison.OrdinalIgnoreCase))
+            {
+                var arrow = message.IndexOf("->", StringComparison.Ordinal);
+                if (arrow >= 0)
+                {
+                    var tail = message[(arrow + 2)..].Trim();
+                    if (int.TryParse(tail, out var parsedId)
+                        && statusNames.TryGetValue(parsedId, out var legacyName)
+                        && !string.IsNullOrWhiteSpace(legacyName))
+                        return $"Статус заказа изменен: {legacyName.Trim()}";
+                }
+            }
+        }
+
+        return message;
     }
 
     private int? GetCompanyId()

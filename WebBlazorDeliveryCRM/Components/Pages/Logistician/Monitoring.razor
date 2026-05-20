@@ -40,19 +40,21 @@
             }
             else
             {
-                <ul class="list-unstyled mb-0 monitoring-feed">
-                    @foreach (var e in _feed)
-                    {
-                        <li class="monitoring-feed-item border-bottom pb-2 mb-2">
-                            <div class="small text-muted">@e.Created_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm") · заказ №@e.OrderNumber</div>
-                            <div class="fw-semibold">@(string.IsNullOrWhiteSpace(e.Title) ? e.EventType : e.Title)</div>
-                            @if (!string.IsNullOrWhiteSpace(e.Message))
-                            {
-                                <div class="small">@e.Message</div>
-                            }
-                        </li>
-                    }
-                </ul>
+                <div class="monitoring-feed-scroll">
+                    <ul class="list-unstyled mb-0 monitoring-feed">
+                        @foreach (var e in _feed)
+                        {
+                            <li class="monitoring-feed-item border-bottom pb-2 mb-2">
+                                <div class="small text-muted">@e.Created_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm") · заказ №@e.OrderNumber</div>
+                                <div class="fw-semibold">@(string.IsNullOrWhiteSpace(e.Title) ? e.EventType : e.Title)</div>
+                                @if (!string.IsNullOrWhiteSpace(e.Message))
+                                {
+                                    <div class="small">@e.Message</div>
+                                }
+                            </li>
+                        }
+                    </ul>
+                </div>
             }
         </div>
     </div>
@@ -60,7 +62,7 @@
         <div class="dms-card">
             <h2 class="dms-card-title">Карта</h2>
             <p class="small text-muted mb-2"></p>
-            <div id="logistician-monitoring-map" style="height: 420px; width: 100%; border-radius: 8px;"></div>
+            <div id="logistician-monitoring-map" class="monitoring-map-canvas"></div>
         </div>
     </div>
 </div>

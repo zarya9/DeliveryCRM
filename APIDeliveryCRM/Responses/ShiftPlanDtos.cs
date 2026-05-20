@@ -27,6 +27,12 @@ public class ShiftPlanSummaryDto
     public decimal LoadFactorVolume { get; set; }
     public List<ShiftPlanStopDto> Stops { get; set; } = new();
     public int OrdersCount => Stops.Select(s => s.OrderId).Distinct().Count();
+
+    /// <summary>Собран из назначенных заказов без полного пересчёта компании.</summary>
+    public bool BuiltFromAssignedOrders { get; set; }
+
+    /// <summary>Точки только для просмотра — нужна открытая смена для отметки выполнения.</summary>
+    public bool RequiresActiveShift { get; set; }
 }
 
 public class ShiftPlanStopDto

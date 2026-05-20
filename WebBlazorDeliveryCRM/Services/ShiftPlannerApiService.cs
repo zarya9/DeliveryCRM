@@ -32,6 +32,18 @@ public class ShiftPlannerApiService
         return await JsonSerializer.DeserializeAsync<CompanyPlannerResultDto>(stream, JsonOpts);
     }
 
+    public async Task<ShiftPlanSummaryDto?> GetCourierPlanAsync(int courierProfileId)
+        => await GetSafeAsync<ShiftPlanSummaryDto>($"/api/ShiftPlanner/courier/{courierProfileId}");
+
+    public async Task<ShiftPlanSummaryDto?> ApplyCourierRouteAsync(int courierProfileId, IReadOnlyList<ApplyCourierRouteStopDto> stops)
+    {
+        var resp = await _http.PostAsJsonAsync($"/api/ShiftPlanner/courier/{courierProfileId}/apply-route", new { stops });
+        if (!resp.IsSuccessStatusCode)
+            return null;
+        await using var stream = await resp.Content.ReadAsStreamAsync();
+        return await JsonSerializer.DeserializeAsync<ShiftPlanSummaryDto>(stream, JsonOpts);
+    }
+
     private async Task<T?> GetSafeAsync<T>(string url)
     {
         var resp = await _http.GetAsync(url);

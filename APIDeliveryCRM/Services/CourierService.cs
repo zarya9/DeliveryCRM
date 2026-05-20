@@ -8,6 +8,7 @@ using APIDeliveryCRM.Helpers;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
+using APIDeliveryCRM.Responses;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using System.Text.RegularExpressions;
@@ -19,13 +20,20 @@ namespace APIDeliveryCRM.Services
         private readonly ContextDB _context;
         private readonly IAuditService _audit;
         private readonly IShiftService _shifts;
+        private readonly IOrderService _orderService;
         private readonly IHubContext<TrackingHub> _trackingHub;
 
-        public CourierService(ContextDB context, IAuditService audit, IShiftService shifts, IHubContext<TrackingHub> trackingHub)
+        public CourierService(
+            ContextDB context,
+            IAuditService audit,
+            IShiftService shifts,
+            IOrderService orderService,
+            IHubContext<TrackingHub> trackingHub)
         {
             _context = context;
             _audit = audit;
             _shifts = shifts;
+            _orderService = orderService;
             _trackingHub = trackingHub;
         }
 
@@ -193,7 +201,7 @@ namespace APIDeliveryCRM.Services
             await _context.SaveChangesAsync();
         }
 
-        public async Task UpdateLocationAsync(int courierProfileId, decimal lat, decimal lon)
+        public async Task<IReadOnlyList<NearbyDeliveryStopDto>> UpdateLocationAsync(int courierProfileId, decimal lat, decimal lon)
         {
             var active = await _shifts.GetActiveShiftAsync(courierProfileId);
             if (active == null)
@@ -203,9 +211,7 @@ namespace APIDeliveryCRM.Services
                 .Include(c => c.User)
                 .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId);
             if (courier == null)
-            {
-                return;
-            }
+                return Array.Empty<NearbyDeliveryStopDto>();
 
             courier.Current_lat = lat;
             courier.Current_lon = lon;
@@ -226,6 +232,11 @@ namespace APIDeliveryCRM.Services
                     online = courier.Is_online,
                     title = $"{name} · {(courier.Is_online ? "онлайн" : "офлайн")}"
                 });
+
+            return await _orderService.GetNearbyDeliverableStopsAsync(
+                courierProfileId,
+                (double)lat,
+                (double)lon);
         }
 
         public async Task SetOnlineStatusAsync(int courierProfileId, bool isOnline)

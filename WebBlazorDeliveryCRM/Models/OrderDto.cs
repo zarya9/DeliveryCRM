@@ -1,4 +1,4 @@
-﻿namespace WebBlazorDeliveryCRM.Models;
+namespace WebBlazorDeliveryCRM.Models;
 
 public class OrderDto
 {
@@ -84,6 +84,7 @@ public class OrderRouteStopDto
     public string? Kind { get; set; }
     public string? Status { get; set; }
     public string? Title { get; set; }
+    public AddressShortDto? Address { get; set; }
 }
 
 public class OrderStatusDto

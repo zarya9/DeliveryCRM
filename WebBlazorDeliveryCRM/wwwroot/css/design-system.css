@@ -433,16 +433,83 @@ html, body {
     color: var(--dms-text-muted, #64748b) !important;
 }
 
-/* Тёмная тема: контурные кнопки на карточке */
-[data-theme="dark"] .dms-card .btn-outline-primary {
+/* Тёмная тема: контурные кнопки на карточке и в модалках */
+[data-theme="dark"] .dms-card .btn-outline-primary,
+[data-theme="dark"] .employee-modal .btn-outline-primary {
     color: var(--dms-primary);
     border-color: rgba(0, 183, 183, 0.55);
 }
 
-[data-theme="dark"] .dms-card .btn-outline-primary:hover {
+[data-theme="dark"] .dms-card .btn-outline-primary:hover,
+[data-theme="dark"] .employee-modal .btn-outline-primary:hover {
     color: var(--dms-text);
     background: rgba(0, 183, 183, 0.14);
     border-color: var(--dms-primary);
+}
+
+/* ApexCharts: тултип по умолчанию светлый, а body наследует светлый --dms-text → текст не виден */
+[data-theme="dark"] .apexcharts-tooltip.apexcharts-theme-light {
+    background: var(--dms-card-bg) !important;
+    border: 1px solid var(--dms-card-border) !important;
+    color: var(--dms-text) !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+}
+
+[data-theme="dark"] .apexcharts-tooltip.apexcharts-theme-light .apexcharts-tooltip-title {
+    background: rgba(0, 0, 0, 0.22) !important;
+    border-bottom: 1px solid var(--dms-card-border) !important;
+    color: var(--dms-text) !important;
+}
+
+[data-theme="dark"] .apexcharts-tooltip-series-group,
+[data-theme="dark"] .apexcharts-tooltip-y-group {
+    background: transparent !important;
+}
+
+[data-theme="dark"] .apexcharts-tooltip-text,
+[data-theme="dark"] .apexcharts-tooltip-text-y-label,
+[data-theme="dark"] .apexcharts-tooltip-text-y-value,
+[data-theme="dark"] .apexcharts-tooltip-goals-label,
+[data-theme="dark"] .apexcharts-tooltip-goals-value,
+[data-theme="dark"] .apexcharts-tooltip-z-label,
+[data-theme="dark"] .apexcharts-tooltip-z-value,
+[data-theme="dark"] .apexcharts-tooltip span,
+[data-theme="dark"] .apexcharts-tooltip div {
+    color: var(--dms-text) !important;
+}
+
+[data-theme="dark"] .apexcharts-text,
+[data-theme="dark"] .apexcharts-title-text,
+[data-theme="dark"] .apexcharts-legend-text,
+[data-theme="dark"] .apexcharts-datalabel,
+[data-theme="dark"] .apexcharts-datalabel-label {
+    fill: var(--dms-text) !important;
+}
+
+[data-theme="dark"] .apexcharts-gridline {
+    stroke: rgba(255, 255, 255, 0.12) !important;
+}
+
+[data-theme="dark"] .apexcharts-xaxis-tick,
+[data-theme="dark"] .apexcharts-yaxis-tick {
+    stroke: var(--dms-card-border) !important;
+}
+
+[data-theme="dark"] .apexcharts-menu {
+    background: var(--dms-card-bg) !important;
+    border: 1px solid var(--dms-card-border) !important;
+}
+
+[data-theme="dark"] .apexcharts-menu-item {
+    color: var(--dms-text) !important;
+}
+
+[data-theme="dark"] .apexcharts-menu-item:hover {
+    background: rgba(0, 183, 183, 0.12) !important;
+}
+
+[data-theme="dark"] .apexcharts-toolbar svg {
+    fill: var(--dms-text-muted) !important;
 }
 
 /* Blazored.Toast: в пакете фиксированный светлый фон — подгоняем под тёмную тему */
@@ -538,4 +605,374 @@ tr.customer-order-table-row:hover {
 .dms-scroll-table-wrap {
     max-height: min(17rem, 40vh);
     overflow: auto;
+}
+
+.courier-route-stop__seq {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+.courier-route-stop--done {
+    opacity: 0.72;
+}
+
+.courier-route-stop__reorder .btn {
+    min-width: 2.25rem;
+    padding-left: 0.35rem;
+    padding-right: 0.35rem;
+}
+
+/* Плашка «рядом с заказом» — над нижней навигацией курьера */
+.courier-proximity-banner {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));
+    z-index: 1040;
+    padding: 0 0.65rem;
+    pointer-events: none;
+}
+
+.courier-proximity-banner__body {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    padding: 0.75rem 0.85rem;
+    border-radius: 0.65rem;
+    background: linear-gradient(135deg, #059669 0%, #047857 100%);
+    color: #fff;
+    box-shadow: 0 8px 24px rgba(5, 150, 105, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.courier-proximity-banner__text {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.35;
+}
+
+.courier-proximity-banner__text .text-muted {
+    color: rgba(255, 255, 255, 0.85) !important;
+}
+
+@media (min-width: 901px) {
+    .courier-proximity-banner {
+        left: var(--dms-sidebar-width, 240px);
+        bottom: 1rem;
+        max-width: 28rem;
+    }
+}
+
+/* Курьер — карта маршрута с меню «следующий заказ / забор» */
+.courier-route-map-wrap {
+    position: relative;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.courier-route-map-canvas {
+    height: 420px;
+    width: 100%;
+    border-radius: 8px;
+}
+
+.courier-route-map-menu {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 500;
+    max-width: min(18rem, calc(100% - 1rem));
+    padding: 0.65rem 0.75rem;
+    border-radius: 0.5rem;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
+    font-size: 0.8125rem;
+    line-height: 1.35;
+    color: var(--dms-text);
+}
+
+[data-theme="dark"] .courier-route-map-menu {
+    background: rgba(30, 41, 59, 0.94);
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.courier-route-map-menu--muted {
+    padding: 0.5rem 0.65rem;
+}
+
+.courier-route-map-menu__title {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--dms-text-muted, #64748b);
+    margin-bottom: 0.15rem;
+}
+
+.courier-route-map-menu__order {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--dms-primary, #0d9488);
+    margin-bottom: 0.45rem;
+}
+
+.courier-route-map-menu__row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    margin-bottom: 0.35rem;
+}
+
+.courier-route-map-menu__row--muted .courier-route-map-menu__value {
+    font-size: 0.75rem;
+    color: var(--dms-text-muted, #64748b);
+}
+
+.courier-route-map-menu__label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--dms-text-muted, #64748b);
+}
+
+.courier-route-map-menu__value {
+    word-break: break-word;
+}
+
+.courier-route-map-menu__orders {
+    margin-top: 0.35rem;
+    padding-top: 0.35rem;
+    border-top: 1px dashed rgba(148, 163, 184, 0.4);
+}
+
+.courier-route-map-menu__order-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.2rem;
+}
+
+.courier-route-map-menu__chip {
+    display: inline-block;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: rgba(148, 163, 184, 0.2);
+    color: var(--dms-text);
+}
+
+.courier-route-map-menu__chip--active {
+    background: var(--dms-primary, #0d9488);
+    color: #fff;
+}
+
+@media (max-width: 480px) {
+    .courier-route-map-menu {
+        max-width: calc(100% - 1rem);
+        font-size: 0.78rem;
+    }
+
+    .courier-route-map-menu__order {
+        font-size: 1rem;
+    }
+}
+
+.courier-navigator__target-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--dms-text-muted, #64748b);
+}
+
+.courier-navigator__meta {
+    font-size: 0.9375rem;
+}
+
+.courier-navigator__steps {
+    margin: 0;
+    padding-left: 1.15rem;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    max-height: 12rem;
+    overflow-y: auto;
+}
+
+.courier-navigator__steps li + li {
+    margin-top: 0.35rem;
+}
+
+/* Логист — мониторинг: лента событий той же высоты, что карта */
+.monitoring-map-canvas {
+    height: 420px;
+    width: 100%;
+    border-radius: 8px;
+}
+
+.monitoring-feed-scroll {
+    height: 420px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 0.25rem;
+}
+
+.monitoring-feed-item:last-child {
+    border-bottom: none !important;
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+/* Курьер — «Мои заказы»: карточки на узком экране */
+.courier-orders-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.courier-order-card {
+    border: 1px solid var(--dms-card-border, rgba(15, 23, 42, 0.12));
+    border-radius: 0.5rem;
+    padding: 0.85rem 1rem;
+    background: var(--dms-card-bg, #fff);
+}
+
+.courier-order-card__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.65rem;
+    margin-bottom: 0.6rem;
+}
+
+.courier-order-card__number {
+    font-weight: 600;
+    font-size: 1rem;
+    line-height: 1.3;
+    color: var(--dms-text);
+}
+
+.courier-order-card__meta {
+    font-size: 0.8rem;
+    color: var(--dms-text-muted, #64748b);
+    margin-top: 0.15rem;
+}
+
+.courier-order-card__badges {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.35rem;
+    flex-shrink: 0;
+}
+
+.courier-order-card__kind {
+    font-weight: 500;
+    font-size: 0.7rem;
+}
+
+.courier-order-card__route {
+    padding: 0.55rem 0.65rem;
+    border-radius: 0.375rem;
+    background: rgba(148, 163, 184, 0.12);
+    margin-bottom: 0.65rem;
+}
+
+[data-theme="dark"] .courier-order-card__route {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.courier-order-card__route-line {
+    font-size: 0.875rem;
+    line-height: 1.45;
+    color: var(--dms-text);
+    word-break: break-word;
+}
+
+.courier-order-card__route-line + .courier-order-card__route-line {
+    margin-top: 0.45rem;
+    padding-top: 0.45rem;
+    border-top: 1px dashed rgba(148, 163, 184, 0.35);
+}
+
+.courier-order-card__actions {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.5rem;
+    align-items: stretch;
+    padding-top: 0.65rem;
+    border-top: 1px solid var(--dms-card-border, rgba(15, 23, 42, 0.1));
+}
+
+.courier-order-card__actions .form-select {
+    min-width: 0;
+}
+
+.courier-order-card__actions .btn {
+    white-space: nowrap;
+    min-width: 6.5rem;
+}
+
+@media (max-width: 380px) {
+    .courier-order-card__head {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .courier-order-card__badges {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .courier-order-card__actions {
+        grid-template-columns: 1fr;
+    }
+
+    .courier-order-card__actions .btn {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
+/* Hub / distribution cards — readable text in light and dark themes */
+.hub-card {
+    color: var(--dms-text);
+}
+
+.hub-card .hub-card-title {
+    color: var(--dms-text);
+}
+
+.hub-card .hub-card-orders,
+.hub-card .hub-card-orders li {
+    color: var(--dms-text);
+}
+
+[data-theme="dark"] .hub-card .text-body,
+[data-theme="dark"] .hub-card .hub-card-orders li {
+    color: var(--dms-text) !important;
+}
+
+[data-theme="dark"] .hub-card .text-muted {
+    color: var(--dms-text-muted) !important;
+}
+
+[data-theme="dark"] .hub-card .small.border.rounded.bg-body-secondary {
+    color: var(--dms-text);
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: var(--dms-card-border) !important;
+}
+
+[data-theme="dark"] .hub-card .small.border.rounded ol li {
+    color: var(--dms-text);
 }

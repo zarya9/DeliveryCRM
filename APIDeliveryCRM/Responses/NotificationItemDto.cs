@@ -9,6 +9,7 @@ namespace APIDeliveryCRM.Responses
         public string Message { get; set; } = "";
         public string? TypeName { get; set; }
         public int? OrderId { get; set; }
+        public int? ShiftId { get; set; }
         public bool IsRead { get; set; }
         public byte Priority { get; set; }
         public bool IsCritical { get; set; }

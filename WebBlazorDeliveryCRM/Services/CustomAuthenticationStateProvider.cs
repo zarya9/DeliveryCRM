@@ -44,9 +44,23 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider
             return Task.FromResult(Anonymous());
         }
 
-        // Короче, это обычный HTTP-запрос без cookie: считаем пользователя анонимным.
+        // HttpContext есть, но в запросе ещё нет валидной cookie (например сразу после входа до
+        // синхронизации cookie или в части SignalR-вызовов). Нельзя затирать circuit/кэш —
+        // иначе HttpClient потеряет Bearer и API ответит 401.
         if (http is not null)
         {
+            var wireToken = _circuitHolder.JwtToken ?? _tokenCache.GetToken();
+            if (!string.IsNullOrEmpty(wireToken))
+            {
+                var fromWire = AuthTokenParser.TryCreatePrincipal(wireToken);
+                if (fromWire?.Identity?.IsAuthenticated == true)
+                {
+                    _circuitHolder.SetAuth(wireToken, fromWire);
+                    _tokenCache.SetToken(wireToken);
+                    return Task.FromResult(new AuthenticationState(fromWire));
+                }
+            }
+
             _circuitHolder.Clear();
             _tokenCache.Clear();
             return Task.FromResult(Anonymous());

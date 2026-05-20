@@ -41,7 +41,7 @@
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         if (state.User.Identity?.IsAuthenticated != true)
         {
-            Navigation.NavigateTo("/login", forceLoad: true);
+            Navigation.NavigateTo("/login", replace: true);
             return;
         }
         var roles = state.User.Claims
@@ -52,14 +52,14 @@
         string? role = roles.FirstOrDefault(r => r is "Клиент" or "Логист" or "Логистика" or "Менеджер" or "Админ" or "Администратор" or "Курьер")
                      ?? roles.FirstOrDefault();
         if (role == "Клиент")
-            Navigation.NavigateTo("/customer", forceLoad: true);
+            Navigation.NavigateTo("/customer", replace: true);
         else if (role == "Менеджер")
-            Navigation.NavigateTo("/manager", forceLoad: true);
+            Navigation.NavigateTo("/manager", replace: true);
         else if (role == "Логист" || string.Equals(role, "Логистика", StringComparison.Ordinal))
-            Navigation.NavigateTo("/logistician", forceLoad: true);
+            Navigation.NavigateTo("/logistician", replace: true);
         else if (role == "Админ" || role == "Администратор")
-            Navigation.NavigateTo("/admin/employees", forceLoad: true);
+            Navigation.NavigateTo("/admin/employees", replace: true);
         else if (role == "Курьер")
-            Navigation.NavigateTo("/courier/shift", forceLoad: true);
+            Navigation.NavigateTo("/courier/shift", replace: true);
     }
 }

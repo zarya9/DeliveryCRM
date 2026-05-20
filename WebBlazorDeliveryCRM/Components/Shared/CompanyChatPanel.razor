@@ -254,6 +254,12 @@
     [Parameter]
     public int? TargetRoomId { get; set; }
 
+    /// <summary>
+    /// Если задано вместе с личным чатом и история пуста, один раз отправляется приветствие по заказу.
+    /// </summary>
+    [Parameter]
+    public string? AutoIntroOrderName { get; set; }
+
     private readonly List<ChatMessageVm> _messages = new();
     private readonly List<ChatRoomListItemDto> _rooms = new();
     private readonly Dictionary<int, string> _roomKinds = new();
@@ -265,12 +271,15 @@
     private string _newMessage = string.Empty;
     private int _currentUserId;
     private int _companyId;
+    private bool _viewerIsClient;
     private bool _initialized;
     private int _activeRoomId;
     private string _activeRoomKind = "company";
     private bool _mobileChatOpen;
     private int? _lastHandledTargetUserId;
     private int? _lastHandledTargetRoomId;
+    /// <summary>Совпадение userId+orderName для повторного открытия чата с тем же менеджером по другому заказу.</summary>
+    private string? _lastHandledDirectOpenSignature;
     private int? _pendingDirectPeerUserId;
     private bool _showPeerProfile;
     private HashSet<int> _onlineUserIds = new();
@@ -369,6 +378,7 @@
             if (!int.TryParse(user.FindFirst(ClaimTypes.NameIdentifier)?.Value, out _currentUserId))
                 return;
             _ = int.TryParse(user.FindFirst("companyId")?.Value, out _companyId);
+            _viewerIsClient = user.IsInRole("Клиент");
 
             _employees.AddRange(await EmployeesApi.GetByCompanyAsync(_companyId));
             _onlineUserIds = await PresenceApi.GetOnlineUserIdsAsync(_companyId);
@@ -384,59 +394,11 @@
             await ReloadRoomsAsync();
             await LoadTemplatesAsync();
 
-            var connection = await ChatHubClient.GetConnectionAsync();
-            connection.On<IncomingMessage>("ReceiveMessage", msg =>
-            {
-                return InvokeAsync(async () =>
-                {
-                    if (msg.chatRoomId != _activeRoomId)
-                    {
-                        await ReloadRoomsAsync();
-                        await ChatUnreadState.RefreshAsync();
-                        if (msg.senderId != _currentUserId && IsDirectRoom(msg.chatRoomId))
-                        {
-                            var senderName = string.IsNullOrWhiteSpace(msg.senderName) ? "Сотрудник" : msg.senderName!;
-                            Notify.ShowInfo($"Новое личное сообщение от {senderName}.", pushWhenHidden: true);
-                        }
-                        return;
-                    }
-
-                    if (_messages.Any(x => x.Id == msg.id)) return;
-                    _messages.Add(ChatMessageVm.FromIncoming(msg, _currentUserId));
-                    await MarkActiveRoomAsReadAsync();
-                    StateHasChanged();
-                    await ScrollMessagesToBottomAsync();
-                });
-            });
-            connection.On<MessageEditedSignal>("MessageEdited", msg =>
-            {
-                var existing = _messages.FirstOrDefault(x => x.Id == msg.messageId);
-                if (existing is null) return;
-                existing.Text = msg.newText ?? existing.Text;
-                existing.EditedAt = msg.editedAt;
-                InvokeAsync(StateHasChanged);
-            });
-            connection.On<MessageDeletedSignal>("MessageDeleted", msg =>
-            {
-                _messages.RemoveAll(x => x.Id == msg.messageId);
-                InvokeAsync(StateHasChanged);
-            });
-            connection.On<UserPresenceChangedDto>("UserPresenceChanged", payload =>
-            {
-                return InvokeAsync(() =>
-                {
-                    if (payload.Online)
-                        _onlineUserIds.Add(payload.UserId);
-                    else
-                        _onlineUserIds.Remove(payload.UserId);
-                    StateHasChanged();
-                });
-            });
-
+            SubscribeHubEvents();
             await ChatHubClient.StartAsync();
             if (_activeRoomId > 0)
             {
-                await connection.SendAsync("JoinRoom", _activeRoomId);
+                await ChatHubClient.JoinRoomAsync(_activeRoomId);
                 await LoadHistoryAsync(_activeRoomId);
                 await MarkActiveRoomAsReadAsync();
             }
@@ -456,9 +418,11 @@
             }
             else if (TargetUserId.HasValue && TargetUserId.Value > 0)
             {
+                _lastHandledDirectOpenSignature = $"{TargetUserId.Value}|{AutoIntroOrderName ?? ""}";
                 _pendingDirectPeerUserId = TargetUserId.Value;
                 await TryOpenDirectChatWithUserAsync(TargetUserId.Value, showError: false);
                 _lastHandledTargetUserId = TargetUserId.Value;
+                await TrySendOrderIntroFromQueryAsync();
             }
 
             _initialized = true;
@@ -501,12 +465,16 @@
 
         if (!TargetUserId.HasValue || TargetUserId.Value <= 0)
             return;
-        if (_lastHandledTargetUserId == TargetUserId.Value)
+
+        var sig = $"{TargetUserId.Value}|{AutoIntroOrderName ?? ""}";
+        if (string.Equals(_lastHandledDirectOpenSignature, sig, StringComparison.Ordinal))
             return;
 
+        _lastHandledDirectOpenSignature = sig;
         _pendingDirectPeerUserId = TargetUserId.Value;
         await TryOpenDirectChatWithUserAsync(TargetUserId.Value, showError: false);
         _lastHandledTargetUserId = TargetUserId.Value;
+        await TrySendOrderIntroFromQueryAsync();
     }
 
     private async Task ReloadRoomsAsync()
@@ -518,6 +486,12 @@
         foreach (var room in rooms)
         {
             _roomKinds[room.ChatRoomId] = room.RoomKind ?? "company";
+            if (string.Equals(room.RoomKind, "direct", StringComparison.OrdinalIgnoreCase)
+                && room.PeerUserId is > 0
+                && IsUsableDirectRoomTitle(room.Name))
+            {
+                _employeeNames[room.PeerUserId.Value] = FormatDirectTitleForViewer(room.Name.Trim());
+            }
         }
         if (_activeRoomId == 0 && _rooms.Count > 0)
             _activeRoomId = _rooms[0].ChatRoomId;
@@ -545,15 +519,13 @@
             return;
         }
 
-        var conn = ChatHubClient.Connection;
-        if (conn != null && _activeRoomId > 0)
-            await conn.SendAsync("LeaveRoom", _activeRoomId);
+        if (_activeRoomId > 0)
+            await ChatHubClient.LeaveRoomAsync(_activeRoomId);
         _activeRoomId = roomId;
         _activeRoomKind = _roomKinds.GetValueOrDefault(roomId, "company");
         _showPeerProfile = false;
         _messages.Clear();
-        if (conn != null)
-            await conn.SendAsync("JoinRoom", _activeRoomId);
+        await ChatHubClient.JoinRoomAsync(_activeRoomId);
         await LoadHistoryAsync(_activeRoomId);
         await MarkActiveRoomAsReadAsync();
         await ReloadRoomsAsync();
@@ -583,6 +555,37 @@
 
     private async Task OpenDirectChatWithUserAsync(int userId)
         => await TryOpenDirectChatWithUserAsync(userId, showError: true);
+
+    private async Task TrySendOrderIntroFromQueryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(AutoIntroOrderName))
+            return;
+        if (!IsDirectActiveRoom || _activeRoomId <= 0)
+            return;
+        if (_messages.Count > 0)
+            return;
+
+        var title = AutoIntroOrderName.Trim();
+        if (title.Length > 500)
+            title = title[..500];
+        var safe = title.Replace("\"", "'");
+        var body = $"Здравствуйте! Пишу вам касаемо заказа \"{safe}\"";
+
+        var (introOk, introMsg) = await ChatApi.SendMessageAsync(_activeRoomId, body, null);
+        if (!introOk)
+        {
+            Notify.ShowWarning("Не удалось отправить первое сообщение — напишите менеджеру вручную.");
+            return;
+        }
+
+        if (introMsg != null)
+            AppendMessageIfNew(ChatMessageVm.FromDto(introMsg, _currentUserId));
+
+        await ReloadRoomsAsync();
+        await MarkActiveRoomAsReadAsync();
+        await ChatUnreadState.RefreshAsync();
+        await ScrollMessagesToBottomAsync();
+    }
 
     private async Task<bool> TryOpenDirectChatWithUserAsync(int userId, bool showError)
     {
@@ -663,7 +666,7 @@
         if (string.IsNullOrEmpty(text) && string.IsNullOrWhiteSpace(_attachmentUrl))
             return;
 
-        var ok = await ChatApi.SendMessageAsync(_activeRoomId, text, _attachmentUrl);
+        var (ok, sent) = await ChatApi.SendMessageAsync(_activeRoomId, text, _attachmentUrl);
         // #region agent log
         AppendDebugLog("run1", "H4", "CompanyChatPanel.razor:SendMessageAsync:sendResult", "SendMessageAsync result", new
         {
@@ -681,8 +684,12 @@
         _newMessage = string.Empty;
         _attachmentUrl = null;
         _attachmentName = null;
+        if (sent != null)
+            AppendMessageIfNew(ChatMessageVm.FromDto(sent, _currentUserId));
+        else
+            await LoadHistoryAsync(_activeRoomId);
+
         await ReloadRoomsAsync();
-        await LoadHistoryAsync(_activeRoomId);
         await MarkActiveRoomAsReadAsync();
         await ChatUnreadState.RefreshAsync();
         await ScrollMessagesToBottomAsync();
@@ -865,12 +872,45 @@
     private bool IsDirectRoom(int roomId)
         => string.Equals(_roomKinds.GetValueOrDefault(roomId, "company"), "direct", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsUsableDirectRoomTitle(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return false;
+        var t = title.Trim();
+        if (t.StartsWith("Чат #", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (t.StartsWith("ЛС", StringComparison.OrdinalIgnoreCase) || t.StartsWith("DM", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return true;
+    }
+
+    private string FormatDirectTitleForViewer(string title)
+    {
+        if (_viewerIsClient)
+            return title;
+        return StripCompanyPrefix(title);
+    }
+
+    private static string StripCompanyPrefix(string title)
+    {
+        var colon = title.IndexOf(':');
+        if (colon < 0)
+            return title;
+        var person = title[(colon + 1)..].Trim();
+        return person.Length > 0 ? person : title;
+    }
+
     private string GetRoomDisplayName(ChatRoomListItemDto room)
     {
         if (string.Equals(room.RoomKind, "direct", StringComparison.OrdinalIgnoreCase) && room.PeerUserId.HasValue)
         {
+            var fromApi = room.Name?.Trim();
+            if (IsUsableDirectRoomTitle(fromApi))
+                return FormatDirectTitleForViewer(fromApi!);
+
             if (_employeeNames.TryGetValue(room.PeerUserId.Value, out var fio) && !string.IsNullOrWhiteSpace(fio))
                 return fio;
+
             return $"Пользователь #{room.PeerUserId.Value}";
         }
 
@@ -955,17 +995,94 @@
         }
     }
 
+    private bool _hubEventsSubscribed;
+
+    private void SubscribeHubEvents()
+    {
+        if (_hubEventsSubscribed)
+            return;
+        _hubEventsSubscribed = true;
+        ChatHubClient.MessageReceived += OnChatMessageReceivedAsync;
+        ChatHubClient.MessageEdited += OnChatMessageEditedAsync;
+        ChatHubClient.MessageDeleted += OnChatMessageDeletedAsync;
+        ChatHubClient.UserPresenceChanged += OnUserPresenceChangedAsync;
+    }
+
+    private void UnsubscribeHubEvents()
+    {
+        if (!_hubEventsSubscribed)
+            return;
+        _hubEventsSubscribed = false;
+        ChatHubClient.MessageReceived -= OnChatMessageReceivedAsync;
+        ChatHubClient.MessageEdited -= OnChatMessageEditedAsync;
+        ChatHubClient.MessageDeleted -= OnChatMessageDeletedAsync;
+        ChatHubClient.UserPresenceChanged -= OnUserPresenceChangedAsync;
+    }
+
+    private Task OnChatMessageReceivedAsync(ChatIncomingMessage msg)
+        => InvokeAsync(async () =>
+        {
+            if (msg.ChatRoomId != _activeRoomId)
+            {
+                await ReloadRoomsAsync();
+                await ChatUnreadState.RefreshAsync();
+                if (msg.SenderId != _currentUserId && IsDirectRoom(msg.ChatRoomId))
+                {
+                    var senderName = string.IsNullOrWhiteSpace(msg.SenderName) ? "Сотрудник" : msg.SenderName!;
+                    Notify.ShowInfo($"Новое личное сообщение от {senderName}.", pushWhenHidden: true);
+                }
+                return;
+            }
+
+            AppendMessageIfNew(ChatMessageVm.FromIncoming(msg, _currentUserId));
+            await MarkActiveRoomAsReadAsync();
+            StateHasChanged();
+            await ScrollMessagesToBottomAsync();
+        });
+
+    private Task OnChatMessageEditedAsync(ChatHubClientService.MessageEditedSignal msg)
+        => InvokeAsync(() =>
+        {
+            var existing = _messages.FirstOrDefault(x => x.Id == msg.messageId);
+            if (existing is null)
+                return Task.CompletedTask;
+            existing.Text = msg.newText ?? existing.Text;
+            existing.EditedAt = msg.editedAt;
+            StateHasChanged();
+            return Task.CompletedTask;
+        });
+
+    private Task OnChatMessageDeletedAsync(int messageId)
+        => InvokeAsync(() =>
+        {
+            _messages.RemoveAll(x => x.Id == messageId);
+            StateHasChanged();
+            return Task.CompletedTask;
+        });
+
+    private Task OnUserPresenceChangedAsync(UserPresenceChangedDto payload)
+        => InvokeAsync(() =>
+        {
+            if (payload.Online)
+                _onlineUserIds.Add(payload.UserId);
+            else
+                _onlineUserIds.Remove(payload.UserId);
+            StateHasChanged();
+            return Task.CompletedTask;
+        });
+
+    private void AppendMessageIfNew(ChatMessageVm vm)
+    {
+        if (_messages.Any(x => x.Id == vm.Id))
+            return;
+        _messages.Add(vm);
+    }
+
     public async ValueTask DisposeAsync()
     {
-        var connection = ChatHubClient.Connection;
-        if (connection != null && _activeRoomId > 0)
-        {
-            try
-            {
-                await connection.SendAsync("LeaveRoom", _activeRoomId);
-            }
-            catch { }
-        }
+        UnsubscribeHubEvents();
+        if (_activeRoomId > 0)
+            await ChatHubClient.LeaveRoomAsync(_activeRoomId);
     }
 
     private sealed class ChatMessageVm
@@ -995,41 +1112,18 @@
             IsMine = dto.Sender_id == currentUserId
         };
 
-        public static ChatMessageVm FromIncoming(IncomingMessage msg, int currentUserId) => new()
+        public static ChatMessageVm FromIncoming(ChatIncomingMessage msg, int currentUserId) => new()
         {
-            Id = msg.id,
-            SenderId = msg.senderId,
-            SenderName = msg.senderName,
-            Text = msg.messageText,
-            AttachmentUrl = msg.attachmentUrl,
-            AttachmentFileName = ExtractFileName(msg.attachmentUrl),
-            IsImageAttachment = IsImageFile(ExtractFileName(msg.attachmentUrl)),
-            SentAt = msg.sentAt,
-            IsMine = msg.senderId == currentUserId
+            Id = msg.Id,
+            SenderId = msg.SenderId,
+            SenderName = msg.SenderName,
+            Text = msg.MessageText,
+            AttachmentUrl = msg.AttachmentUrl,
+            AttachmentFileName = ExtractFileName(msg.AttachmentUrl),
+            IsImageAttachment = IsImageFile(ExtractFileName(msg.AttachmentUrl)),
+            SentAt = msg.SentAt,
+            IsMine = msg.SenderId == currentUserId
         };
-    }
-
-    private sealed class IncomingMessage
-    {
-        public int id { get; set; }
-        public int chatRoomId { get; set; }
-        public int senderId { get; set; }
-        public string? senderName { get; set; }
-        public string messageText { get; set; } = "";
-        public string? attachmentUrl { get; set; }
-        public DateTime sentAt { get; set; }
-    }
-
-    private sealed class MessageEditedSignal
-    {
-        public int messageId { get; set; }
-        public string? newText { get; set; }
-        public DateTime? editedAt { get; set; }
-    }
-
-    private sealed class MessageDeletedSignal
-    {
-        public int messageId { get; set; }
     }
 
     // #region agent log

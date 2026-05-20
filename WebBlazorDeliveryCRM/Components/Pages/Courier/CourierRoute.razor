@@ -1,0 +1,847 @@
+@page "/courier/route"
+@layout CourierLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Курьер")]
+@using System.Globalization
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.JSInterop
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Utilities
+@inject AuthenticationStateProvider AuthState
+@inject CouriersApiService CouriersApi
+@inject CourierProximityState Proximity
+@inject ShiftPlannerApiService PlannerApi
+@inject OrdersApiService OrdersApi
+@inject AppNotificationService Notify
+@inject IJSRuntime JS
+@inject IConfiguration Configuration
+@implements IAsyncDisposable
+
+<PageTitle>Мой маршрут — Курьер</PageTitle>
+
+<div class="dms-page-header">
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="route-02" CssClass="dms-page-title-icon" />
+        Мой маршрут
+    </h1>
+    <p class="subtitle">
+        Точки смены в порядке посещения. Можно изменить порядок оставшихся точек — маршрут пересчитается.
+        Отмечайте выполнение — статус заказа обновится автоматически.
+    </p>
+</div>
+
+@if (_loading)
+{
+    <p class="text-muted">Загрузка…</p>
+}
+else if (_profileId is null)
+{
+    <div class="alert alert-warning">Профиль курьера не найден. Обратитесь к администратору компании.</div>
+}
+else
+{
+    <div class="dms-card mb-3">
+        <h2 class="dms-card-title dms-card-title-with-icon mb-2">
+            <HugeIcon Name="maps-location-01" CssClass="dms-card-title-icon" />
+            Карта маршрута
+        </h2>
+        <p class="small text-muted mb-2">
+            Порядок точек — как в плане. <strong>Синяя точка</strong> — вы: перетащите её или <strong>кликните по карте</strong>, чтобы задать позицию (как на «Позиция на карте»).
+            @if (!_shiftActive)
+            {
+                <span class="text-warning"> Для сохранения на сервер начните смену.</span>
+            }
+        </p>
+        @if (!string.IsNullOrEmpty(_positionStatus))
+        {
+            <p class="small mb-2 @(_positionError ? "text-warning" : "text-success")">@_positionStatus</p>
+        }
+        <div class="courier-route-map-wrap">
+            <div id="courier-route-map" class="courier-route-map-canvas"></div>
+            @if (_mapHint is not null)
+            {
+                <div class="courier-route-map-menu" role="complementary" aria-label="Следующая точка маршрута">
+                    <div class="courier-route-map-menu__title">Следующий заказ</div>
+                    <div class="courier-route-map-menu__order">№@_mapHint.OrderNumber</div>
+                    <div class="courier-route-map-menu__row">
+                        <span class="courier-route-map-menu__label">Забор</span>
+                        <span class="courier-route-map-menu__value">@_mapHint.PickupAddress</span>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_mapHint.NextStopTitle))
+                    {
+                        <div class="courier-route-map-menu__row courier-route-map-menu__row--muted">
+                            <span class="courier-route-map-menu__label">Точка @_mapHint.Sequence</span>
+                            <span class="courier-route-map-menu__value">@_mapHint.NextStopTitle</span>
+                        </div>
+                    }
+                    @if (_mapHint.OrdersInRoute.Count > 1)
+                    {
+                        <div class="courier-route-map-menu__orders">
+                            <span class="courier-route-map-menu__label">Порядок заказов</span>
+                            <span class="courier-route-map-menu__order-chips">
+                                @foreach (var n in _mapHint.OrdersInRoute)
+                                {
+                                    <span class="courier-route-map-menu__chip @(n == _mapHint.OrderNumber ? "courier-route-map-menu__chip--active" : "")">№@n</span>
+                                }
+                            </span>
+                        </div>
+                    }
+                    @if (GetNextStop() is { } hintStop && hintStop.Latitude is { } && hintStop.Longitude is { })
+                    {
+                        <button type="button" class="btn btn-primary btn-sm w-100 mt-2"
+                                disabled="@_navLoading"
+                                @onclick="ShowNavigationOnMapAsync">
+                            @(_navLoading ? "…" : "Навигатор")
+                        </button>
+                    }
+                </div>
+            }
+            else if (_plan is not null && _plan.Stops.Count > 0)
+            {
+                <div class="courier-route-map-menu courier-route-map-menu--muted" role="status">
+                    <span class="small">Все точки маршрута выполнены.</span>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="dms-card mb-3 courier-navigator">
+        <div class="d-flex flex-wrap gap-2 justify-content-between align-items-start mb-2">
+            <h2 class="dms-card-title dms-card-title-with-icon mb-0">
+                <HugeIcon Name="navigation-03" CssClass="dms-card-title-icon" />
+                Навигатор
+            </h2>
+            <button type="button" class="btn btn-outline-secondary btn-sm"
+                    disabled="@(_navLoading || GetNextStop() is null)"
+                    @onclick="RefreshNavigationAsync">
+                @(_navLoading ? "…" : "Обновить маршрут")
+            </button>
+        </div>
+
+        @{
+            var navStop = GetNextStop();
+        }
+        @if (navStop is null)
+        {
+            <p class="text-muted small mb-0">Нет следующей точки — все остановки выполнены или маршрут пуст.</p>
+        }
+        else if (navStop.Latitude is not { } nLat || navStop.Longitude is not { } nLon || (nLat == 0 && nLon == 0))
+        {
+            <p class="text-warning small mb-0">У следующей точки нет координат — откройте внешнюю карту по адресу в списке ниже.</p>
+            <p class="small mb-0 mt-2"><strong>@NavStopLabel(navStop)</strong><br /><span class="text-muted">@(navStop.AddressLine ?? "—")</span></p>
+        }
+        else
+        {
+            <div class="courier-navigator__target mb-2">
+                <div class="courier-navigator__target-label">Следующая точка · заказ №@navStop.OrderNumber</div>
+                <div class="fw-semibold">@NavStopLabel(navStop)</div>
+                @if (!string.IsNullOrWhiteSpace(navStop.AddressLine))
+                {
+                    <div class="small text-muted">@navStop.AddressLine</div>
+                }
+            </div>
+
+            @if (_navLoading)
+            {
+                <p class="small text-muted mb-2">Строим маршрут по дорогам…</p>
+            }
+            else if (!string.IsNullOrEmpty(_navError))
+            {
+                <p class="small text-warning mb-2">@_navError</p>
+            }
+            else if (_navResult?.Ok == true)
+            {
+                <p class="courier-navigator__meta mb-2">
+                    <span><strong>@_navResult.DistanceKm.ToString("0.#", CultureInfo.InvariantCulture) км</strong></span>
+                    <span class="text-muted"> · ~@_navResult.DurationMinutes мин в пути</span>
+                </p>
+                @if (_navResult.Steps.Count > 0)
+                {
+                    <ol class="courier-navigator__steps mb-3">
+                        @foreach (var step in _navResult.Steps)
+                        {
+                            <li>
+                                <span>@step.Text</span>
+                                @if (step.DistanceM > 0)
+                                {
+                                    <span class="text-muted"> · @(step.DistanceM >= 1000 ? $"{step.DistanceM / 1000.0:0.#} км" : $"{step.DistanceM} м")</span>
+                                }
+                            </li>
+                        }
+                    </ol>
+                }
+            }
+
+            <div class="d-flex flex-wrap gap-2">
+                <button type="button" class="btn btn-primary btn-sm d-inline-flex align-items-center gap-1"
+                        disabled="@_navLoading"
+                        @onclick="ShowNavigationOnMapAsync">
+                    <HugeIcon Name="maps-location-01" CssClass="dms-icon-sm" />
+                    <span>На карте</span>
+                </button>
+                @if (_yandexNavUrl is not null)
+                {
+                    <a class="btn btn-outline-primary btn-sm" href="@_yandexNavUrl" target="_blank" rel="noopener">Яндекс</a>
+                }
+                @if (_googleNavUrl is not null)
+                {
+                    <a class="btn btn-outline-secondary btn-sm" href="@_googleNavUrl" target="_blank" rel="noopener">Google</a>
+                }
+                @if (_twoGisNavUrl is not null)
+                {
+                    <a class="btn btn-outline-secondary btn-sm" href="@_twoGisNavUrl" target="_blank" rel="noopener">2ГИС</a>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="dms-card mb-3">
+        <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-2">
+            <h2 class="dms-card-title dms-card-title-with-icon mb-0">
+                <HugeIcon Name="route-02" CssClass="dms-card-title-icon" />
+                Активный план
+            </h2>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1" disabled="@_reloadBusy" @onclick="ReloadAsync">
+                <HugeIcon Name="activity-01" CssClass="dms-icon-sm" />
+                <span>@(_reloadBusy ? "…" : "Обновить")</span>
+            </button>
+        </div>
+
+        @if (_plan is null)
+        {
+            <p class="text-muted mb-0">
+                Нет активных заказов на вас. Дождитесь назначения от логиста.
+            </p>
+            <p class="small text-muted mt-2 mb-0">
+                <a href="/courier/orders">Мои заказы</a>
+            </p>
+        }
+        else
+        {
+            @if (_plan.RequiresActiveShift)
+            {
+                <div class="alert alert-warning py-2 small mb-3">
+                    Начните смену на странице <a href="/courier/shift">«Смена и геолокация»</a>, чтобы отмечать точки маршрута.
+                </div>
+            }
+            else if (_plan.BuiltFromAssignedOrders)
+            {
+                <div class="alert alert-info py-2 small mb-3">
+                    Маршрут собран из назначенных заказов.
+                </div>
+            }
+            <div class="small text-muted mb-3">
+                @if (!string.IsNullOrWhiteSpace(_plan.VehicleLabel))
+                {
+                    <span>ТС: @_plan.VehicleLabel · </span>
+                }
+                <span>@_plan.Stops.Count точек · @_plan.TotalDistanceKm.ToString("0.#") км · ~@_plan.EstimatedDurationMinutes.ToString("0") мин</span>
+            </div>
+
+            <ol class="list-unstyled mb-0 courier-route-stops">
+                @foreach (var stop in _plan.Stops.OrderBy(s => s.Sequence))
+                {
+                    var done = IsStopDone(stop);
+                    var busy = _completingId == stop.AssignmentId;
+                    <li class="courier-route-stop @(done ? "courier-route-stop--done" : "") mb-3">
+                        <div class="d-flex gap-3">
+                            <div class="courier-route-stop__seq flex-shrink-0 @(done ? "bg-success" : "bg-primary")">
+                                @stop.Sequence
+                            </div>
+                            <div class="flex-grow-1 min-w-0">
+                                <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                                    <strong>Заказ №@stop.OrderNumber</strong>
+                                    @if (stop.Priority >= 3)
+                                    {
+                                        <span class="badge text-bg-danger">срочно</span>
+                                    }
+                                    <span class="badge @StopStatusBadgeClass(stop.Status)">@StopStatusLabel(stop.Status)</span>
+                                </div>
+                                <div class="mb-1">@(string.IsNullOrWhiteSpace(stop.Title) ? StopKindLabel(stop.StopKind) : stop.Title)</div>
+                                @if (!string.IsNullOrWhiteSpace(stop.AddressLine))
+                                {
+                                    <div class="small text-muted mb-1">@stop.AddressLine</div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(stop.Notes))
+                                {
+                                    <div class="small text-muted mb-1">@stop.Notes</div>
+                                }
+                                @if (stop.Latitude is { } lat && stop.Longitude is { } lon && (lat != 0 || lon != 0))
+                                {
+                                    <div class="d-flex flex-wrap gap-2 mt-1">
+                                        <button type="button" class="btn btn-link btn-sm p-0 align-baseline"
+                                                disabled="@(_navLoading)"
+                                                @onclick="() => NavigateToStopAsync(stop)">
+                                            В навигатор
+                                        </button>
+                                        @{
+                                            var ptUrl = CourierNavigationUrls.PointOnMap(lat, lon);
+                                        }
+                                        @if (ptUrl is not null)
+                                        {
+                                            <a class="small" href="@ptUrl" target="_blank" rel="noopener">На карте</a>
+                                        }
+                                    </div>
+                                }
+                                @if (!done)
+                                {
+                                    <div class="mt-2 d-flex flex-wrap gap-2 align-items-center">
+                                        @{
+                                            var ordered = _plan.Stops.OrderBy(s => s.Sequence).ToList();
+                                            var stopIdx = ordered.FindIndex(s => s.AssignmentId == stop.AssignmentId);
+                                            var canUp = stopIdx > 0 && !IsStopDone(ordered[stopIdx - 1]);
+                                            var canDown = stopIdx >= 0 && stopIdx < ordered.Count - 1 && !IsStopDone(ordered[stopIdx + 1]);
+                                        }
+                                        <div class="courier-route-stop__reorder btn-group btn-group-sm" role="group" aria-label="Порядок точки">
+                                            <button type="button" class="btn btn-outline-secondary" title="Выше"
+                                                    disabled="@(_reorderBusy || !canUp || _plan.RequiresActiveShift)"
+                                                    @onclick="() => MoveStopAsync(stop, -1)">↑</button>
+                                            <button type="button" class="btn btn-outline-secondary" title="Ниже"
+                                                    disabled="@(_reorderBusy || !canDown || _plan.RequiresActiveShift)"
+                                                    @onclick="() => MoveStopAsync(stop, 1)">↓</button>
+                                        </div>
+                                        <button type="button"
+                                                class="btn btn-sm btn-success d-inline-flex align-items-center gap-1"
+                                                disabled="@(busy || _reorderBusy || _plan.RequiresActiveShift || stop.AssignmentId <= 0)"
+                                                @onclick="() => CompleteStopAsync(stop)">
+                                            <HugeIcon Name="checkmark-circle-02" CssClass="dms-icon-sm" />
+                                            <span>@(busy ? "…" : "Точка выполнена")</span>
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </li>
+                }
+            </ol>
+        }
+    </div>
+}
+
+@code {
+    private int? _profileId;
+    private ShiftPlanSummaryDto? _plan;
+    private CourierRouteMapDto? _mapData;
+    private bool _loading = true;
+    private bool _reloadBusy;
+    private bool _reorderBusy;
+    private bool _mapReady;
+    private int? _completingId;
+    private MapRouteHint? _mapHint;
+
+    private bool _shiftActive;
+    private bool _isOnline;
+    private double _positionLat = 55.7558;
+    private double _positionLon = 37.6173;
+    private string? _positionStatus;
+    private bool _positionError;
+    private DotNetObjectReference<CourierRoute>? _dotNetRef;
+    private CancellationTokenSource? _debouncePushCts;
+
+    private bool _navLoading;
+    private CourierNavRouteResult? _navResult;
+    private string? _navError;
+    private string? _yandexNavUrl;
+    private string? _googleNavUrl;
+    private string? _twoGisNavUrl;
+    private ShiftPlanStopDto? _navTargetStop;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var state = await AuthState.GetAuthenticationStateAsync();
+            var uidStr = state.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!int.TryParse(uidStr, out var uid))
+            {
+                _loading = false;
+                StateHasChanged();
+                return;
+            }
+
+            var profile = await CouriersApi.GetByUserIdAsync(uid);
+            if (profile != null)
+            {
+                _profileId = profile.ID_CourierProfile;
+                _isOnline = profile.Is_online;
+                var lat = (double)profile.Current_lat;
+                var lon = (double)profile.Current_lon;
+                if (Math.Abs(lat) >= 0.001 || Math.Abs(lon) >= 0.001)
+                {
+                    _positionLat = lat;
+                    _positionLon = lon;
+                }
+
+                var (shiftA, _, _) = await CouriersApi.GetActiveShiftAsync(_profileId.Value);
+                _shiftActive = shiftA;
+            }
+
+            if (_profileId.HasValue)
+                await ReloadCoreAsync();
+
+            _loading = false;
+            StateHasChanged();
+            return;
+        }
+
+        if (_loading || !_profileId.HasValue || _mapReady)
+            return;
+
+        await InitMapAsync();
+        await RefreshMapAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _reloadBusy = true;
+        try
+        {
+            await ReloadCoreAsync();
+        }
+        finally
+        {
+            _reloadBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ReloadCoreAsync()
+    {
+        if (!_profileId.HasValue) return;
+        _plan = await PlannerApi.GetCourierPlanAsync(_profileId.Value);
+        _mapData = await CouriersApi.GetRouteMapAsync(_profileId.Value);
+        _mapHint = BuildMapRouteHint(_plan);
+        if (_mapReady)
+            await RefreshMapAsync();
+    }
+
+    private async Task InitMapAsync()
+    {
+        if (_mapReady) return;
+        var osrmUrl = Configuration["Osrm:RouterBaseUrl"];
+        await JS.InvokeVoidAsync("leafletMap.init", "courier-route-map", 55.7558, 37.6173, 11, null, osrmUrl, false, "ru");
+        _mapReady = true;
+    }
+
+    private async Task RefreshMapAsync()
+    {
+        if (!_mapReady) return;
+        await JS.InvokeVoidAsync("leafletMap.clearMarkers");
+        await JS.InvokeVoidAsync("leafletMap.clearRoute");
+        if (_mapData is null) return;
+
+        // Позиция курьера — только синяя точка (enableCourierPositionEdit), без дублирующей иконки машины.
+        var markers = _mapData.Markers
+            .Where(m => !string.Equals(m.Kind, "courier", StringComparison.OrdinalIgnoreCase))
+            .Select(m => new { lat = m.Lat, lon = m.Lon, title = m.Title, kind = m.Kind })
+            .ToList<object>();
+        var waypoints = _mapData.Waypoints
+            .Select(w => new { lat = w.Lat, lon = w.Lon, title = w.Title })
+            .ToList<object>();
+
+        if (markers.Count > 0)
+            await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
+        if (waypoints.Count >= 2)
+            await JS.InvokeVoidAsync("leafletMap.setRouteWaypoints", waypoints);
+
+        await EnablePositionEditOnMapAsync();
+        if (_navTargetStop is not null)
+            await DrawNavigationForStopAsync(_navTargetStop);
+    }
+
+    private ShiftPlanStopDto? GetNextStop() =>
+        _plan?.Stops.OrderBy(s => s.Sequence).FirstOrDefault(s => !IsStopDone(s));
+
+    private static string NavStopLabel(ShiftPlanStopDto stop) =>
+        string.IsNullOrWhiteSpace(stop.Title) ? StopKindLabel(stop.StopKind) : stop.Title!.Trim();
+
+    private void UpdateExternalNavUrls(ShiftPlanStopDto stop)
+    {
+        if (stop.Latitude is not { } tLat || stop.Longitude is not { } tLon)
+        {
+            _yandexNavUrl = _googleNavUrl = _twoGisNavUrl = null;
+            return;
+        }
+
+        _yandexNavUrl = CourierNavigationUrls.YandexRoute(_positionLat, _positionLon, tLat, tLon);
+        _googleNavUrl = CourierNavigationUrls.GoogleRoute(_positionLat, _positionLon, tLat, tLon);
+        _twoGisNavUrl = CourierNavigationUrls.TwoGisRoute(_positionLat, _positionLon, tLat, tLon);
+    }
+
+    private async Task RefreshNavigationAsync()
+    {
+        var stop = _navTargetStop ?? GetNextStop();
+        if (stop is null)
+        {
+            _navResult = null;
+            _navError = null;
+            _navTargetStop = null;
+            _yandexNavUrl = _googleNavUrl = _twoGisNavUrl = null;
+            if (_mapReady)
+            {
+                try { await JS.InvokeVoidAsync("leafletMap.clearNavigationRoute"); }
+                catch { /* ignore */ }
+            }
+            return;
+        }
+
+        _navTargetStop = stop;
+        UpdateExternalNavUrls(stop);
+        await DrawNavigationForStopAsync(stop);
+    }
+
+    private async Task NavigateToStopAsync(ShiftPlanStopDto stop)
+    {
+        _navTargetStop = stop;
+        UpdateExternalNavUrls(stop);
+        await DrawNavigationForStopAsync(stop);
+        StateHasChanged();
+    }
+
+    private async Task ShowNavigationOnMapAsync()
+    {
+        var stop = _navTargetStop ?? GetNextStop();
+        if (stop is null) return;
+        await DrawNavigationForStopAsync(stop);
+    }
+
+    private async Task DrawNavigationForStopAsync(ShiftPlanStopDto stop)
+    {
+        if (!_mapReady || stop.Latitude is not { } tLat || stop.Longitude is not { } tLon)
+            return;
+
+        _navLoading = true;
+        _navError = null;
+        StateHasChanged();
+        try
+        {
+            var result = await JS.InvokeAsync<CourierNavRouteResult?>(
+                "leafletMap.fetchNavigationToStop",
+                _positionLat,
+                _positionLon,
+                tLat,
+                tLon);
+            _navResult = result;
+            if (result is null || !result.Ok)
+                _navError = result?.Message ?? "Не удалось построить маршрут.";
+        }
+        catch
+        {
+            _navError = "Ошибка при запросе маршрута.";
+            _navResult = null;
+        }
+        finally
+        {
+            _navLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task EnablePositionEditOnMapAsync()
+    {
+        if (!_mapReady || !_profileId.HasValue) return;
+        try
+        {
+            _dotNetRef ??= DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync(
+                "leafletMap.enableCourierPositionEdit",
+                _dotNetRef,
+                _profileId.Value,
+                _positionLat,
+                _positionLon);
+        }
+        catch
+        {
+            // пререндер / circuit
+        }
+    }
+
+    [JSInvokable]
+    public Task OnCourierPositionMoved(double lat, double lng)
+    {
+        _positionLat = (double)ClampLat((decimal)lat);
+        _positionLon = (double)ClampLon((decimal)lng);
+        _ = DebouncedPushPositionAsync();
+        _ = RefreshNavigationAsync();
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task DebouncedPushPositionAsync()
+    {
+        _debouncePushCts?.Cancel();
+        _debouncePushCts?.Dispose();
+        _debouncePushCts = new CancellationTokenSource();
+        var ct = _debouncePushCts.Token;
+        try
+        {
+            await Task.Delay(380, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        await PushPositionNowAsync();
+    }
+
+    private async Task PushPositionNowAsync()
+    {
+        if (!_profileId.HasValue) return;
+        if (!_shiftActive)
+        {
+            _positionError = true;
+            _positionStatus = "Позиция на карте обновлена локально. Чтобы отправить на сервер, начните смену.";
+            return;
+        }
+
+        _positionError = false;
+        try
+        {
+            var (ok, err, nearby) = await CouriersApi.UpdateLocationAsync(
+                _profileId.Value,
+                (decimal)_positionLat,
+                (decimal)_positionLon);
+            if (ok)
+            {
+                if (_isOnline)
+                    Proximity.SetNearby(nearby);
+                _positionStatus = _isOnline
+                    ? "Позиция отправлена."
+                    : "Сохранено. Включите «В сеть» на странице смены для мониторинга.";
+            }
+            else
+            {
+                _positionError = true;
+                _positionStatus = string.IsNullOrWhiteSpace(err) ? "Не удалось сохранить координаты." : err;
+            }
+        }
+        catch
+        {
+            _positionError = true;
+            _positionStatus = "Ошибка сети при сохранении позиции.";
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static decimal ClampLat(decimal v) => v < -90 ? -90 : v > 90 ? 90 : v;
+
+    private static decimal ClampLon(decimal v) => v < -180 ? -180 : v > 180 ? 180 : v;
+
+    public async ValueTask DisposeAsync()
+    {
+        _debouncePushCts?.Cancel();
+        _debouncePushCts?.Dispose();
+        if (_dotNetRef != null)
+        {
+            try { _dotNetRef.Dispose(); }
+            catch { /* ignore */ }
+            _dotNetRef = null;
+        }
+
+        if (!_mapReady) return;
+        try
+        {
+            await JS.InvokeVoidAsync("leafletMap.clearNavigationRoute");
+            await JS.InvokeVoidAsync("leafletMap.disableCourierPositionEdit");
+            await JS.InvokeVoidAsync("leafletMap.dispose");
+        }
+        catch
+        {
+            // ignore disconnect during navigation
+        }
+        _mapReady = false;
+    }
+
+    private async Task MoveStopAsync(ShiftPlanStopDto stop, int delta)
+    {
+        if (!_profileId.HasValue || _plan is null || _plan.RequiresActiveShift || delta == 0)
+            return;
+
+        var ordered = _plan.Stops.OrderBy(s => s.Sequence).ToList();
+        var idx = ordered.FindIndex(s => s.AssignmentId == stop.AssignmentId);
+        var newIdx = idx + delta;
+        if (idx < 0 || newIdx < 0 || newIdx >= ordered.Count)
+            return;
+        if (IsStopDone(ordered[idx]) || IsStopDone(ordered[newIdx]))
+            return;
+
+        (ordered[idx], ordered[newIdx]) = (ordered[newIdx], ordered[idx]);
+        var stops = BuildApplyRouteStops(ordered);
+        if (stops is not { Count: > 0 })
+        {
+            Notify.ShowError("Не удалось перестроить маршрут: у точек нет координат.");
+            return;
+        }
+
+        _reorderBusy = true;
+        try
+        {
+            var updated = await PlannerApi.ApplyCourierRouteAsync(_profileId.Value, stops);
+            if (updated is null)
+            {
+                Notify.ShowError("Не удалось обновить маршрут. Проверьте смену и координаты точек.");
+                return;
+            }
+
+            Notify.ShowSuccess("Маршрут перестроен.");
+            _plan = updated;
+            _mapData = await CouriersApi.GetRouteMapAsync(_profileId.Value);
+            _mapHint = BuildMapRouteHint(_plan);
+            if (_mapReady)
+                await RefreshMapAsync();
+        }
+        finally
+        {
+            _reorderBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private static List<ApplyCourierRouteStopDto>? BuildApplyRouteStops(IEnumerable<ShiftPlanStopDto> ordered)
+    {
+        var list = new List<ApplyCourierRouteStopDto>();
+        var seq = 1;
+        foreach (var s in ordered)
+        {
+            if (s.Latitude is not { } lat || s.Longitude is not { } lon)
+                continue;
+            if (lat == 0 && lon == 0)
+                continue;
+
+            list.Add(new ApplyCourierRouteStopDto
+            {
+                Sequence = seq++,
+                OrderId = s.OrderId > 0 ? s.OrderId : null,
+                OrderRouteStopId = s.OrderRouteStopId,
+                Title = string.IsNullOrWhiteSpace(s.Title) ? StopKindLabel(s.StopKind) : s.Title.Trim(),
+                Latitude = lat,
+                Longitude = lon
+            });
+        }
+
+        return list.Count > 0 ? list : null;
+    }
+
+    private async Task CompleteStopAsync(ShiftPlanStopDto stop)
+    {
+        if (!_profileId.HasValue || stop.AssignmentId <= 0 || _plan?.RequiresActiveShift == true) return;
+        _completingId = stop.AssignmentId;
+        try
+        {
+            var result = await OrdersApi.CompleteRouteStopAsync(stop.AssignmentId, _profileId);
+            if (result == null)
+            {
+                Notify.ShowError("Не удалось завершить точку. Проверьте смену и порядок выполнения.");
+                return;
+            }
+
+            var msg = result.OrderDelivered
+                ? $"Заказ №{result.OrderNumber} доставлен."
+                : result.HubHandoffTriggered
+                    ? $"Точка выполнена. Заказ №{result.OrderNumber} передан на следующий этап."
+                    : $"Точка выполнена. Статус: {result.NewStatusName ?? "обновлён"}.";
+            Notify.ShowSuccess(msg);
+            await ReloadCoreAsync();
+        }
+        finally
+        {
+            _completingId = null;
+            StateHasChanged();
+        }
+    }
+
+    private static bool IsStopDone(ShiftPlanStopDto stop)
+    {
+        var s = stop.Status?.Trim() ?? "";
+        return s.Equals("Done", StringComparison.OrdinalIgnoreCase)
+               || s.Equals("Skipped", StringComparison.OrdinalIgnoreCase)
+               || s == "3" || s == "4";
+    }
+
+    private static string StopStatusLabel(string? status) => status switch
+    {
+        "Pending" or "1" => "Ожидает",
+        "InProgress" or "2" => "В работе",
+        "Done" or "3" => "Выполнено",
+        "Skipped" or "4" => "Пропущено",
+        "Reassigned" or "5" => "Переназначено",
+        _ => status ?? "—"
+    };
+
+    private static string StopStatusBadgeClass(string? status)
+    {
+        if (IsStopDone(new ShiftPlanStopDto { Status = status }))
+            return "text-bg-success";
+        var s = status?.Trim() ?? "";
+        return s.Equals("InProgress", StringComparison.OrdinalIgnoreCase) || s == "2"
+            ? "text-bg-warning"
+            : "text-bg-secondary";
+    }
+
+    private static string StopKindLabel(string? kind) => kind switch
+    {
+        "SenderPickup" => "Забор у отправителя",
+        "Hub" => "Склад / хаб",
+        "RecipientDelivery" => "Доставка получателю",
+        _ => kind ?? "Точка маршрута"
+    };
+
+    private static MapRouteHint? BuildMapRouteHint(ShiftPlanSummaryDto? plan)
+    {
+        if (plan?.Stops is not { Count: > 0 })
+            return null;
+
+        var ordered = plan.Stops.OrderBy(s => s.Sequence).ToList();
+        var next = ordered.FirstOrDefault(s => !IsStopDone(s));
+        if (next == null)
+            return null;
+
+        var pickupStop = ordered.FirstOrDefault(s =>
+            s.OrderId == next.OrderId && IsPickupStop(s));
+        if (pickupStop == null)
+            pickupStop = ordered.FirstOrDefault(IsPickupStop);
+
+        var pickupAddress = pickupStop?.AddressLine;
+        if (string.IsNullOrWhiteSpace(pickupAddress) && IsPickupStop(next))
+            pickupAddress = next.AddressLine;
+        if (string.IsNullOrWhiteSpace(pickupAddress))
+            pickupAddress = "—";
+
+        var ordersInRoute = ordered
+            .GroupBy(s => s.OrderNumber)
+            .OrderBy(g => g.Min(x => x.Sequence))
+            .Select(g => g.Key)
+            .ToList();
+
+        var nextTitle = string.IsNullOrWhiteSpace(next.Title)
+            ? StopKindLabel(next.StopKind)
+            : next.Title!.Trim();
+
+        return new MapRouteHint(
+            next.OrderNumber,
+            pickupAddress,
+            next.Sequence,
+            nextTitle,
+            ordersInRoute);
+    }
+
+    private static bool IsPickupStop(ShiftPlanStopDto stop)
+    {
+        if (string.Equals(stop.StopKind, "SenderPickup", StringComparison.OrdinalIgnoreCase))
+            return true;
+        var title = stop.Title ?? "";
+        return title.Contains("Забор", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed record MapRouteHint(
+        int OrderNumber,
+        string PickupAddress,
+        int Sequence,
+        string NextStopTitle,
+        IReadOnlyList<int> OrdersInRoute);
+}

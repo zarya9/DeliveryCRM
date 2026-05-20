@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Json;
+using System.Net.Http.Json;
 using System.Text.Json;
 using WebBlazorDeliveryCRM.Models;
 
@@ -34,6 +34,9 @@ public class CouriersApiService
     {
         return await GetSafeAsync<List<OrderDto>>($"/api/Couriers/{courierId}/orders") ?? new List<OrderDto>();
     }
+
+    public async Task<ShiftClosureSummaryDto?> GetShiftSummaryAsync(int shiftId)
+        => await GetSafeAsync<ShiftClosureSummaryDto>($"/api/Couriers/shift/{shiftId}/summary");
 
     public async Task<CourierRouteMapDto?> GetRouteMapAsync(int courierId)
     {
@@ -134,14 +137,54 @@ public class CouriersApiService
         return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body);
     }
 
-    public async Task<(bool ok, string? error)> UpdateLocationAsync(int courierProfileId, decimal lat, decimal lon)
+    public async Task<(bool ok, string? error, IReadOnlyList<NearbyDeliveryStopDto> nearby)> UpdateLocationAsync(
+        int courierProfileId,
+        decimal lat,
+        decimal lon)
     {
         var url = $"/api/Couriers/{courierProfileId}/location?lat={lat.ToString(System.Globalization.CultureInfo.InvariantCulture)}&lon={lon.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
         var resp = await _http.PostAsync(url, null);
-        if (resp.IsSuccessStatusCode)
-            return (true, null);
-        var body = await resp.Content.ReadAsStringAsync();
-        return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadAsStringAsync();
+            return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body, Array.Empty<NearbyDeliveryStopDto>());
+        }
+
+        var nearby = await ParseNearbyStopsAsync(resp);
+        return (true, null, nearby);
+    }
+
+    public async Task<IReadOnlyList<NearbyDeliveryStopDto>> GetNearbyStopsAsync(int courierProfileId, decimal lat, decimal lon)
+    {
+        var url = $"/api/Couriers/{courierProfileId}/nearby-stops?lat={lat.ToString(System.Globalization.CultureInfo.InvariantCulture)}&lon={lon.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        var resp = await _http.GetAsync(url);
+        if (!resp.IsSuccessStatusCode)
+            return Array.Empty<NearbyDeliveryStopDto>();
+        return await ParseNearbyStopsAsync(resp);
+    }
+
+    private static async Task<IReadOnlyList<NearbyDeliveryStopDto>> ParseNearbyStopsAsync(HttpResponseMessage resp)
+    {
+        await using var stream = await resp.Content.ReadAsStreamAsync();
+        using var doc = await JsonDocument.ParseAsync(stream);
+        if (!doc.RootElement.TryGetProperty("nearbyStops", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return Array.Empty<NearbyDeliveryStopDto>();
+
+        var list = new List<NearbyDeliveryStopDto>();
+        foreach (var item in arr.EnumerateArray())
+        {
+            list.Add(new NearbyDeliveryStopDto
+            {
+                AssignmentId = item.TryGetProperty("assignmentId", out var a) ? a.GetInt32() : 0,
+                OrderId = item.TryGetProperty("orderId", out var o) ? o.GetInt32() : 0,
+                OrderNumber = item.TryGetProperty("orderNumber", out var n) ? n.GetInt32() : 0,
+                Title = item.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "",
+                AddressLine = item.TryGetProperty("addressLine", out var ad) ? ad.GetString() ?? "" : "",
+                DistanceMeters = item.TryGetProperty("distanceMeters", out var d) ? d.GetDouble() : 0
+            });
+        }
+
+        return list;
     }
 
     private async Task<T?> GetSafeAsync<T>(string url)

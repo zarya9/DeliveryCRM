@@ -188,37 +188,52 @@
             }
             else
             {
-                <div class="mb-2"><strong>Название склада:</strong> @(string.IsNullOrWhiteSpace(ActiveHub.Name) ? "Склад" : ActiveHub.Name)</div>
-                <div class="mb-2"><strong>Адрес:</strong> @FormatAddress(ActiveHub)</div>
+                <div class="lead-detail-row">
+                    <HugeIcon Name="store-01" CssClass="lead-detail-icon" />
+                    <p class="mb-0"><strong>Название склада:</strong> @(string.IsNullOrWhiteSpace(ActiveHub.Name) ? "Склад" : ActiveHub.Name)</p>
+                </div>
+                <div class="lead-detail-row">
+                    <HugeIcon Name="location-01" CssClass="lead-detail-icon" />
+                    <p class="mb-0"><strong>Адрес:</strong> @FormatAddress(ActiveHub)</p>
+                </div>
 
-                <div class="mb-2">
-                    <strong>Заказы на складе:</strong>
-                    @if (ActiveHub.OrdersOnSite is { Count: > 0 })
-                    {
-                        <ul class="mt-1 mb-0 ps-3">
-                            @foreach (var o in ActiveHub.OrdersOnSite)
-                            {
-                                <li>Заказ №@o.OrderNumber — от @(o.ClientName ?? "—"), доставка: @(o.DeliveryTo ?? "—")</li>
-                            }
-                        </ul>
-                    }
-                    else
-                    {
-                        <div class="text-muted mt-1">Нет заказов на этом складе.</div>
-                    }
+                <div class="lead-detail-row">
+                    <HugeIcon Name="invoice-01" CssClass="lead-detail-icon" />
+                    <div>
+                        <p class="mb-0"><strong>Заказы на складе:</strong></p>
+                        @if (ActiveHub.OrdersOnSite is { Count: > 0 })
+                        {
+                            <ul class="mt-1 mb-0 ps-3">
+                                @foreach (var o in ActiveHub.OrdersOnSite)
+                                {
+                                    <li>Заказ №@o.OrderNumber — от @(o.ClientName ?? "—"), доставка: @(o.DeliveryTo ?? "—")</li>
+                                }
+                            </ul>
+                        }
+                        else
+                        {
+                            <p class="text-muted mb-0 mt-1">Нет заказов на этом складе.</p>
+                        }
+                    </div>
                 </div>
 
                 @if (HasHubCoordinates(ActiveHub))
                 {
-                    <HubMiniLeafletMap @key="ActiveHub.Id"
-                                       ElementId="@($"hub-leaflet-modal-{ActiveHub.Id}")"
-                                       Lat="@((double)ActiveHub.Latitude!.Value)"
-                                       Lon="@((double)ActiveHub.Longitude!.Value)"
-                                       CssClass="hub-mini-map hub-mini-map--details" />
+                    <div class="lead-detail-row mb-2">
+                        <HugeIcon Name="maps-location-01" CssClass="lead-detail-icon" />
+                        <div class="flex-grow-1 min-w-0">
+                            <p class="mb-1"><strong>На карте</strong></p>
+                            <HubMiniLeafletMap @key="ActiveHub.Id"
+                                               ElementId="@($"hub-leaflet-modal-{ActiveHub.Id}")"
+                                               Lat="@((double)ActiveHub.Latitude!.Value)"
+                                               Lon="@((double)ActiveHub.Longitude!.Value)"
+                                               CssClass="hub-mini-map hub-mini-map--details" />
+                        </div>
+                    </div>
                 }
 
                 <div class="d-flex justify-content-end gap-2 mt-3">
-                    <button type="button" class="btn btn-outline-secondary d-inline-flex align-items-center gap-1" @onclick="EnableHubEditMode">
+                    <button type="button" class="btn btn-outline-primary d-inline-flex align-items-center gap-1" @onclick="EnableHubEditMode">
                         <HugeIcon Name="edit-01" CssClass="dms-icon-sm" />
                         <span>Редактировать</span>
                     </button>

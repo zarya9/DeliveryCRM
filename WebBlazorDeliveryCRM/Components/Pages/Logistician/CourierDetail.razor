@@ -4,6 +4,7 @@
 @using WebBlazorDeliveryCRM.Services
 @using WebBlazorDeliveryCRM.Components.Shared
 @inject CouriersApiService CouriersApi
+@inject OrdersApiService OrdersApi
 @inject NavigationManager Navigation
 @inject AppNotificationService Notify
 
@@ -219,6 +220,7 @@ else
                                     <HugeIcon Name="clock-01" CssClass="courier-detail-th-icon" />
                                 </span>
                             </th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -229,6 +231,14 @@ else
                                 <td>@o.Name</td>
                                 <td>@(o.OrderStatus?.Name ?? "—")</td>
                                 <td>@o.Created_at.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                <td>
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-danger"
+                                            disabled="@(_revokingOrderId == o.ID_Order)"
+                                            @onclick="() => RevokeOrderAsync(o.ID_Order)">
+                                        @(_revokingOrderId == o.ID_Order ? "…" : "Отозвать")
+                                    </button>
+                                </td>
                             </tr>
                         }
                     </tbody>
@@ -297,6 +307,7 @@ else
     private List<OrderDto>? _orders;
     private int _selectedVehicleId;
     private bool _assigning;
+    private int? _revokingOrderId;
     private bool _loading = true;
     private bool _editingDocs;
     private bool _savingDocs;
@@ -433,5 +444,29 @@ else
         var parts = new[] { brand, model, plate }.Where(s => !string.IsNullOrWhiteSpace(s));
         var s = string.Join(" ", parts);
         return string.IsNullOrWhiteSpace(s) ? $"ТС #{v.ID_Vehicle}" : s;
+    }
+
+    private async Task RevokeOrderAsync(int orderId)
+    {
+        _revokingOrderId = orderId;
+        try
+        {
+            var (ok, error) = await OrdersApi.RevokeCourierAsync(orderId);
+            if (ok)
+            {
+                Notify.ShowSuccess("Заказ отозван у курьера.");
+                await LoadAsync();
+            }
+            else
+                Notify.ShowError(error ?? "Не удалось отозвать заказ.");
+        }
+        catch (Exception ex)
+        {
+            Notify.ShowError(ex.Message);
+        }
+        finally
+        {
+            _revokingOrderId = null;
+        }
     }
 }

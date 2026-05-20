@@ -29,6 +29,7 @@ namespace APIDeliveryCRM.ContextDb
             Map<User>(modelBuilder, "Users", schemaUsers);
             Map<Role>(modelBuilder, "Roles", schemaUsers);
             Map<Login>(modelBuilder, "Logins", schemaUsers);
+            Map<PasswordResetCode>(modelBuilder, "PasswordResetCodes", schemaUsers);
             Map<ClientProfile>(modelBuilder, "ClientProfiles", schemaUsers);
             Map<ClientStatus>(modelBuilder, "ClientStatuses", schemaUsers);
             Map<ClientSegment>(modelBuilder, "ClientSegments", schemaUsers);
@@ -211,6 +212,12 @@ namespace APIDeliveryCRM.ContextDb
                 .WithMany(u => u.Logins)
                 .HasForeignKey(l => l.ID_User)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<PasswordResetCode>()
+                .HasOne(p => p.Login)
+                .WithMany(l => l.PasswordResetCodes)
+                .HasForeignKey(p => p.LoginId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<ClientProfile>()
                 .HasOne(c => c.User)
@@ -410,6 +417,12 @@ namespace APIDeliveryCRM.ContextDb
                 .HasOne(n => n.Order)
                 .WithMany()
                 .HasForeignKey(n => n.Order_id)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Notification>()
+                .HasOne(n => n.CourierShift)
+                .WithMany()
+                .HasForeignKey(n => n.Shift_id)
                 .OnDelete(DeleteBehavior.Restrict);
 
             modelBuilder.Entity<Review>()
@@ -783,6 +796,7 @@ namespace APIDeliveryCRM.ContextDb
         public DbSet<User> Users { get; set; }
         public DbSet<Role> Roles { get; set; }
         public DbSet<Login> Logins { get; set; }
+        public DbSet<PasswordResetCode> PasswordResetCodes { get; set; }
         public DbSet<ClientProfile> ClientProfiles { get; set; }
         public DbSet<ClientStatus> ClientStatuses { get; set; }
         public DbSet<ClientSegment> ClientSegments { get; set; }

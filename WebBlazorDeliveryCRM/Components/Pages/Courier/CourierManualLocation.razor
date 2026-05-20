@@ -9,6 +9,7 @@
 @implements IAsyncDisposable
 @inject AuthenticationStateProvider AuthState
 @inject CouriersApiService CouriersApi
+@inject CourierProximityState Proximity
 @inject IJSRuntime JS
 
 <PageTitle>Позиция на карте — Курьер</PageTitle>
@@ -269,9 +270,11 @@ else
         _lastError = null;
         try
         {
-            var (ok, err) = await CouriersApi.UpdateLocationAsync(_profileId.Value, _manualLat, _manualLon);
+            var (ok, err, nearby) = await CouriersApi.UpdateLocationAsync(_profileId.Value, _manualLat, _manualLon);
             if (ok)
             {
+                if (_isOnline)
+                    Proximity.SetNearby(nearby);
                 _lastOk = _isOnline
                     ? "Точка отправлена. Логист увидит вас на мониторинге (при открытой вкладке карты)."
                     : "Точка на сервере сохранена. Чтобы статус совпадал с мониторингом, включите «В сеть» на странице смены.";

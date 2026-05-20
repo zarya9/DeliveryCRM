@@ -1293,6 +1293,9 @@ namespace APIDeliveryCRM.Migrations
                     b.Property<DateOnly>("Sent_at")
                         .HasColumnType("date");
 
+                    b.Property<int?>("Shift_id")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("text");
@@ -1308,6 +1311,8 @@ namespace APIDeliveryCRM.Migrations
                     b.HasIndex("Company_id");
 
                     b.HasIndex("Order_id");
+
+                    b.HasIndex("Shift_id");
 
                     b.HasIndex("Type_id");
 
@@ -1665,6 +1670,38 @@ namespace APIDeliveryCRM.Migrations
                     b.HasKey("ID_PackageType");
 
                     b.ToTable("PackageTypes", "заказы");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.PasswordResetCode", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("ConsumedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("LoginId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LoginId");
+
+                    b.ToTable("PasswordResetCodes", "пользователи_и_доступ");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.PaymentMethod", b =>
@@ -3058,6 +3095,11 @@ namespace APIDeliveryCRM.Migrations
                         .HasForeignKey("Order_id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("APIDeliveryCRM.Model.CourierShift", "CourierShift")
+                        .WithMany()
+                        .HasForeignKey("Shift_id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("APIDeliveryCRM.Model.NotificationType", "NotificationType")
                         .WithMany()
                         .HasForeignKey("Type_id")
@@ -3071,6 +3113,8 @@ namespace APIDeliveryCRM.Migrations
                         .IsRequired();
 
                     b.Navigation("Company");
+
+                    b.Navigation("CourierShift");
 
                     b.Navigation("NotificationType");
 
@@ -3220,6 +3264,17 @@ namespace APIDeliveryCRM.Migrations
                         .IsRequired();
 
                     b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.PasswordResetCode", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.Login", "Login")
+                        .WithMany("PasswordResetCodes")
+                        .HasForeignKey("LoginId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Login");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.PaymentTransaction", b =>
@@ -3625,6 +3680,11 @@ namespace APIDeliveryCRM.Migrations
             modelBuilder.Entity("APIDeliveryCRM.Model.LeadStage", b =>
                 {
                     b.Navigation("Leads");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.Login", b =>
+                {
+                    b.Navigation("PasswordResetCodes");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.Order", b =>

@@ -21,13 +21,22 @@ namespace APIDeliveryCRM.Controllers
         private static readonly string[] StaffRoles = { "Менеджер", "Логист", "Администратор", "Админ" };
 
         private readonly ICourierService _courierService;
+        private readonly IOrderService _orderService;
         private readonly IShiftService _shiftService;
+        private readonly IShiftPlannerService _shiftPlanner;
         private readonly ContextDB _context;
 
-        public CouriersController(ICourierService courierService, IShiftService shiftService, ContextDB context)
+        public CouriersController(
+            ICourierService courierService,
+            IOrderService orderService,
+            IShiftService shiftService,
+            IShiftPlannerService shiftPlanner,
+            ContextDB context)
         {
             _courierService = courierService;
+            _orderService = orderService;
             _shiftService = shiftService;
+            _shiftPlanner = shiftPlanner;
             _context = context;
         }
 
@@ -83,7 +92,6 @@ namespace APIDeliveryCRM.Controllers
             return new OkObjectResult(orders);
         }
 
-        [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
         [HttpGet("{id:int}/route-map")]
         public async Task<IActionResult> GetRouteMap(int id)
         {
@@ -126,46 +134,65 @@ namespace APIDeliveryCRM.Controllers
                 });
             }
 
+            var plannedWaypoints = await _shiftPlanner.GetCourierRouteWaypointsAsync(id);
             var waypoints = new List<object>();
-            foreach (var order in orders.OrderBy(o => o.Created_at))
+            if (plannedWaypoints.Count > 0)
             {
-                if (order.RouteStops?.Count > 0)
+                foreach (var w in plannedWaypoints)
                 {
-                    foreach (var stop in order.RouteStops.OrderBy(s => s.SortOrder))
+                    waypoints.Add(new
                     {
-                        decimal? lat = stop.Address?.Latitude ?? stop.LogisticsHub?.Address?.Latitude;
-                        decimal? lon = stop.Address?.Longitude ?? stop.LogisticsHub?.Address?.Longitude;
-                        if (!lat.HasValue || !lon.HasValue) continue;
+                        orderId = w.OrderId ?? 0,
+                        assignmentId = w.AssignmentId,
+                        sequence = w.Sequence,
+                        title = w.Title,
+                        lat = w.Lat,
+                        lon = w.Lon
+                    });
+                }
+            }
+            else
+            {
+                foreach (var order in orders.OrderBy(o => o.Created_at))
+                {
+                    if (order.RouteStops?.Count > 0)
+                    {
+                        foreach (var stop in order.RouteStops.OrderBy(s => s.SortOrder))
+                        {
+                            decimal? lat = stop.Address?.Latitude ?? stop.LogisticsHub?.Address?.Latitude;
+                            decimal? lon = stop.Address?.Longitude ?? stop.LogisticsHub?.Address?.Longitude;
+                            if (!lat.HasValue || !lon.HasValue) continue;
+                            waypoints.Add(new
+                            {
+                                orderId = order.ID_Order,
+                                title = $"Заказ #{order.Order_Number}: {(string.IsNullOrWhiteSpace(stop.Title) ? stop.Kind.ToString() : stop.Title)}",
+                                lat = (double)lat.Value,
+                                lon = (double)lon.Value
+                            });
+                        }
+                        continue;
+                    }
+
+                    if (order.PickupAddress?.Latitude is { } pLat && order.PickupAddress.Longitude is { } pLon)
+                    {
                         waypoints.Add(new
                         {
                             orderId = order.ID_Order,
-                            title = $"Заказ #{order.Order_Number}: {(string.IsNullOrWhiteSpace(stop.Title) ? stop.Kind.ToString() : stop.Title)}",
-                            lat = (double)lat.Value,
-                            lon = (double)lon.Value
+                            title = $"Заказ #{order.Order_Number}: забор",
+                            lat = (double)pLat,
+                            lon = (double)pLon
                         });
                     }
-                    continue;
-                }
-
-                if (order.PickupAddress?.Latitude is { } pLat && order.PickupAddress.Longitude is { } pLon)
-                {
-                    waypoints.Add(new
+                    if (order.DeliveryAddress?.Latitude is { } dLat && order.DeliveryAddress.Longitude is { } dLon)
                     {
-                        orderId = order.ID_Order,
-                        title = $"Заказ #{order.Order_Number}: забор",
-                        lat = (double)pLat,
-                        lon = (double)pLon
-                    });
-                }
-                if (order.DeliveryAddress?.Latitude is { } dLat && order.DeliveryAddress.Longitude is { } dLon)
-                {
-                    waypoints.Add(new
-                    {
-                        orderId = order.ID_Order,
-                        title = $"Заказ #{order.Order_Number}: доставка",
-                        lat = (double)dLat,
-                        lon = (double)dLon
-                    });
+                        waypoints.Add(new
+                        {
+                            orderId = order.ID_Order,
+                            title = $"Заказ #{order.Order_Number}: доставка",
+                            lat = (double)dLat,
+                            lon = (double)dLon
+                        });
+                    }
                 }
             }
 
@@ -246,13 +273,24 @@ namespace APIDeliveryCRM.Controllers
 
             try
             {
-                await _courierService.UpdateLocationAsync(id, lat, lon);
-                return new OkResult();
+                var nearby = await _courierService.UpdateLocationAsync(id, lat, lon);
+                return Ok(new { nearbyStops = nearby });
             }
             catch (InvalidOperationException ex)
             {
                 return BadRequest(new { message = ex.Message });
             }
+        }
+
+        [HttpGet("{id:int}/nearby-stops")]
+        public async Task<IActionResult> GetNearbyStops(int id, [FromQuery] decimal lat, [FromQuery] decimal lon, [FromQuery] double maxMeters = 50)
+        {
+            var err = await AuthorizeCourierSelfOrStaffAsync(id);
+            if (err != null)
+                return err;
+
+            var nearby = await _orderService.GetNearbyDeliverableStopsAsync(id, (double)lat, (double)lon, maxMeters);
+            return Ok(new { nearbyStops = nearby });
         }
 
         [HttpPost("{id:int}/online")]
@@ -302,6 +340,31 @@ namespace APIDeliveryCRM.Controllers
             {
                 return NotFound(new { message = ex.Message });
             }
+        }
+
+        [HttpGet("shift/{shiftId:int}/summary")]
+        public async Task<IActionResult> GetShiftSummary(int shiftId)
+        {
+            var shift = await _shiftService.GetByIdAsync(shiftId);
+            if (shift == null)
+                return NotFound();
+
+            var companyId = GetCompanyIdClaim();
+            if (!companyId.HasValue || shift.Company_id != companyId.Value)
+                return Forbid();
+
+            if (!IsLogisticsStaff())
+            {
+                var uid = ParseUserId(User);
+                if (!uid.HasValue || shift.CourierProfile.User_id != uid.Value)
+                    return Forbid();
+            }
+
+            var summary = await _shiftPlanner.GetShiftClosureSummaryAsync(shiftId);
+            if (summary == null)
+                return NotFound(new { message = "Итог смены не найден." });
+
+            return Ok(summary);
         }
 
         [HttpPost("shift/{shiftId:int}/end")]

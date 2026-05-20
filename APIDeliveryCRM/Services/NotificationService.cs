@@ -21,7 +21,7 @@ namespace APIDeliveryCRM.Services
             _hubContext = hubContext;
         }
 
-        public async Task SendAsync(int userId, int typeId, string title, string message, int? orderId = null, byte priority = 0, bool isCritical = false, bool requiresAck = false)
+        public async Task SendAsync(int userId, int typeId, string title, string message, int? orderId = null, int? shiftId = null, byte priority = 0, bool isCritical = false, bool requiresAck = false)
         {
             var user = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.ID_User == userId);
             if (user == null)
@@ -35,6 +35,7 @@ namespace APIDeliveryCRM.Services
                 Title = title,
                 Message = message,
                 Order_id = orderId,
+                Shift_id = shiftId,
                 Is_read = false,
                 Priority = priority,
                 Is_critical = isCritical,
@@ -52,6 +53,7 @@ namespace APIDeliveryCRM.Services
                 message = notification.Message,
                 typeId = notification.Type_id,
                 orderId = notification.Order_id,
+                shiftId = notification.Shift_id,
                 priority = notification.Priority,
                 isCritical = notification.Is_critical,
                 requiresAck = notification.Requires_ack,

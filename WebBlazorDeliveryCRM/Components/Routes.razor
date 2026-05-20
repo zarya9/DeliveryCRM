@@ -3,6 +3,9 @@
 <Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
         <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <Authorizing>
+                <p class="text-muted small p-3">Проверка доступа…</p>
+            </Authorizing>
             <NotAuthorized>
                 @if (context.User.Identity?.IsAuthenticated != true)
                 {
@@ -12,7 +15,10 @@
                 {
                     <div class="alert alert-warning border-warning shadow-sm mb-0" style="max-width: 42rem;" role="status">
                         <strong class="d-block">Нет доступа</strong>
-                        <span class="small">У этой учётной записи нет прав на выбранный раздел. Выберите другой пункт меню или обратитесь к администратору.</span>
+                        <span class="small">У этой учётной записи нет прав на выбранный раздел.</span>
+                        <div class="mt-2">
+                            <a class="btn btn-sm btn-outline-primary" href="/access-denied">Подробнее</a>
+                        </div>
                     </div>
                 }
             </NotAuthorized>

@@ -7,6 +7,7 @@
 @using WebBlazorDeliveryCRM.Utilities
 @inject OrdersApiService OrdersApi
 @inject CouriersApiService CouriersApi
+@inject ShiftPlannerApiService PlannerApi
 @inject AppNotificationService Notify
 @inject NavigationManager Navigation
 
@@ -18,6 +19,18 @@
         Панель распределения заказов
     </h1>
     <p class="subtitle">Новые заказы и назначение курьеров</p>
+    <div class="d-flex flex-wrap gap-2 mt-2">
+        <button type="button" class="btn btn-outline-primary btn-sm d-inline-flex align-items-center gap-1"
+                disabled="@_plannerBusy" @onclick="RebuildRoutesAsync">
+            <HugeIcon Name="route-02" CssClass="dms-icon-sm" />
+            <span>@(_plannerBusy ? "…" : "Пересобрать маршруты")</span>
+        </button>
+        <button type="button" class="btn btn-outline-success btn-sm d-inline-flex align-items-center gap-1"
+                disabled="@(_autoDispatchBusy || _unassignedCount == 0)" @onclick="AutoDispatchAllAsync">
+            <HugeIcon Name="analytics-up" CssClass="dms-icon-sm" />
+            <span>@(_autoDispatchBusy ? "…" : "Авто-назначить всех")</span>
+        </button>
+    </div>
 </div>
 
 <div class="dms-stat-grid">
@@ -64,7 +77,7 @@
                         <ol class="small mb-0 ps-3 hub-card-orders">
                             @foreach (var s in o.RouteStops.OrderBy(x => x.SortOrder))
                             {
-                                <li class="text-body">@(string.IsNullOrEmpty(s.Title) ? StopKindLabel(s.Kind) : s.Title)</li>
+                                <li>@(string.IsNullOrEmpty(s.Title) ? StopKindLabel(s.Kind) : s.Title)</li>
                             }
                         </ol>
                     }
@@ -171,6 +184,56 @@
     }
 </div>
 
+@if (_selectedDistributionCourierId.HasValue)
+{
+    var assigned = GetAssignedOrdersForSelectedCourier();
+    var courierName = GetCourierDisplayName(_selectedDistributionCourierId.Value);
+    <div class="dms-card mt-3">
+        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+            <h2 class="dms-card-title logistician-card-title-with-icon mb-0">
+                <HugeIcon Name="delivery-truck-01" CssClass="logistician-card-title-icon" />
+                Заказы у курьера: @courierName
+            </h2>
+            @if (assigned.Count > 0)
+            {
+                <button type="button"
+                        class="btn btn-outline-danger btn-sm d-inline-flex align-items-center gap-1"
+                        disabled="@_revokeAllBusy"
+                        @onclick="RevokeAllFromSelectedCourierAsync">
+                    <HugeIcon Name="cancel-01" CssClass="dms-icon-sm" />
+                    <span>@(_revokeAllBusy ? "…" : $"Отозвать все ({assigned.Count})")</span>
+                </button>
+            }
+        </div>
+        @if (assigned.Count > 0)
+        {
+            <div class="hub-grid">
+                @foreach (var o in assigned)
+                {
+                    <div class="hub-card">
+                        <h3 class="hub-card-title mb-1">№@o.Order_Number · @(string.IsNullOrWhiteSpace(o.Name) ? "Без названия" : o.Name)</h3>
+                        <div class="mb-2">
+                            <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@OrderStatusUi.ToneForStatusName(o.OrderStatus?.Name)" />
+                        </div>
+                        <div class="mt-auto pt-2 border-top border-secondary border-opacity-25">
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-danger"
+                                    disabled="@(_revokingOrderId == o.ID_Order || _revokeAllBusy)"
+                                    @onclick="() => RevokeOrderAsync(o.ID_Order)">
+                                @(_revokingOrderId == o.ID_Order ? "…" : "Отозвать")
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <p class="text-muted mb-0">У этого курьера нет активных назначенных заказов.</p>
+        }
+    </div>
+}
+
 @if (_showOrderAssignModal && ModalOrder is not null)
 {
     var mo = ModalOrder;
@@ -256,6 +319,10 @@
     private Dictionary<int, int> _courierActiveOrders = new();
     private List<VehicleDto> _vehicles = new();
 
+    private bool _plannerBusy;
+    private bool _autoDispatchBusy;
+    private int? _revokingOrderId;
+    private bool _revokeAllBusy;
     private int? _selectedUnassignedOrderId;
     private int? _selectedDistributionCourierId;
     private bool _showOrderAssignModal;
@@ -463,6 +530,66 @@
         return r * cc;
     }
 
+    private async Task RebuildRoutesAsync()
+    {
+        _plannerBusy = true;
+        try
+        {
+            var result = await PlannerApi.RebuildAsync(reason: "logistician.distribution");
+            if (result == null)
+            {
+                Notify.ShowError("Не удалось пересобрать маршруты. Проверьте активные смены курьеров.");
+                return;
+            }
+
+            var unplanned = result.Unplanned?.Count ?? 0;
+            Notify.ShowSuccess(unplanned > 0
+                ? $"Маршруты обновлены. Не вошли в план: {unplanned} заказ(ов)."
+                : "Маршруты смен пересобраны.");
+            await Load();
+        }
+        finally
+        {
+            _plannerBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task AutoDispatchAllAsync()
+    {
+        if (_unassigned is not { Count: > 0 })
+            return;
+
+        _autoDispatchBusy = true;
+        var ok = 0;
+        var fail = 0;
+        try
+        {
+            foreach (var order in _unassigned.ToList())
+            {
+                var dispatch = await OrdersApi.AutoDispatchAsync(order.ID_Order);
+                if (dispatch != null)
+                    ok++;
+                else
+                    fail++;
+            }
+
+            if (ok > 0)
+                Notify.ShowSuccess($"Автоназначение: успешно {ok}, не удалось {fail}.");
+            else
+                Notify.ShowWarning("Не удалось автоматически назначить курьеров.");
+
+            await Load();
+            if (ok > 0)
+                await RebuildRoutesAsync();
+        }
+        finally
+        {
+            _autoDispatchBusy = false;
+            StateHasChanged();
+        }
+    }
+
     private async Task AssignBestCourier(int orderId)
     {
         var order = _unassigned?.FirstOrDefault(x => x.ID_Order == orderId);
@@ -504,6 +631,102 @@
         var parts = new[] { brand, model, plate }.Where(s => !string.IsNullOrWhiteSpace(s));
         var s = string.Join(" ", parts);
         return string.IsNullOrWhiteSpace(s) ? $"ТС #{v.ID_Vehicle}" : s;
+    }
+
+    private List<OrderDto> GetAssignedOrdersForSelectedCourier()
+    {
+        if (!_selectedDistributionCourierId.HasValue)
+            return new List<OrderDto>();
+        return (_orders ?? new List<OrderDto>())
+            .Where(o => o.Courier_id == _selectedDistributionCourierId.Value && CanRevokeOrder(o))
+            .OrderByDescending(o => o.Created_at)
+            .ToList();
+    }
+
+    private string GetCourierDisplayName(int courierProfileId)
+    {
+        var c = _couriers?.FirstOrDefault(x => x.ID_CourierProfile == courierProfileId);
+        return c is null ? $"#{courierProfileId}" : $"{c.User?.FName} {c.User?.Name}".Trim();
+    }
+
+    private static bool CanRevokeOrder(OrderDto o)
+    {
+        if (o.Delivered_at.HasValue)
+            return false;
+        var name = o.OrderStatus?.Name?.Trim() ?? "";
+        if (name.Contains("Отмен", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("cancel", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (name.Contains("Доставлен", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return true;
+    }
+
+    private async Task RevokeOrderAsync(int orderId)
+    {
+        _revokingOrderId = orderId;
+        try
+        {
+            var (ok, error) = await OrdersApi.RevokeCourierAsync(orderId);
+            if (ok)
+            {
+                Notify.ShowSuccess("Заказ отозван у курьера.");
+                await Load();
+            }
+            else
+                Notify.ShowError(error ?? "Не удалось отозвать заказ.");
+        }
+        catch (Exception ex)
+        {
+            Notify.ShowError(ex.Message);
+        }
+        finally
+        {
+            _revokingOrderId = null;
+        }
+    }
+
+    private async Task RevokeAllFromSelectedCourierAsync()
+    {
+        if (!_selectedDistributionCourierId.HasValue)
+            return;
+
+        var orderIds = GetAssignedOrdersForSelectedCourier().Select(o => o.ID_Order).ToList();
+        if (orderIds.Count == 0)
+        {
+            Notify.ShowWarning("Нет заказов для отзыва.");
+            return;
+        }
+
+        _revokeAllBusy = true;
+        try
+        {
+            var result = await OrdersApi.RevokeFromCourierAsync(new RevokeCourierOrdersRequestDto
+            {
+                CourierId = _selectedDistributionCourierId.Value,
+                OrderIds = orderIds
+            });
+            if (result is null)
+            {
+                Notify.ShowError("Не удалось отозвать заказы.");
+                return;
+            }
+
+            if (result.RevokedCount > 0)
+                Notify.ShowSuccess($"Отозвано заказов: {result.RevokedCount}.");
+            if (result.FailedCount > 0)
+                Notify.ShowWarning($"Не удалось: {result.FailedCount}. {string.Join(" ", result.Errors.Take(3))}");
+
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            Notify.ShowError(ex.Message);
+        }
+        finally
+        {
+            _revokeAllBusy = false;
+        }
     }
 
 }

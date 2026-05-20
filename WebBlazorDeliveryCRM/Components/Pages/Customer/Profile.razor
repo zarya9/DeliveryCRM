@@ -9,7 +9,6 @@
 @inject OrdersApiService OrdersApi
 @inject AddressSuggestApiService AddressSuggestApi
 @inject AppNotificationService Notify
-@inject IJSRuntime JS
 @inject IConfiguration Configuration
 
 <PageTitle>Профиль — Клиент</PageTitle>
@@ -179,7 +178,13 @@
             <div class="row g-3">
                 <div class="col-md-6">
                     <label class="form-label">Номер карты</label>
-                    <input class="form-control" placeholder="0000 0000 0000 0000" value="@_cardNumber" @oninput="OnCardNumberInput" />
+                    <input class="form-control"
+                           placeholder="0000 0000 0000 0000"
+                           autocomplete="cc-number"
+                           @bind="_cardNumber"
+                           @bind:event="oninput"
+                           @bind:after="AfterCardNumberBound"
+                           @onchange="OnCardNumberInput" />
                     <div class="small text-muted mt-1 d-inline-flex align-items-center flex-wrap gap-2">
                         <span>Платёжная система:</span>
                         <PaymentBrandMark System="@_cardPaymentSystem" />
@@ -187,7 +192,13 @@
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Срок</label>
-                    <input class="form-control" placeholder="MM/YY" value="@_cardExpiryMonth" @oninput="OnCardExpiryInput" />
+                    <input class="form-control"
+                           placeholder="MM/YY"
+                           autocomplete="cc-exp"
+                           @bind="_cardExpiryMonth"
+                           @bind:event="oninput"
+                           @bind:after="AfterCardExpiryBound"
+                           @onchange="OnCardExpiryInput" />
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">@_cardSecurityCodeLabel</label>
@@ -196,17 +207,24 @@
                            maxlength="4"
                            autocomplete="cc-csc"
                            class="form-control"
-                           value="@_cardCvv"
-                           @oninput="OnCardCvvInput" />
+                           @bind="_cardCvv"
+                           @bind:event="oninput"
+                           @bind:after="AfterCardCvvBound"
+                           @onchange="OnCardCvvInput" />
                 </div>
                 <div class="col-md-12">
                     <label class="form-label">Владелец</label>
-                    <input class="form-control" placeholder="IVAN IVANOV" @bind="_cardHolder" @bind:event="oninput" />
+                    <input class="form-control"
+                           placeholder="IVAN IVANOV"
+                           autocomplete="cc-name"
+                           @bind="_cardHolder"
+                           @bind:event="onchange"
+                           @oninput="OnCardHolderInput" />
                 </div>
             </div>
 
             <div class="d-flex gap-2 mt-3">
-                <button class="btn btn-primary d-inline-flex align-items-center gap-1" disabled="@_bindingCard" @onclick="BindCardAsync">
+                <button type="button" class="btn btn-primary d-inline-flex align-items-center gap-1" disabled="@_bindingCard" @onclick="BindCardAsync">
                     @if (_bindingCard)
                     {
                         <span>Сохранение...</span>
@@ -217,7 +235,7 @@
                         <span>Привязать</span>
                     }
                 </button>
-                <button class="btn btn-outline-secondary" disabled="@_bindingCard" @onclick="CloseCardModal">Отмена</button>
+                <button type="button" class="btn btn-outline-secondary" disabled="@_bindingCard" @onclick="CloseCardModal">Отмена</button>
             </div>
         </div>
     </div>
@@ -399,6 +417,11 @@
         _cardCvv = new string((e.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(4).ToArray());
     }
 
+    private void OnCardHolderInput(ChangeEventArgs e)
+    {
+        _cardHolder = e.Value?.ToString() ?? string.Empty;
+    }
+
     private void OnCardExpiryInput(ChangeEventArgs e)
     {
         var raw = new string((e.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(4).ToArray());
@@ -430,6 +453,15 @@
         }
         _cardExpiryMonth = $"{raw[..2]}/{raw[2..]}";
     }
+
+    private void AfterCardNumberBound() =>
+        OnCardNumberInput(new ChangeEventArgs { Value = _cardNumber });
+
+    private void AfterCardExpiryBound() =>
+        OnCardExpiryInput(new ChangeEventArgs { Value = _cardExpiryMonth });
+
+    private void AfterCardCvvBound() =>
+        OnCardCvvInput(new ChangeEventArgs { Value = _cardCvv });
 
     private async Task BindCardAsync()
     {

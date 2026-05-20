@@ -141,6 +141,93 @@ public class AuthApiService
             return new RegistrationResult { Success = false, ErrorMessage = ServerUnavailableUserMessage };
         }
     }
+
+    public async Task<PasswordResetRequestResult> RequestPasswordResetAsync(string email)
+    {
+        var client = _factory.CreateClient("UnauthorizedClient");
+        try
+        {
+            var response = await client.PostAsJsonAsync("/api/Users/password-reset/request", new { Email = email }, JsonOptions);
+            var body = await response.Content.ReadAsStringAsync();
+            var message = ParseMessageFromBody(body) ?? "Если указанный email зарегистрирован в системе, на него отправлено письмо с кодом восстановления.";
+            if (response.IsSuccessStatusCode)
+                return new PasswordResetRequestResult { Success = true, Message = message };
+            if ((int)response.StatusCode == 503)
+                return new PasswordResetRequestResult { Success = false, ErrorMessage = message };
+            return new PasswordResetRequestResult { Success = false, ErrorMessage = message };
+        }
+        catch (HttpRequestException)
+        {
+            return new PasswordResetRequestResult { Success = false, ErrorMessage = ServerUnavailableUserMessage };
+        }
+        catch (TaskCanceledException)
+        {
+            return new PasswordResetRequestResult { Success = false, ErrorMessage = ServerUnavailableUserMessage };
+        }
+        catch (Exception)
+        {
+            return new PasswordResetRequestResult { Success = false, ErrorMessage = ServerUnavailableUserMessage };
+        }
+    }
+
+    public async Task<PasswordResetCompleteResult> CompletePasswordResetAsync(string email, string code, string newPassword)
+    {
+        var client = _factory.CreateClient("UnauthorizedClient");
+        try
+        {
+            var response = await client.PostAsJsonAsync("/api/Users/password-reset/complete",
+                new { Email = email, Code = code, NewPassword = newPassword }, JsonOptions);
+            var body = await response.Content.ReadAsStringAsync();
+            var message = ParseMessageFromBody(body) ?? "Готово.";
+            if (response.IsSuccessStatusCode)
+                return new PasswordResetCompleteResult { Success = true, Message = message };
+            return new PasswordResetCompleteResult { Success = false, ErrorMessage = message };
+        }
+        catch (HttpRequestException)
+        {
+            return new PasswordResetCompleteResult { Success = false, ErrorMessage = ServerUnavailableUserMessage };
+        }
+        catch (TaskCanceledException)
+        {
+            return new PasswordResetCompleteResult { Success = false, ErrorMessage = ServerUnavailableUserMessage };
+        }
+        catch (Exception)
+        {
+            return new PasswordResetCompleteResult { Success = false, ErrorMessage = ServerUnavailableUserMessage };
+        }
+    }
+
+    private static string? ParseMessageFromBody(string errorBody)
+    {
+        if (string.IsNullOrWhiteSpace(errorBody))
+            return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(errorBody);
+            if (doc.RootElement.TryGetProperty("message", out var msgProp))
+                return msgProp.GetString();
+        }
+        catch
+        {
+            return null;
+        }
+
+        return null;
+    }
+}
+
+public sealed class PasswordResetRequestResult
+{
+    public bool Success { get; set; }
+    public string? Message { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
+public sealed class PasswordResetCompleteResult
+{
+    public bool Success { get; set; }
+    public string? Message { get; set; }
+    public string? ErrorMessage { get; set; }
 }
 
 public sealed class RegisterClientUiRequest

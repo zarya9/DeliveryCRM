@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
+using APIDeliveryCRM.Responses;
 
 namespace APIDeliveryCRM.Interfaces
 {
@@ -11,7 +12,7 @@ namespace APIDeliveryCRM.Interfaces
         Task<CourierProfile?> GetByUserIdAsync(int userId);
         Task<IReadOnlyList<CourierProfile>> GetAllAsync(int? companyId = null);
         Task<IReadOnlyList<Order>> GetActiveOrdersAsync(int courierProfileId);
-        Task UpdateLocationAsync(int courierProfileId, decimal lat, decimal lon);
+        Task<IReadOnlyList<NearbyDeliveryStopDto>> UpdateLocationAsync(int courierProfileId, decimal lat, decimal lon);
         Task SetOnlineStatusAsync(int courierProfileId, bool isOnline);
         Task<IReadOnlyList<Vehicle>> GetVehiclesByCompanyAsync(int companyId);
         Task AssignVehicleAsync(int courierProfileId, int vehicleId, int? actorUserId = null, string? ipAddress = null);

@@ -37,6 +37,8 @@ public class ShiftPlanSummaryDto
     public decimal LoadFactorVolume { get; set; }
     public List<ShiftPlanStopDto> Stops { get; set; } = new();
     public int OrdersCount { get; set; }
+    public bool BuiltFromAssignedOrders { get; set; }
+    public bool RequiresActiveShift { get; set; }
 }
 
 public class ShiftPlanStopDto

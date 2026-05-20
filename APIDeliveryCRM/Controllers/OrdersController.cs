@@ -1,13 +1,14 @@
 using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using APIDeliveryCRM.ContextDb;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
-using APIDeliveryCRM.ContextDb;
-using Microsoft.EntityFrameworkCore;
+using APIDeliveryCRM.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace APIDeliveryCRM.Controllers
 {
@@ -17,22 +18,21 @@ namespace APIDeliveryCRM.Controllers
     public class OrdersController : Controller
     {
         private readonly IOrderService _orderService;
+        private readonly ICompanyService _companyService;
         private readonly ContextDB _context;
 
-        public OrdersController(IOrderService orderService, ContextDB context)
+        public OrdersController(IOrderService orderService, ICompanyService companyService, ContextDB context)
         {
             _orderService = orderService;
+            _companyService = companyService;
             _context = context;
         }
 
         [HttpGet("statuses")]
         public async Task<IActionResult> GetOrderStatuses()
         {
-            var list = await _context.OrderStatuses.AsNoTracking()
-                .OrderBy(s => s.ID_OrderStatus)
-                .Select(s => new { id = s.ID_OrderStatus, name = s.Name })
-                .ToListAsync();
-            return new OkObjectResult(list);
+            var list = await _orderService.GetOrderStatusesListAsync();
+            return Ok(list);
         }
 
         [HttpGet]
@@ -82,7 +82,7 @@ namespace APIDeliveryCRM.Controllers
             var companyId = ResolveCompanyId(null, out var forbidden);
             if (forbidden) return Forbid();
             if (!companyId.HasValue) return Unauthorized();
-            if (!await HasActiveSubscriptionAsync(companyId.Value))
+            if (!await _companyService.HasActiveSubscriptionAsync(companyId.Value))
                 return StatusCode(402, new { message = "Тариф компании неактивен. Оформите или продлите подписку." });
             try
             {
@@ -103,103 +103,8 @@ namespace APIDeliveryCRM.Controllers
             if (!userId.HasValue)
                 return Unauthorized();
 
-            var client = await _context.ClientProfiles
-                .AsNoTracking()
-                .FirstOrDefaultAsync(c => c.User_id == userId.Value);
-            if (client == null)
-                return BadRequest(new { message = "Профиль клиента не найден для текущего пользователя." });
-
-            var targetCompanyId = request.CompanyId > 0 ? request.CompanyId : client.Company_id;
-            var targetCompany = await _context.Companies.AsNoTracking()
-                .FirstOrDefaultAsync(c => c.ID_Company == targetCompanyId);
-            if (targetCompany == null)
-                return BadRequest(new { message = "Указанная компания не найдена." });
-            if (!await HasActiveSubscriptionAsync(targetCompanyId))
-                return StatusCode(402, new { message = "Тариф выбранной компании неактивен. Создание заказов временно недоступно." });
-
-            var orderTypeId = await _context.OrderTypes
-                .AsNoTracking()
-                .Select(x => x.ID_OrderType)
-                .FirstOrDefaultAsync();
-            var statusId = await _context.OrderStatuses
-                .AsNoTracking()
-                .Select(x => x.ID_OrderStatus)
-                .FirstOrDefaultAsync();
-            var packageTypeId = await _context.PackageTypes
-                .AsNoTracking()
-                .Select(x => x.ID_PackageType)
-                .FirstOrDefaultAsync();
-            var fallbackPaymentMethodId = await _context.PaymentMethods
-                .AsNoTracking()
-                .Select(x => x.ID_PaymentMethod)
-                .FirstOrDefaultAsync();
-
-            if (orderTypeId == 0 || statusId == 0 || packageTypeId == 0)
-                return BadRequest(new { message = "Не настроены справочники заказа (типы/статусы/пакеты)." });
-            if (client.Preferred_payment_method_id <= 0 && fallbackPaymentMethodId == 0)
-                return BadRequest(new { message = "Не настроены способы оплаты для компании." });
-
-            var pickupAddress = new Address
-            {
-                Street = request.PickupStreet.Trim(),
-                House = request.PickupHouse.Trim(),
-                Flat = string.IsNullOrWhiteSpace(request.PickupFlat) ? null : request.PickupFlat.Trim(),
-                City = string.IsNullOrWhiteSpace(request.PickupCity) ? null : request.PickupCity.Trim(),
-                Comment = string.IsNullOrWhiteSpace(request.PickupComment) ? null : request.PickupComment.Trim(),
-                Latitude = request.PickupLatitude,
-                Longitude = request.PickupLongitude,
-                Company_id = targetCompanyId,
-                User_id = userId.Value
-            };
-            var deliveryAddress = new Address
-            {
-                Street = request.DeliveryStreet.Trim(),
-                House = request.DeliveryHouse.Trim(),
-                Flat = string.IsNullOrWhiteSpace(request.DeliveryFlat) ? null : request.DeliveryFlat.Trim(),
-                City = string.IsNullOrWhiteSpace(request.DeliveryCity) ? null : request.DeliveryCity.Trim(),
-                Comment = string.IsNullOrWhiteSpace(request.DeliveryComment) ? null : request.DeliveryComment.Trim(),
-                Latitude = request.DeliveryLatitude,
-                Longitude = request.DeliveryLongitude,
-                Company_id = targetCompanyId,
-                User_id = userId.Value
-            };
-
-            _context.Addresses.Add(pickupAddress);
-            _context.Addresses.Add(deliveryAddress);
-            await _context.SaveChangesAsync();
-
-            var create = new CreateOrderRequest
-            {
-                Name = request.Name.Trim(),
-                Description = request.Description?.Trim() ?? string.Empty,
-                Client_id = client.ID_ClientProfile,
-                OrderType_id = orderTypeId,
-                Status_id = statusId,
-                PackageType_id = packageTypeId,
-                Weight = request.Weight,
-                Height = request.Height,
-                Length = request.Length,
-                Width = request.Width,
-                Estimated_cost = 0,
-                PaymentMethod_id = client.Preferred_payment_method_id > 0 ? client.Preferred_payment_method_id : fallbackPaymentMethodId,
-                PickupAddress_id = pickupAddress.ID_Address,
-                DeliveryAddress_id = deliveryAddress.ID_Address,
-                DeliveryRouteKind = 1,
-                AutoSelectRouteKind = true,
-                Priority = request.Priority,
-                RequestedDeliveryAtUtc = request.RequestedDeliveryAtUtc,
-                OrderCompany_id = targetCompanyId
-            };
-
-            try
-            {
-                var created = await _orderService.CreateAsync(create);
-                return Ok(created);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
+            var result = await _orderService.CreateMineFromCustomerAsync(userId.Value, request);
+            return MapCustomerOrderCreateResult(result);
         }
 
         [HttpPut("{id:int}")]
@@ -219,6 +124,33 @@ namespace APIDeliveryCRM.Controllers
 
             var updated = await _orderService.UpdateAsync(order);
             return new OkObjectResult(updated);
+        }
+
+        [HttpPost("assignments/{assignmentId:int}/complete")]
+        [Authorize(Roles = "Курьер,Логист,Администратор,Админ,Менеджер")]
+        public async Task<IActionResult> CompleteRouteStop(int assignmentId, [FromQuery] int? courierId)
+        {
+            var companyId = ResolveCompanyId(null, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!companyId.HasValue) return Unauthorized();
+
+            var profileId = courierId;
+            if (!profileId.HasValue)
+            {
+                var userId = GetCurrentUserId();
+                if (!userId.HasValue)
+                    return Unauthorized();
+                profileId = await ResolveCourierProfileIdAsync(userId.Value, companyId.Value);
+            }
+
+            if (!profileId.HasValue)
+                return BadRequest(new { message = "Профиль курьера не найден." });
+
+            var (ok, result, error) = await _orderService.CompleteRouteStopAsync(assignmentId, profileId.Value, GetCurrentUserId());
+            if (!ok)
+                return BadRequest(new { message = error ?? "Не удалось завершить точку маршрута." });
+
+            return Ok(result);
         }
 
         [HttpPost("{id:int}/status")]
@@ -274,6 +206,45 @@ namespace APIDeliveryCRM.Controllers
             return Ok();
         }
 
+        [HttpPost("{id:int}/revoke-courier")]
+        [Authorize(Roles = "Логист,Логистика,Администратор,Админ,Менеджер")]
+        public async Task<IActionResult> RevokeCourier(int id, [FromQuery] string? reason)
+        {
+            var companyId = ResolveCompanyId(null, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!companyId.HasValue) return Unauthorized();
+
+            var order = await _orderService.GetByIdAsync(id);
+            if (order == null) return NotFound();
+            if (order.Company_id != companyId.Value) return Forbid();
+
+            var (ok, error) = await _orderService.RevokeCourierAsync(id, GetCurrentUserId(), reason);
+            if (!ok)
+                return BadRequest(new { message = error ?? "Не удалось отозвать курьера." });
+
+            return Ok();
+        }
+
+        [HttpPost("revoke-from-courier")]
+        [Authorize(Roles = "Логист,Логистика,Администратор,Админ,Менеджер")]
+        public async Task<IActionResult> RevokeFromCourier([FromBody] RevokeCourierOrdersRequest request)
+        {
+            var companyId = ResolveCompanyId(null, out var forbidden);
+            if (forbidden) return Forbid();
+            if (!companyId.HasValue) return Unauthorized();
+            if (request.CourierId <= 0)
+                return BadRequest(new { message = "Укажите курьера." });
+
+            var result = await _orderService.RevokeCourierOrdersAsync(
+                companyId.Value,
+                request.CourierId,
+                request.OrderIds,
+                GetCurrentUserId(),
+                request.Reason);
+
+            return Ok(result);
+        }
+
         [HttpPost("{id:int}/auto-dispatch")]
         public async Task<IActionResult> AutoDispatch(int id)
         {
@@ -321,10 +292,35 @@ namespace APIDeliveryCRM.Controllers
             return Ok(eta);
         }
 
+        private static IActionResult MapCustomerOrderCreateResult(CustomerOrderCreateResult result)
+        {
+            if (result.Outcome == CustomerOrderCreateOutcome.Ok && result.Order != null)
+                return new OkObjectResult(result.Order);
+
+            var message = result.Message ?? "Ошибка создания заказа.";
+            return result.Outcome switch
+            {
+                CustomerOrderCreateOutcome.SubscriptionInactive => new ObjectResult(new { message }) { StatusCode = 402 },
+                CustomerOrderCreateOutcome.ClientNotFound or CustomerOrderCreateOutcome.CompanyNotFound
+                    or CustomerOrderCreateOutcome.CatalogNotConfigured
+                    or CustomerOrderCreateOutcome.PaymentMethodsNotConfigured
+                    or CustomerOrderCreateOutcome.InvalidOperation => new BadRequestObjectResult(new { message }),
+                _ => new BadRequestObjectResult(new { message })
+            };
+        }
+
         private int? GetCurrentUserId()
         {
             var v = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             return int.TryParse(v, out var id) ? id : null;
+        }
+
+        private async Task<int?> ResolveCourierProfileIdAsync(int userId, int companyId)
+        {
+            return await _context.CourierProfiles.AsNoTracking()
+                .Where(c => c.User_id == userId && c.Company_id == companyId)
+                .Select(c => (int?)c.ID_CourierProfile)
+                .FirstOrDefaultAsync();
         }
 
         private int? ResolveCompanyId(int? requestedCompanyId, out bool forbidden)
@@ -342,17 +338,5 @@ namespace APIDeliveryCRM.Controllers
 
             return claimCompanyId;
         }
-
-        private async Task<bool> HasActiveSubscriptionAsync(int companyId)
-        {
-            var company = await _context.Companies
-                .AsNoTracking()
-                .FirstOrDefaultAsync(c => c.ID_Company == companyId);
-            if (company == null || !company.Is_Active)
-                return false;
-            return company.SubscriptionExpiresAt == default || company.SubscriptionExpiresAt >= DateTime.UtcNow;
-        }
     }
 }
-
-

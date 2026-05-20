@@ -300,6 +300,8 @@
     private List<CompanyOrderTargetDto> _orderCompanies = new();
     private int _defaultCompanyId;
 
+    private const int ExcludedCompanyOrderId = 1;
+
     private string StepTitle => _step switch
     {
         1 => "основное",
@@ -328,11 +330,13 @@
             if (profile != null)
             {
                 _defaultCompanyId = profile.Company_id;
-                if (_form.CompanyId == 0)
+                if (_form.CompanyId == 0 && _defaultCompanyId != ExcludedCompanyOrderId)
                     _form.CompanyId = _defaultCompanyId;
             }
             if (_orderCompanies.Count > 0 && !_orderCompanies.Any(c => c.Id == _form.CompanyId))
                 _form.CompanyId = _orderCompanies[0].Id;
+            else if (_orderCompanies.Count == 0 && _form.CompanyId == ExcludedCompanyOrderId)
+                _form.CompanyId = 0;
         }
         catch
         {
@@ -349,7 +353,7 @@
             Name = "Новый заказ",
             PickupCity = "Казань",
             DeliveryCity = "Казань",
-            CompanyId = _defaultCompanyId > 0 ? _defaultCompanyId : 0
+            CompanyId = ResolveDefaultCompanyIdForForm()
         };
         _pickupSearchText = "";
         _deliverySearchText = "";
@@ -359,6 +363,15 @@
         _deliveryOpen = false;
         _pickupSuggestLoading = false;
         _deliverySuggestLoading = false;
+    }
+
+    private int ResolveDefaultCompanyIdForForm()
+    {
+        if (_defaultCompanyId <= 0 || _defaultCompanyId == ExcludedCompanyOrderId)
+            return 0;
+        if (_orderCompanies.Any(c => c.Id == _defaultCompanyId))
+            return _defaultCompanyId;
+        return _orderCompanies.Count > 0 ? _orderCompanies[0].Id : 0;
     }
 
     public async ValueTask DisposeAsync()

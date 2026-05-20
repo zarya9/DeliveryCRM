@@ -1,10 +1,12 @@
 @inherits LayoutComponentBase
+@using WebBlazorDeliveryCRM.Components.Shared
 
 <DesktopLayout>
     <SidebarContent>
         <CourierSidebar />
     </SidebarContent>
     <ChildContent>
+        <CourierProximityBanner />
         @Body
     </ChildContent>
 </DesktopLayout>

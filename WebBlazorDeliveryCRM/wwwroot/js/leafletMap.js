@@ -22,6 +22,11 @@ window.leafletMap = {
     enableRouting: false,
     routeAbortController: null,
     routeRequestId: 0,
+    /** Редактирование своей позиции курьером: клик по карте + перетаскивание маркера */
+    editableCourier: null,
+    /** Сегмент «до следующей точки» для навигатора курьера */
+    navigationLayer: null,
+    navigationRequestId: 0,
 
     init: function (elementId, centerLat, centerLon, zoom, theme, osrmBaseUrl, enableRouting, routeLanguage) {
         if (this.map) {
@@ -136,7 +141,12 @@ window.leafletMap = {
             if (isNaN(lat) || isNaN(lon)) continue;
             var title = items[i].title || "Точка " + (i + 1);
             var kind = items[i].kind || "";
-            if (kind === "courier" && items[i].id != null && items[i].id !== undefined) {
+            if (
+                kind === "courier" &&
+                items[i].id != null &&
+                items[i].id !== undefined &&
+                !this.editableCourier
+            ) {
                 this.upsertCourierMarker(items[i].id, lat, lon, title, !!items[i].online);
                 var ck = String(items[i].id);
                 if (this.courierMarkersById[ck]) allLayers.push(this.courierMarkersById[ck]);
@@ -264,6 +274,98 @@ window.leafletMap = {
         return false;
     },
 
+    _buildEditableCourierIcon: function () {
+        var iconHtml =
+            '<div style="width:24px;height:24px;background:var(--dms-primary, #2563eb);border:2px solid #fff;border-radius:50%;box-shadow:0 2px 10px rgba(0,0,0,.4)"></div>';
+        return L.divIcon({
+            className: "courier-editable-marker-pin",
+            html: iconHtml,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+        });
+    },
+
+    _notifyCourierPositionMoved: function (lat, lng) {
+        if (!this.editableCourier || !this.editableCourier.dotnetHelper) return;
+        this.editableCourier.dotnetHelper
+            .invokeMethodAsync("OnCourierPositionMoved", lat, lng)
+            .catch(function () {});
+    },
+
+    _bindEditableCourierDrag: function (marker) {
+        if (!marker || !this.editableCourier) return;
+        var self = this;
+        marker.off("dragend");
+        marker.on("dragend", function (e) {
+            var ll = e.target.getLatLng();
+            self._notifyCourierPositionMoved(ll.lat, ll.lng);
+        });
+    },
+
+    _upsertEditableCourierMarker: function (lat, lon) {
+        if (!this.map || !this.editableCourier) return;
+        var latN = parseFloat(lat);
+        var lonN = parseFloat(lon);
+        if (isNaN(latN) || isNaN(lonN)) return;
+        var key = this.editableCourier.id;
+        var icon = this._buildEditableCourierIcon();
+        var title = "Ваша позиция — перетащите или кликните по карте";
+        var m = this.courierMarkersById[key];
+        if (m) {
+            m.setLatLng([latN, lonN]);
+            m.setIcon(icon);
+            if (m.dragging && m.dragging.enable) m.dragging.enable();
+        } else {
+            m = L.marker([latN, lonN], {
+                draggable: true,
+                icon: icon,
+                riseOnHover: true,
+                zIndexOffset: 1000
+            })
+                .addTo(this.map)
+                .bindPopup(title);
+            this.courierMarkersById[key] = m;
+        }
+        this._bindEditableCourierDrag(m);
+    },
+
+    _moveEditableCourierTo: function (lat, lon, shouldPan) {
+        if (!this.map || !this.editableCourier) return;
+        this._upsertEditableCourierMarker(lat, lon);
+        if (shouldPan) this.map.panTo([lat, lon]);
+        this._notifyCourierPositionMoved(lat, lon);
+    },
+
+    /**
+     * Включить перемещение позиции курьера (как courierManualMap): drag + click по карте.
+     */
+    enableCourierPositionEdit: function (dotnetHelper, courierId, lat, lon) {
+        this.disableCourierPositionEdit();
+        if (!this.map) return;
+        var self = this;
+        var id = String(courierId);
+        this.editableCourier = { id: id, dotnetHelper: dotnetHelper };
+        var latN = parseFloat(lat);
+        var lonN = parseFloat(lon);
+        if (isNaN(latN) || isNaN(lonN) || (Math.abs(latN) < 0.001 && Math.abs(lonN) < 0.001)) {
+            var c = this.map.getCenter();
+            latN = c.lat;
+            lonN = c.lng;
+        }
+        this._upsertEditableCourierMarker(latN, lonN);
+        this.editableCourier.clickHandler = function (e) {
+            self._moveEditableCourierTo(e.latlng.lat, e.latlng.lng, true);
+        };
+        this.map.on("click", this.editableCourier.clickHandler);
+    },
+
+    disableCourierPositionEdit: function () {
+        if (this.editableCourier && this.map && this.editableCourier.clickHandler) {
+            this.map.off("click", this.editableCourier.clickHandler);
+        }
+        this.editableCourier = null;
+    },
+
     /** Обновление одного курьера без полной перерисовки карты (SignalR). */
     upsertCourierMarker: function (id, lat, lon, title, online) {
         if (!this.map) return;
@@ -271,6 +373,14 @@ window.leafletMap = {
         var lonN = parseFloat(lon);
         if (isNaN(latN) || isNaN(lonN)) return;
         var key = String(id);
+        if (this.editableCourier && key === this.editableCourier.id) {
+            this._upsertEditableCourierMarker(latN, lonN);
+            if (title) {
+                var em = this.courierMarkersById[key];
+                if (em) em.setPopupContent(title);
+            }
+            return;
+        }
         var icon = this._buildPinnedIcon("courier", online);
         var m = this.courierMarkersById[key];
         if (m) {
@@ -415,6 +525,23 @@ window.leafletMap = {
 
     clearRoute: function () {
         this.clearRouteInternal();
+    },
+
+    getView: function () {
+        if (!this.map) return null;
+        var c = this.map.getCenter();
+        return { lat: c.lat, lng: c.lng, zoom: this.map.getZoom() };
+    },
+
+    /** Установить центр и масштаб без анимации (восстановление после возврата на страницу). */
+    setView: function (lat, lng, zoom) {
+        if (!this.map) return;
+        if (lat == null || lng == null || zoom == null) return;
+        var la = parseFloat(lat);
+        var ln = parseFloat(lng);
+        var z = parseInt(zoom, 10);
+        if (isNaN(la) || isNaN(ln) || isNaN(z)) return;
+        this.map.setView([la, ln], z, { animate: false });
     },
 
     /**
@@ -603,7 +730,125 @@ window.leafletMap = {
             });
     },
 
+    _formatManeuverRu: function (step) {
+        if (!step) return "Продолжайте движение";
+        var m = step.maneuver || {};
+        var type = (m.type || "").toLowerCase();
+        var mod = (m.modifier || "").toLowerCase();
+        var name = step.name || step.ref || "";
+        var dest = step.destinations || "";
+        if (type === "arrive") return dest ? "Прибытие: " + dest : "Вы на месте";
+        if (type === "depart") return name ? "Начните движение по " + name : "Начните движение";
+        if (type === "roundabout" && m.exit != null)
+            return "На кольце — съезд " + m.exit + (name ? ", далее " + name : "");
+        var turn =
+            mod.indexOf("left") >= 0
+                ? "Поверните налево"
+                : mod.indexOf("right") >= 0
+                  ? "Поверните направо"
+                  : mod.indexOf("straight") >= 0 || mod.indexOf("uturn") < 0
+                    ? "Двигайтесь прямо"
+                    : "Развернитесь";
+        if (name) return turn + " на " + name;
+        return turn;
+    },
+
+    clearNavigationRoute: function () {
+        this.navigationRequestId++;
+        if (this.navigationLayer && this.map) {
+            try {
+                this.map.removeLayer(this.navigationLayer);
+            } catch (_) {}
+        }
+        this.navigationLayer = null;
+    },
+
+    /**
+     * Маршрут от текущей позиции курьера до следующей точки + шаги для панели навигатора.
+     */
+    fetchNavigationToStop: async function (fromLat, fromLon, toLat, toLon) {
+        if (!this.map) return null;
+        var fl = parseFloat(fromLat);
+        var fn = parseFloat(fromLon);
+        var tl = parseFloat(toLat);
+        var tn = parseFloat(toLon);
+        if (isNaN(fl) || isNaN(fn) || isNaN(tl) || isNaN(tn)) return null;
+
+        var self = this;
+        var reqId = ++this.navigationRequestId;
+        var base = (this.osrmBaseUrl || "https://router.project-osrm.org").replace(/\/$/, "");
+        var coords =
+            encodeURIComponent(fn) +
+            "," +
+            encodeURIComponent(fl) +
+            ";" +
+            encodeURIComponent(tn) +
+            "," +
+            encodeURIComponent(tl);
+        var url =
+            base +
+            "/route/v1/driving/" +
+            coords +
+            "?overview=full&geometries=geojson&steps=true&annotations=false";
+
+        try {
+            var r = await fetch(url, { method: "GET", credentials: "omit" });
+            if (!r.ok) return { ok: false, message: "OSRM HTTP " + r.status };
+            var data = await r.json();
+            if (reqId !== self.navigationRequestId) return null;
+            if (!data || data.code !== "Ok" || !data.routes || !data.routes.length)
+                return { ok: false, message: (data && data.message) || "Маршрут не найден" };
+
+            var route = data.routes[0];
+            var geom = route.geometry && route.geometry.coordinates;
+            self.clearNavigationRoute();
+            if (geom && geom.length) {
+                var latlngs = geom.map(function (x) {
+                    return [x[1], x[0]];
+                });
+                self.navigationLayer = L.polyline(latlngs, {
+                    color: "#0ea5e9",
+                    weight: 7,
+                    opacity: 0.92,
+                    dashArray: null,
+                }).addTo(self.map);
+                var fg = L.featureGroup([
+                    self.navigationLayer,
+                    L.marker([fl, fn]),
+                    L.marker([tl, tn]),
+                ]);
+                self.map.fitBounds(fg.getBounds().pad(0.18), { maxZoom: 15 });
+            }
+
+            var steps = [];
+            if (route.legs && route.legs.length) {
+                var osSteps = route.legs[0].steps || [];
+                for (var i = 0; i < osSteps.length; i++) {
+                    var s = osSteps[i];
+                    if (!s) continue;
+                    var distM = Math.round(s.distance || 0);
+                    if (distM < 8 && (s.maneuver || {}).type === "depart") continue;
+                    steps.push({
+                        text: self._formatManeuverRu(s),
+                        distanceM: distM,
+                    });
+                }
+            }
+
+            return {
+                ok: true,
+                distanceKm: Math.round((route.distance || 0) / 100) / 10,
+                durationMinutes: Math.max(1, Math.round((route.duration || 0) / 60)),
+                steps: steps.slice(0, 12),
+            };
+        } catch (e) {
+            return { ok: false, message: e && e.message ? e.message : "Ошибка маршрута" };
+        }
+    },
+
     dispose: function () {
+        this.clearNavigationRoute();
+        this.disableCourierPositionEdit();
         this.clearMarkers(); /* очищает и courierMarkersById */
         if (this.routingControl && this.map) {
             this.map.removeControl(this.routingControl);

@@ -1,6 +1,7 @@
 using APIDeliveryCRM.ContextDb;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
+using APIDeliveryCRM.Request;
 using APIDeliveryCRM.Responses;
 using Microsoft.EntityFrameworkCore;
 
@@ -35,10 +36,12 @@ public class ShiftPlannerService : IShiftPlannerService
     private const decimal PickupClusterPickupAffinityKmPerNeighbor = 38m;
 
     private readonly ContextDB _context;
+    private readonly IFuelPriceService _fuelPriceService;
 
-    public ShiftPlannerService(ContextDB context)
+    public ShiftPlannerService(ContextDB context, IFuelPriceService fuelPriceService)
     {
         _context = context;
+        _fuelPriceService = fuelPriceService;
     }
 
     public async Task<CompanyPlannerResultDto> RebuildCompanyPlanAsync(int companyId, string reason, CancellationToken cancellationToken = default)
@@ -186,7 +189,8 @@ public class ShiftPlannerService : IShiftPlannerService
 
                 stop.Order.Plan_locked_shiftPlan_id = plan.ID_ShiftPlan;
                 stop.Order.Plan_locked_at = now;
-                stop.Order.Courier_id = state.Shift.Courier_id;
+                if (!stop.Order.Courier_id.HasValue)
+                    stop.Order.Courier_id = state.Shift.Courier_id;
                 stop.Order.HandoffStage = stop.Stage switch
                 {
                     ShiftAssignmentStage.PickupToHub => OrderHandoffStage.AwaitingHubDropOff,
@@ -253,6 +257,572 @@ public class ShiftPlannerService : IShiftPlannerService
             .FirstOrDefaultAsync(cancellationToken);
 
         return plan == null ? null : MapPlan(plan);
+    }
+
+    public async Task<ShiftPlanSummaryDto?> GetCourierPlanAsync(int courierProfileId, CancellationToken cancellationToken = default)
+    {
+        var active = await GetActivePlanForCourierAsync(courierProfileId, cancellationToken);
+        if (active != null && active.Stops.Count > 0)
+            return active;
+
+        return await EnsureCourierPlanFromAssignedOrdersAsync(courierProfileId, cancellationToken);
+    }
+
+    public async Task<ShiftPlanSummaryDto?> ApplyCourierRouteAsync(
+        int companyId,
+        int courierProfileId,
+        IReadOnlyList<ApplyCourierRouteStopRequest> stops,
+        string? reason = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (stops.Count == 0)
+            return null;
+
+        var courier = await _context.CourierProfiles
+            .Include(c => c.User)
+            .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId && c.Company_id == companyId, cancellationToken);
+        if (courier == null)
+            return null;
+
+        var orderedStops = stops
+            .Where(s => s.Latitude.HasValue && s.Longitude.HasValue)
+            .OrderBy(s => s.Sequence)
+            .ToList();
+        if (orderedStops.Count == 0)
+            return null;
+
+        var orderIds = orderedStops
+            .Where(s => s.OrderId is > 0)
+            .Select(s => s.OrderId!.Value)
+            .Distinct()
+            .ToList();
+
+        var orders = orderIds.Count == 0
+            ? new List<Order>()
+            : await _context.Orders
+                .Include(o => o.RouteStops).ThenInclude(rs => rs.Address)
+                .Include(o => o.PickupAddress)
+                .Include(o => o.DeliveryAddress)
+                .Where(o => o.Company_id == companyId && orderIds.Contains(o.ID_Order))
+                .ToListAsync(cancellationToken);
+
+        foreach (var order in orders)
+            order.Courier_id = courierProfileId;
+
+        var shift = await EnsureActiveShiftForCourierAsync(courierProfileId, companyId, cancellationToken);
+        if (shift == null)
+            return BuildSyntheticPlanFromOrderedStops(courier, orderedStops, orders);
+
+        await using var tx = await _context.Database.BeginTransactionAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+
+        var stalePlans = await _context.ShiftPlans
+            .Where(p => p.Courier_id == courierProfileId && (p.Status == ShiftPlanStatus.Active || p.Status == ShiftPlanStatus.Draft))
+            .ToListAsync(cancellationToken);
+        foreach (var stale in stalePlans)
+            stale.Status = ShiftPlanStatus.Replanned;
+
+        var staleAssignments = await _context.ShiftAssignments
+            .Where(a => a.Shift_id == shift.ID_Shift &&
+                        (a.Status == ShiftAssignmentStatus.Pending || a.Status == ShiftAssignmentStatus.InProgress))
+            .ToListAsync(cancellationToken);
+        foreach (var a in staleAssignments)
+            a.Status = ShiftAssignmentStatus.Reassigned;
+
+        var vehicle = await _context.Vehicles
+            .Where(v => v.Company_id == companyId && v.CurrentCourier_id == courierProfileId)
+            .OrderByDescending(v => v.ID_Vehicle)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var nextVersion = (await _context.ShiftPlans
+            .Where(p => p.Shift_id == shift.ID_Shift)
+            .Select(p => (int?)p.Version)
+            .MaxAsync(cancellationToken) ?? 0) + 1;
+
+        var plan = new ShiftPlan
+        {
+            Company_id = companyId,
+            Shift_id = shift.ID_Shift,
+            Courier_id = courierProfileId,
+            Vehicle_id = vehicle?.ID_Vehicle,
+            Status = ShiftPlanStatus.Active,
+            Created_at = now,
+            Activated_at = now,
+            Planned_start_utc = now,
+            Version = nextVersion,
+            Last_recompute_reason = string.IsNullOrWhiteSpace(reason) ? "logistician.route_map" : reason.Trim()
+        };
+        _context.ShiftPlans.Add(plan);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var seq = 1;
+        var newAssignments = new List<ShiftAssignment>();
+        foreach (var stop in orderedStops)
+        {
+            if (stop.OrderId is not > 0)
+                continue;
+
+            var order = orders.FirstOrDefault(o => o.ID_Order == stop.OrderId!.Value);
+            if (order == null)
+                continue;
+
+            var routeStopId = stop.OrderRouteStopId;
+            if (!routeStopId.HasValue)
+                routeStopId = ResolveRouteStopIdFromTitle(order, stop.Title);
+
+            var stage = ShiftAssignmentStage.LocalUrban;
+            if (routeStopId.HasValue)
+            {
+                var routeStop = order.RouteStops.FirstOrDefault(rs => rs.ID_OrderRouteStop == routeStopId.Value);
+                if (routeStop != null)
+                    stage = ResolveStageForStop(order, routeStop);
+            }
+
+            var assignment = new ShiftAssignment
+            {
+                Company_id = companyId,
+                Shift_id = shift.ID_Shift,
+                ShiftPlan_id = plan.ID_ShiftPlan,
+                Order_id = order.ID_Order,
+                Assignment_sequence = seq++,
+                OrderRouteStop_id = routeStopId,
+                Stage = stage,
+                Status = ShiftAssignmentStatus.Pending,
+                Planned_start_utc = now,
+                Notes = stop.Title
+            };
+            _context.ShiftAssignments.Add(assignment);
+            newAssignments.Add(assignment);
+
+            order.Plan_locked_shiftPlan_id = plan.ID_ShiftPlan;
+            order.Plan_locked_at = now;
+        }
+
+        ApplySegmentDistancesToAssignments(newAssignments, orderedStops);
+        plan.Total_distance_km = Math.Round(newAssignments.Sum(a => a.Planned_distance_km), 3);
+        plan.Estimated_duration_minutes = Math.Round(newAssignments.Count * StopServiceMinutes + plan.Total_distance_km / AvgSpeedKmH * 60m, 1);
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+
+        return await GetActivePlanForCourierAsync(courierProfileId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<CourierRouteMapWaypointDto>> GetCourierRouteWaypointsAsync(
+        int courierProfileId,
+        CancellationToken cancellationToken = default)
+    {
+        var plan = await _context.ShiftPlans
+            .Include(p => p.Assignments).ThenInclude(a => a.OrderRouteStop)!.ThenInclude(s => s!.Address)
+            .Include(p => p.Assignments).ThenInclude(a => a.Order).ThenInclude(o => o!.PickupAddress)
+            .Include(p => p.Assignments).ThenInclude(a => a.Order).ThenInclude(o => o!.DeliveryAddress)
+            .Where(p => p.Courier_id == courierProfileId && (p.Status == ShiftPlanStatus.Active || p.Status == ShiftPlanStatus.Draft))
+            .OrderByDescending(p => p.Created_at)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (plan == null)
+            return Array.Empty<CourierRouteMapWaypointDto>();
+
+        var list = new List<CourierRouteMapWaypointDto>();
+        foreach (var a in plan.Assignments
+                     .Where(x => x.Status is ShiftAssignmentStatus.Pending or ShiftAssignmentStatus.InProgress)
+                     .OrderBy(x => x.Assignment_sequence))
+        {
+            var (lat, lon, title) = ResolveAssignmentMapPoint(a);
+            if (!lat.HasValue || !lon.HasValue)
+                continue;
+
+            list.Add(new CourierRouteMapWaypointDto
+            {
+                Sequence = a.Assignment_sequence,
+                OrderId = a.Order_id > 0 ? a.Order_id : null,
+                AssignmentId = a.ID_ShiftAssignment,
+                Title = title ?? a.Notes,
+                Lat = lat.Value,
+                Lon = lon.Value
+            });
+        }
+
+        return list;
+    }
+
+    private async Task<CourierShift?> EnsureActiveShiftForCourierAsync(
+        int courierProfileId,
+        int companyId,
+        CancellationToken cancellationToken)
+    {
+        var shift = await _context.CourierShifts
+            .Where(s => s.Courier_id == courierProfileId && s.Company_id == companyId && s.TimeEnd == null)
+            .OrderByDescending(s => s.TimeStart)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (shift != null)
+            return shift;
+
+        var statusId = await _context.ShiftStatuses.AsNoTracking()
+            .Where(s => s.Name == "Active" || s.Name == "Активна")
+            .Select(s => (int?)s.ID_ShiftStatus)
+            .FirstOrDefaultAsync(cancellationToken) ?? 1;
+
+        shift = new CourierShift
+        {
+            Company_id = companyId,
+            Courier_id = courierProfileId,
+            Date = DateOnly.FromDateTime(DateTime.UtcNow),
+            TimeStart = DateTime.UtcNow,
+            ShiftStatus_id = statusId
+        };
+        _context.CourierShifts.Add(shift);
+        await _context.SaveChangesAsync(cancellationToken);
+        return shift;
+    }
+
+    private static int? ResolveRouteStopIdFromTitle(Order order, string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return null;
+
+        var t = title.ToLowerInvariant();
+        var stops = order.RouteStops.OrderBy(s => s.SortOrder).ToList();
+        if (stops.Count == 0)
+            return null;
+
+        if (t.Contains("забор") || t.Contains("отправит"))
+            return stops.FirstOrDefault(s => s.Kind == OrderRouteStopKind.SenderPickup)?.ID_OrderRouteStop
+                   ?? stops.First().ID_OrderRouteStop;
+
+        if (t.Contains("доставк") || t.Contains("получат"))
+            return stops.FirstOrDefault(s => s.Kind == OrderRouteStopKind.RecipientDelivery)?.ID_OrderRouteStop
+                   ?? stops.Last().ID_OrderRouteStop;
+
+        if (t.Contains("склад") || t.Contains("хаб"))
+            return stops.FirstOrDefault(s => s.Kind == OrderRouteStopKind.Hub)?.ID_OrderRouteStop;
+
+        return null;
+    }
+
+    private static (double? lat, double? lon, string? title) ResolveAssignmentMapPoint(ShiftAssignment a)
+    {
+        if (a.OrderRouteStop?.Address?.Latitude is { } slat && a.OrderRouteStop.Address.Longitude is { } slon)
+            return ((double)slat, (double)slon, a.OrderRouteStop.Title ?? a.Notes);
+
+        var order = a.Order;
+        if (order == null)
+            return (null, null, a.Notes);
+
+        var notes = a.Notes ?? string.Empty;
+        if (notes.Contains("забор", StringComparison.OrdinalIgnoreCase) &&
+            order.PickupAddress?.Latitude is { } plat && order.PickupAddress.Longitude is { } plon)
+            return ((double)plat, (double)plon, notes);
+
+        if (notes.Contains("доставк", StringComparison.OrdinalIgnoreCase) &&
+            order.DeliveryAddress?.Latitude is { } dlat && order.DeliveryAddress.Longitude is { } dlon)
+            return ((double)dlat, (double)dlon, notes);
+
+        if (order.DeliveryAddress?.Latitude is { } lat && order.DeliveryAddress.Longitude is { } lon)
+            return ((double)lat, (double)lon, notes);
+
+        if (order.PickupAddress?.Latitude is { } plat2 && order.PickupAddress.Longitude is { } plon2)
+            return ((double)plat2, (double)plon2, notes);
+
+        return (null, null, notes);
+    }
+
+    private static ShiftPlanSummaryDto BuildSyntheticPlanFromOrderedStops(
+        CourierProfile courier,
+        List<ApplyCourierRouteStopRequest> stops,
+        List<Order> orders)
+    {
+        var courierName = $"{courier.User?.FName} {courier.User?.Name}".Trim();
+        var dtoStops = new List<ShiftPlanStopDto>();
+        foreach (var stop in stops.OrderBy(s => s.Sequence))
+        {
+            if (!stop.Latitude.HasValue || !stop.Longitude.HasValue)
+                continue;
+
+            var order = stop.OrderId is > 0
+                ? orders.FirstOrDefault(o => o.ID_Order == stop.OrderId.Value)
+                : null;
+
+            dtoStops.Add(new ShiftPlanStopDto
+            {
+                AssignmentId = 0,
+                Sequence = stop.Sequence,
+                OrderId = stop.OrderId ?? 0,
+                OrderNumber = order?.Order_Number ?? 0,
+                Title = stop.Title,
+                Latitude = stop.Latitude,
+                Longitude = stop.Longitude,
+                AddressLine = stop.Title,
+                Status = ShiftAssignmentStatus.Pending,
+                Stage = ShiftAssignmentStage.LocalUrban,
+                StopKind = OrderRouteStopKind.SenderPickup
+            });
+        }
+
+        return new ShiftPlanSummaryDto
+        {
+            ShiftPlanId = 0,
+            CompanyId = courier.Company_id,
+            CourierId = courier.ID_CourierProfile,
+            CourierName = string.IsNullOrWhiteSpace(courierName) ? $"Курьер #{courier.ID_CourierProfile}" : courierName,
+            Status = ShiftPlanStatus.Active,
+            CreatedAt = DateTime.UtcNow,
+            Stops = dtoStops,
+            BuiltFromAssignedOrders = true,
+            RequiresActiveShift = true
+        };
+    }
+
+    private async Task<ShiftPlanSummaryDto?> EnsureCourierPlanFromAssignedOrdersAsync(
+        int courierProfileId,
+        CancellationToken cancellationToken)
+    {
+        var courier = await _context.CourierProfiles
+            .Include(c => c.User)
+            .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId, cancellationToken);
+        if (courier == null)
+            return null;
+
+        var orders = await _context.Orders
+            .Include(o => o.RouteStops).ThenInclude(s => s.Address)
+            .Include(o => o.RouteStops).ThenInclude(s => s.LogisticsHub)
+            .Include(o => o.PickupAddress)
+            .Include(o => o.DeliveryAddress)
+            .Where(o => o.Courier_id == courierProfileId && o.Delivered_at == null)
+            .OrderByDescending(o => o.Priority)
+            .ThenBy(o => o.Created_at)
+            .ToListAsync(cancellationToken);
+
+        if (orders.Count == 0)
+            return null;
+
+        var shift = await _context.CourierShifts
+            .Where(s => s.Courier_id == courierProfileId && s.TimeEnd == null)
+            .OrderByDescending(s => s.TimeStart)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (shift == null)
+            return BuildSyntheticPlanFromOrders(courier, orders);
+
+        await using var tx = await _context.Database.BeginTransactionAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+
+        var stalePlans = await _context.ShiftPlans
+            .Where(p => p.Shift_id == shift.ID_Shift && (p.Status == ShiftPlanStatus.Active || p.Status == ShiftPlanStatus.Draft))
+            .ToListAsync(cancellationToken);
+        foreach (var stale in stalePlans)
+            stale.Status = ShiftPlanStatus.Replanned;
+
+        var vehicle = await _context.Vehicles
+            .Where(v => v.Company_id == courier.Company_id && v.CurrentCourier_id == courierProfileId)
+            .OrderByDescending(v => v.ID_Vehicle)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var nextVersion = (await _context.ShiftPlans
+            .Where(p => p.Shift_id == shift.ID_Shift)
+            .Select(p => (int?)p.Version)
+            .MaxAsync(cancellationToken) ?? 0) + 1;
+
+        var plan = new ShiftPlan
+        {
+            Company_id = courier.Company_id,
+            Shift_id = shift.ID_Shift,
+            Courier_id = courierProfileId,
+            Vehicle_id = vehicle?.ID_Vehicle,
+            Status = ShiftPlanStatus.Active,
+            Created_at = now,
+            Activated_at = now,
+            Planned_start_utc = now,
+            Version = nextVersion,
+            Last_recompute_reason = "courier.assigned_orders"
+        };
+        _context.ShiftPlans.Add(plan);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var sequence = 1;
+        foreach (var order in orders)
+        {
+            var routeStops = order.RouteStops
+                .Where(s => s.Status != OrderRouteStopStatus.Completed)
+                .OrderBy(s => s.SortOrder)
+                .ToList();
+
+            if (routeStops.Count == 0)
+            {
+                if (order.PickupAddress != null)
+                {
+                    _context.ShiftAssignments.Add(CreateAssignment(
+                        plan, shift, order, sequence++, ShiftAssignmentStage.LocalUrban,
+                        null, "Забор у отправителя"));
+                }
+
+                if (order.DeliveryAddress != null)
+                {
+                    _context.ShiftAssignments.Add(CreateAssignment(
+                        plan, shift, order, sequence++, ShiftAssignmentStage.LocalUrban,
+                        null, "Доставка получателю"));
+                }
+
+                continue;
+            }
+
+            foreach (var stop in routeStops)
+            {
+                var stage = ResolveStageForStop(order, stop);
+                _context.ShiftAssignments.Add(CreateAssignment(
+                    plan, shift, order, sequence++, stage, stop.ID_OrderRouteStop, stop.Title));
+            }
+
+            order.Plan_locked_shiftPlan_id = plan.ID_ShiftPlan;
+            order.Plan_locked_at = now;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+
+        var loaded = await _context.ShiftPlans
+            .Include(p => p.CourierProfile).ThenInclude(c => c.User)
+            .Include(p => p.Vehicle)
+            .Include(p => p.Assignments).ThenInclude(a => a.Order)
+            .Include(p => p.Assignments).ThenInclude(a => a.OrderRouteStop)!.ThenInclude(s => s!.Address)
+            .FirstAsync(p => p.ID_ShiftPlan == plan.ID_ShiftPlan, cancellationToken);
+
+        var dto = MapPlan(loaded);
+        dto.BuiltFromAssignedOrders = true;
+        return dto;
+    }
+
+    private static ShiftAssignment CreateAssignment(
+        ShiftPlan plan,
+        CourierShift shift,
+        Order order,
+        int sequence,
+        ShiftAssignmentStage stage,
+        int? routeStopId,
+        string? notes)
+    {
+        return new ShiftAssignment
+        {
+            Company_id = plan.Company_id,
+            Shift_id = shift.ID_Shift,
+            ShiftPlan_id = plan.ID_ShiftPlan,
+            Order_id = order.ID_Order,
+            Assignment_sequence = sequence,
+            OrderRouteStop_id = routeStopId,
+            Stage = stage,
+            Status = ShiftAssignmentStatus.Pending,
+            Planned_start_utc = DateTime.UtcNow,
+            Notes = notes
+        };
+    }
+
+    private static ShiftAssignmentStage ResolveStageForStop(Order order, OrderRouteStop stop)
+    {
+        if (order.DeliveryRouteKind != DeliveryRouteKind.ViaHub)
+            return ShiftAssignmentStage.LocalUrban;
+
+        return stop.Kind switch
+        {
+            OrderRouteStopKind.SenderPickup => ShiftAssignmentStage.PickupToHub,
+            OrderRouteStopKind.Hub when order.HandoffStage is OrderHandoffStage.AtHub or OrderHandoffStage.LastMileInProgress
+                => ShiftAssignmentStage.HubToRecipient,
+            OrderRouteStopKind.Hub => ShiftAssignmentStage.PickupToHub,
+            OrderRouteStopKind.RecipientDelivery => ShiftAssignmentStage.HubToRecipient,
+            _ => ShiftAssignmentStage.LocalUrban
+        };
+    }
+
+    private static ShiftPlanSummaryDto BuildSyntheticPlanFromOrders(CourierProfile courier, List<Order> orders)
+    {
+        var courierName = $"{courier.User?.FName} {courier.User?.Name}".Trim();
+        var stops = new List<ShiftPlanStopDto>();
+        var sequence = 1;
+
+        foreach (var order in orders)
+        {
+            var routeStops = order.RouteStops.OrderBy(s => s.SortOrder).ToList();
+            if (routeStops.Count == 0)
+            {
+                if (order.PickupAddress != null)
+                {
+                    stops.Add(BuildSyntheticStop(sequence++, order, OrderRouteStopKind.SenderPickup,
+                        "Забор у отправителя", order.PickupAddress, ShiftAssignmentStage.LocalUrban));
+                }
+
+                if (order.DeliveryAddress != null)
+                {
+                    stops.Add(BuildSyntheticStop(sequence++, order, OrderRouteStopKind.RecipientDelivery,
+                        "Доставка получателю", order.DeliveryAddress, ShiftAssignmentStage.LocalUrban));
+                }
+
+                continue;
+            }
+
+            foreach (var stop in routeStops)
+            {
+                var stage = ResolveStageForStop(order, stop);
+                stops.Add(new ShiftPlanStopDto
+                {
+                    AssignmentId = 0,
+                    Sequence = sequence++,
+                    OrderId = order.ID_Order,
+                    OrderNumber = order.Order_Number,
+                    OrderRouteStopId = stop.ID_OrderRouteStop,
+                    StopKind = stop.Kind,
+                    Stage = stage,
+                    Status = ShiftAssignmentStatus.Pending,
+                    Title = string.IsNullOrWhiteSpace(stop.Title) ? stop.Kind.ToString() : stop.Title,
+                    Latitude = stop.Address?.Latitude is { } lat ? (double?)lat : null,
+                    Longitude = stop.Address?.Longitude is { } lon ? (double?)lon : null,
+                    AddressLine = BuildAddressLine(stop.Address),
+                    Priority = order.Priority,
+                    OrderSlaDueAtUtc = order.Sla_due_at
+                });
+            }
+        }
+
+        return new ShiftPlanSummaryDto
+        {
+            ShiftPlanId = 0,
+            CompanyId = courier.Company_id,
+            CourierId = courier.ID_CourierProfile,
+            CourierName = string.IsNullOrWhiteSpace(courierName) ? $"Курьер #{courier.ID_CourierProfile}" : courierName,
+            Status = ShiftPlanStatus.Draft,
+            CreatedAt = DateTime.UtcNow,
+            Stops = stops,
+            BuiltFromAssignedOrders = true,
+            RequiresActiveShift = true
+        };
+    }
+
+    private static ShiftPlanStopDto BuildSyntheticStop(
+        int sequence,
+        Order order,
+        OrderRouteStopKind kind,
+        string title,
+        Address address,
+        ShiftAssignmentStage stage)
+        => new()
+        {
+            AssignmentId = 0,
+            Sequence = sequence,
+            OrderId = order.ID_Order,
+            OrderNumber = order.Order_Number,
+            StopKind = kind,
+            Stage = stage,
+            Status = ShiftAssignmentStatus.Pending,
+            Title = title,
+            Latitude = address.Latitude is { } lat ? (double?)lat : null,
+            Longitude = address.Longitude is { } lon ? (double?)lon : null,
+            AddressLine = BuildAddressLine(address),
+            Priority = order.Priority,
+            OrderSlaDueAtUtc = order.Sla_due_at
+        };
+
+    public async Task<bool> IsCourierOwnedByUserAsync(int courierProfileId, int userId, CancellationToken cancellationToken = default)
+    {
+        return await _context.CourierProfiles.AsNoTracking()
+            .AnyAsync(c => c.ID_CourierProfile == courierProfileId && c.User_id == userId, cancellationToken);
     }
 
     private static bool TryPlanOrder(Order order, List<CourierRouteState> states, DateTime nowUtc)
@@ -362,6 +932,8 @@ public class ShiftPlannerService : IShiftPlannerService
         foreach (var state in states)
         {
             if (!state.IsCourierOnline)
+                continue;
+            if (leg.Order.Courier_id.HasValue && leg.Order.Courier_id.Value != state.Shift.Courier_id)
                 continue;
             if (leg.RequiresVehicle && !state.HasOperationalVehicle)
                 continue;
@@ -842,4 +1414,293 @@ public class ShiftPlannerService : IShiftPlannerService
         public int? OrderRouteStopId { get; init; }
         public string? Notes { get; init; }
     }
+
+    public async Task<ShiftClosureSummaryDto?> FinalizeShiftAsync(int shiftId, CancellationToken cancellationToken = default)
+    {
+        var shift = await _context.CourierShifts
+            .Include(s => s.CourierProfile).ThenInclude(c => c.User)
+            .FirstOrDefaultAsync(s => s.ID_Shift == shiftId, cancellationToken);
+        if (shift == null)
+            return null;
+
+        var plans = await _context.ShiftPlans
+            .Where(p => p.Shift_id == shiftId)
+            .ToListAsync(cancellationToken);
+
+        var now = DateTime.UtcNow;
+        foreach (var plan in plans.Where(p => p.Status is ShiftPlanStatus.Active or ShiftPlanStatus.Draft))
+        {
+            plan.Status = ShiftPlanStatus.Completed;
+            plan.Completed_at = now;
+        }
+
+        var assignments = await _context.ShiftAssignments
+            .Include(a => a.Order).ThenInclude(o => o!.PickupAddress)
+            .Include(a => a.Order).ThenInclude(o => o!.DeliveryAddress)
+            .Include(a => a.OrderRouteStop)!.ThenInclude(s => s!.Address)
+            .Where(a => a.Shift_id == shiftId)
+            .ToListAsync(cancellationToken);
+
+        var finalPlan = plans
+            .Where(p => p.Status == ShiftPlanStatus.Completed)
+            .OrderByDescending(p => p.Version)
+            .ThenByDescending(p => p.ID_ShiftPlan)
+            .FirstOrDefault();
+
+        if (finalPlan != null)
+        {
+            var planAssignments = assignments
+                .Where(a => a.ShiftPlan_id == finalPlan.ID_ShiftPlan)
+                .OrderBy(a => a.Assignment_sequence)
+                .ToList();
+            if (planAssignments.Count == 0)
+                planAssignments.AddRange(assignments.OrderBy(a => a.Assignment_sequence));
+
+            RecalculateAssignmentSegmentDistances(planAssignments);
+            finalPlan.Total_distance_km = Math.Round(planAssignments.Sum(a => a.Planned_distance_km), 3);
+            finalPlan.Estimated_duration_minutes = Math.Round(
+                planAssignments.Count * StopServiceMinutes + finalPlan.Total_distance_km / AvgSpeedKmH * 60m, 1);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return await BuildShiftClosureSummaryAsync(shift, finalPlan, assignments, cancellationToken);
+    }
+
+    public async Task<ShiftClosureSummaryDto?> GetShiftClosureSummaryAsync(int shiftId, CancellationToken cancellationToken = default)
+    {
+        var shift = await _context.CourierShifts
+            .Include(s => s.CourierProfile).ThenInclude(c => c.User)
+            .FirstOrDefaultAsync(s => s.ID_Shift == shiftId, cancellationToken);
+        if (shift == null)
+            return null;
+
+        var finalPlan = await _context.ShiftPlans
+            .Where(p => p.Shift_id == shiftId && p.Status == ShiftPlanStatus.Completed)
+            .OrderByDescending(p => p.Version)
+            .ThenByDescending(p => p.ID_ShiftPlan)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var assignments = await _context.ShiftAssignments
+            .Include(a => a.Order)
+            .Where(a => a.Shift_id == shiftId)
+            .ToListAsync(cancellationToken);
+
+        return await BuildShiftClosureSummaryAsync(shift, finalPlan, assignments, cancellationToken);
+    }
+
+    public async Task RecalculateActivePlanDistanceAsync(int courierProfileId, CancellationToken cancellationToken = default)
+    {
+        var plan = await _context.ShiftPlans
+            .Include(p => p.Assignments).ThenInclude(a => a.Order).ThenInclude(o => o!.PickupAddress)
+            .Include(p => p.Assignments).ThenInclude(a => a.Order).ThenInclude(o => o!.DeliveryAddress)
+            .Include(p => p.Assignments).ThenInclude(a => a.OrderRouteStop)!.ThenInclude(s => s!.Address)
+            .Where(p => p.Courier_id == courierProfileId && (p.Status == ShiftPlanStatus.Active || p.Status == ShiftPlanStatus.Draft))
+            .OrderByDescending(p => p.Created_at)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (plan == null)
+            return;
+
+        var ordered = plan.Assignments
+            .Where(a => a.Status is ShiftAssignmentStatus.Pending or ShiftAssignmentStatus.InProgress or ShiftAssignmentStatus.Done)
+            .OrderBy(a => a.Assignment_sequence)
+            .ToList();
+
+        RecalculateAssignmentSegmentDistances(ordered);
+        plan.Total_distance_km = Math.Round(ordered.Sum(a => a.Planned_distance_km), 3);
+        plan.Estimated_duration_minutes = Math.Round(
+            ordered.Count * StopServiceMinutes + plan.Total_distance_km / AvgSpeedKmH * 60m, 1);
+        plan.Last_recompute_reason = "route.recalculated";
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<CourierRouteMapWaypointDto>> GetShiftRouteWaypointsAsync(
+        int shiftId,
+        CancellationToken cancellationToken = default)
+    {
+        var plan = await _context.ShiftPlans
+            .Include(p => p.Assignments).ThenInclude(a => a.OrderRouteStop)!.ThenInclude(s => s!.Address)
+            .Include(p => p.Assignments).ThenInclude(a => a.Order).ThenInclude(o => o!.PickupAddress)
+            .Include(p => p.Assignments).ThenInclude(a => a.Order).ThenInclude(o => o!.DeliveryAddress)
+            .Where(p => p.Shift_id == shiftId && p.Status == ShiftPlanStatus.Completed)
+            .OrderByDescending(p => p.Version)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (plan == null)
+            return Array.Empty<CourierRouteMapWaypointDto>();
+
+        var list = new List<CourierRouteMapWaypointDto>();
+        foreach (var a in plan.Assignments.OrderBy(x => x.Assignment_sequence))
+        {
+            var (lat, lon, title) = ResolveAssignmentMapPoint(a);
+            if (!lat.HasValue || !lon.HasValue)
+                continue;
+
+            list.Add(new CourierRouteMapWaypointDto
+            {
+                Sequence = a.Assignment_sequence,
+                OrderId = a.Order_id > 0 ? a.Order_id : null,
+                AssignmentId = a.ID_ShiftAssignment,
+                Title = title ?? a.Notes,
+                Lat = lat.Value,
+                Lon = lon.Value
+            });
+        }
+
+        return list;
+    }
+
+    private async Task<ShiftClosureSummaryDto> BuildShiftClosureSummaryAsync(
+        CourierShift shift,
+        ShiftPlan? finalPlan,
+        List<ShiftAssignment> assignments,
+        CancellationToken cancellationToken)
+    {
+        var courier = shift.CourierProfile;
+        var name = $"{courier?.User?.Name} {courier?.User?.FName}".Trim();
+        if (string.IsNullOrWhiteSpace(name))
+            name = $"Курьер #{shift.Courier_id}";
+
+        var totalKm = finalPlan?.Total_distance_km ?? Math.Round(assignments.Sum(a => a.Planned_distance_km), 3);
+        if (totalKm <= 0)
+        {
+            var ordered = assignments.OrderBy(a => a.Assignment_sequence).ToList();
+            RecalculateAssignmentSegmentDistances(ordered);
+            totalKm = Math.Round(ordered.Sum(a => a.Planned_distance_km), 3);
+        }
+
+        var (liters, costRub) = await EstimateShiftFuelAsync(shift.Company_id, shift.Courier_id, totalKm, cancellationToken);
+        var waypoints = await GetShiftRouteWaypointsAsync(shift.ID_Shift, cancellationToken);
+
+        return new ShiftClosureSummaryDto
+        {
+            ShiftId = shift.ID_Shift,
+            CourierProfileId = shift.Courier_id,
+            CourierName = name,
+            TimeStart = shift.TimeStart,
+            TimeEnd = shift.TimeEnd,
+            ShiftPlanId = finalPlan?.ID_ShiftPlan,
+            PlanVersion = finalPlan?.Version ?? 0,
+            TotalDistanceKm = totalKm,
+            EstimatedFuelLiters = liters,
+            EstimatedFuelCostRub = costRub,
+            OrdersCompletedCount = assignments
+                .Where(a => a.Status == ShiftAssignmentStatus.Done)
+                .Select(a => a.Order_id)
+                .Distinct()
+                .Count(),
+            RouteStopsCompletedCount = assignments.Count(a => a.Status == ShiftAssignmentStatus.Done),
+            Waypoints = waypoints.ToList()
+        };
+    }
+
+    private async Task<(decimal liters, decimal costRub)> EstimateShiftFuelAsync(
+        int companyId,
+        int courierProfileId,
+        decimal distanceKm,
+        CancellationToken cancellationToken)
+    {
+        var safeDistance = Math.Max(0.1m, distanceKm);
+        var consumptionL100 = 10.5m;
+        var fuelPrice = await _fuelPriceService.GetPriceRubPerLiterAsync(null, cancellationToken);
+
+        var vehicle = await _context.Vehicles
+            .AsNoTracking()
+            .Include(v => v.VehicleModel)
+            .Include(v => v.FuelType)
+            .Where(v => v.Company_id == companyId && v.CurrentCourier_id == courierProfileId)
+            .OrderByDescending(v => v.ID_Vehicle)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (vehicle?.VehicleModel?.AvgFuelCity > 0)
+            consumptionL100 = vehicle.VehicleModel.AvgFuelCity;
+
+        if (vehicle?.FuelType?.Name != null)
+            fuelPrice = await _fuelPriceService.GetPriceRubPerLiterAsync(vehicle.FuelType.Name, cancellationToken);
+
+        var liters = Math.Round(safeDistance * consumptionL100 / 100m, 2);
+        var costRub = Math.Round(liters * fuelPrice, 2);
+        return (liters, costRub);
+    }
+
+    private static void ApplySegmentDistancesToAssignments(
+        List<ShiftAssignment> assignments,
+        IReadOnlyList<ApplyCourierRouteStopRequest> orderedStops)
+    {
+        var points = orderedStops
+            .Where(s => s.OrderId is > 0 && s.Latitude.HasValue && s.Longitude.HasValue)
+            .Select(s => ((double)s.Latitude!.Value, (double)s.Longitude!.Value))
+            .ToList();
+
+        for (var i = 0; i < assignments.Count; i++)
+        {
+            if (i == 0 || i >= points.Count)
+            {
+                assignments[i].Planned_distance_km = 0;
+                continue;
+            }
+
+            var prev = points[i - 1];
+            var cur = points[i];
+            assignments[i].Planned_distance_km = Math.Round((decimal)HaversineKm(prev.Item1, prev.Item2, cur.Item1, cur.Item2), 3);
+        }
+    }
+
+    private void RecalculateAssignmentSegmentDistances(List<ShiftAssignment> orderedAssignments)
+    {
+        (double lat, double lon)? prev = null;
+        foreach (var a in orderedAssignments)
+        {
+            var point = ResolveAssignmentCoordinates(a);
+            if (!point.HasValue)
+            {
+                a.Planned_distance_km = 0;
+                continue;
+            }
+
+            if (!prev.HasValue)
+            {
+                a.Planned_distance_km = 0;
+                prev = point;
+                continue;
+            }
+
+            a.Planned_distance_km = Math.Round(
+                (decimal)HaversineKm(prev.Value.lat, prev.Value.lon, point.Value.lat, point.Value.lon), 3);
+            prev = point;
+        }
+    }
+
+    private static (double lat, double lon)? ResolveAssignmentCoordinates(ShiftAssignment assignment)
+    {
+        if (assignment.OrderRouteStop?.Address?.Latitude is { } rLat &&
+            assignment.OrderRouteStop.Address.Longitude is { } rLon &&
+            (rLat != 0 || rLon != 0))
+            return ((double)rLat, (double)rLon);
+
+        var order = assignment.Order;
+        if (order?.PickupAddress?.Latitude is { } pLat && order.PickupAddress.Longitude is { } pLon && (pLat != 0 || pLon != 0))
+            return ((double)pLat, (double)pLon);
+
+        if (order?.DeliveryAddress?.Latitude is { } dLat && order.DeliveryAddress.Longitude is { } dLon && (dLat != 0 || dLon != 0))
+            return ((double)dLat, (double)dLon);
+
+        return null;
+    }
+
+    private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double r = 6371.0;
+        var dLat = DegreesToRadians(lat2 - lat1);
+        var dLon = DegreesToRadians(lon2 - lon1);
+        var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                Math.Cos(DegreesToRadians(lat1)) * Math.Cos(DegreesToRadians(lat2)) *
+                Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+        return r * c;
+    }
+
+    private static double DegreesToRadians(double deg) => deg * (Math.PI / 180.0);
 }

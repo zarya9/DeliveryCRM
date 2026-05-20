@@ -99,10 +99,49 @@ public class ChatApiService
         return (payload != null, payload?.RoomId ?? 0, payload?.RoomName);
     }
 
-    public async Task<bool> SendMessageAsync(int roomId, string text, string? attachmentUrl = null)
+    public async Task<(bool ok, ChatMessageDto? message)> SendMessageAsync(int roomId, string text, string? attachmentUrl = null)
     {
         var res = await _http.PostAsJsonAsync($"/api/Chat/messages?chatRoomId={roomId}", new { messageText = text, attachmentUrl = NormalizeAttachmentUrl(attachmentUrl) });
-        return res.IsSuccessStatusCode;
+        if (!res.IsSuccessStatusCode)
+            return (false, null);
+
+        try
+        {
+            var sent = await res.Content.ReadFromJsonAsync<SentMessageResponse>(JsonOptions);
+            if (sent is null)
+                return (true, null);
+
+            var dto = new ChatMessageDto
+            {
+                ID_ChatMessage = sent.id,
+                ChatRoom_id = sent.chatRoomId,
+                Sender_id = sent.senderId,
+                MessageText = sent.messageText ?? text,
+                SenderName = sent.senderName,
+                AttachmentUrl = NormalizeAttachmentUrl(sent.attachmentUrl),
+                Sent_at = sent.sentAt == default ? DateTime.UtcNow : sent.sentAt,
+                Edited_at = sent.editedAt,
+                Is_deleted = sent.isDeleted
+            };
+            return (true, dto);
+        }
+        catch
+        {
+            return (true, null);
+        }
+    }
+
+    private sealed class SentMessageResponse
+    {
+        public int id { get; set; }
+        public int chatRoomId { get; set; }
+        public int senderId { get; set; }
+        public string? senderName { get; set; }
+        public string? messageText { get; set; }
+        public string? attachmentUrl { get; set; }
+        public DateTime sentAt { get; set; }
+        public DateTime? editedAt { get; set; }
+        public bool isDeleted { get; set; }
     }
 
     public async Task<(bool ok, string? path, string? error)> UploadChatAttachmentAsync(IBrowserFile file)

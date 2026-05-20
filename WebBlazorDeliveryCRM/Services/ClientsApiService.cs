@@ -109,6 +109,31 @@ public class ClientsApiService
             return (false, ex.Message);
         }
     }
+
+    public async Task<int?> GetChatContactUserIdAsync(int? orderId = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var url = orderId is > 0
+                ? $"/api/Clients/chat-contact?orderId={orderId.Value}"
+                : "/api/Clients/chat-contact";
+            using var resp = await _http.GetAsync(url, cancellationToken);
+            if (!resp.IsSuccessStatusCode)
+                return null;
+            var dto = await resp.Content.ReadFromJsonAsync<ChatContactDto>(JsonOpts, cancellationToken);
+            return dto is { UserId: > 0 } ? dto.UserId : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}
+
+public sealed class ChatContactDto
+{
+    public int UserId { get; set; }
+    public string? Role { get; set; }
 }
 
 public sealed class UpdateClientProfileDto

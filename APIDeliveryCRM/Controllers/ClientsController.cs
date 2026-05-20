@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Request;
@@ -86,6 +87,23 @@ namespace APIDeliveryCRM.Controllers
         public async Task<IActionResult> AddNote([FromBody] AddClientNoteRequest request)
         {
             return await _clientService.AddClientNoteAsync(request);
+        }
+
+        /// <summary>Сотрудник компании для личного чата (менеджер, логист, админ).</summary>
+        [HttpGet("chat-contact")]
+        [Authorize(Roles = "Клиент")]
+        public async Task<IActionResult> GetChatContact([FromQuery] int? orderId = null)
+        {
+            var userId = GetCurrentUserId();
+            if (!userId.HasValue)
+                return Unauthorized();
+            return await _clientService.GetChatContactUserIdAsync(userId.Value, orderId);
+        }
+
+        private int? GetCurrentUserId()
+        {
+            var v = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return int.TryParse(v, out var id) ? id : null;
         }
     }
 }

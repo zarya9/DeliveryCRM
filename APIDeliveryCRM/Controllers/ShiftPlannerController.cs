@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using APIDeliveryCRM.Interfaces;
+using APIDeliveryCRM.Request;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -44,20 +45,67 @@ public class ShiftPlannerController : Controller
         return Ok(result);
     }
 
+    [HttpPost("courier/{courierId:int}/apply-route")]
+    [Authorize(Roles = "Курьер,Логист,Логистика,Администратор,Админ,Менеджер")]
+    public async Task<IActionResult> ApplyCourierRoute(int courierId, [FromBody] ApplyCourierRouteRequest request, CancellationToken cancellationToken)
+    {
+        var isCourier = User.IsInRole("Курьер");
+        var isStaff = User.IsInRole("Логист") || User.IsInRole("Логистика")
+            || User.IsInRole("Администратор") || User.IsInRole("Админ") || User.IsInRole("Менеджер");
+        if (isCourier && !isStaff)
+        {
+            if (!await IsCourierSelfAsync(courierId))
+                return Forbid();
+        }
+        else if (!isStaff)
+        {
+            return Forbid();
+        }
+
+        var companyId = GetCompanyIdClaim();
+        if (!companyId.HasValue)
+            return Unauthorized();
+
+        if (request.Stops == null || request.Stops.Count == 0)
+            return BadRequest(new { message = "Список точек маршрута пуст." });
+
+        var reason = isCourier && !isStaff ? "courier.route_changed" : "logistician.route_map";
+        var plan = await _planner.ApplyCourierRouteAsync(
+            companyId.Value,
+            courierId,
+            request.Stops,
+            reason,
+            cancellationToken);
+        if (plan == null)
+            return BadRequest(new { message = "Не удалось применить маршрут. Проверьте координаты точек и заказы." });
+
+        return Ok(plan);
+    }
+
     [HttpGet("courier/{courierId:int}")]
+    [Authorize(Roles = "Курьер,Логист,Логистика,Администратор,Админ,Менеджер")]
     public async Task<IActionResult> GetCourierPlan(int courierId, CancellationToken cancellationToken)
     {
-        var plan = await _planner.GetActivePlanForCourierAsync(courierId, cancellationToken);
+        var plan = await _planner.GetCourierPlanAsync(courierId, cancellationToken);
         if (plan == null) return NotFound();
 
         var companyId = GetCompanyIdClaim();
         if (!companyId.HasValue || plan.CompanyId != companyId.Value)
             return Forbid();
 
-        if (!IsStaff())
+        if (!IsStaff() && !await IsCourierSelfAsync(courierId))
             return Forbid();
 
         return Ok(plan);
+    }
+
+    private async Task<bool> IsCourierSelfAsync(int courierProfileId)
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(userId, out var uid))
+            return false;
+
+        return await _planner.IsCourierOwnedByUserAsync(courierProfileId, uid);
     }
 
     private bool IsStaff()

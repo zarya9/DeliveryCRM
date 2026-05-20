@@ -1,21 +1,50 @@
+@using System.Security.Claims
 @inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
 
-<p>Перенаправление на страницу входа… <a href="/login">Войти</a></p>
+<p class="text-muted small p-3">Проверка доступа…</p>
 
 @code {
-    protected override void OnInitialized()
+    private bool _handled;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        var relative = Navigation.ToBaseRelativePath(Navigation.Uri);
-        var path = "/" + relative.TrimStart('/');
-        if (path.StartsWith("/login", StringComparison.OrdinalIgnoreCase))
+        if (!firstRender || _handled)
             return;
+        _handled = true;
+
+        var path = AuthRouteHelper.GetPathOnly(Navigation.Uri);
+        if (AuthRouteHelper.IsAuthPage(path))
+            return;
+
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (state.User.Identity?.IsAuthenticated == true)
+        {
+            var role = state.User.FindFirst(ClaimTypes.Role)?.Value
+                       ?? state.User.FindFirst("role")?.Value;
+            if (AuthRouteHelper.CanAccessPathForRole(role, path))
+            {
+                TryNavigate(path);
+                return;
+            }
+
+            TryNavigate("/access-denied");
+            return;
+        }
+
+        var returnUrl = Uri.EscapeDataString(path);
+        TryNavigate($"/login?ReturnUrl={returnUrl}");
+    }
+
+    private void TryNavigate(string url)
+    {
         try
         {
-            Navigation.NavigateTo("/login", forceLoad: true, replace: true);
+            Navigation.NavigateTo(url, replace: true);
         }
         catch (Microsoft.AspNetCore.Components.NavigationException)
         {
-            // In some debug modes Blazor throws NavigationException to interrupt rendering on redirect.
+            // Blazor debug: redirect interrupts render.
         }
     }
 }

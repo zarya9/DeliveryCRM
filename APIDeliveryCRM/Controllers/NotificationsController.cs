@@ -75,6 +75,13 @@ namespace APIDeliveryCRM.Controllers
             return int.TryParse(v, out var id) ? id : null;
         }
 
+        private static string? LocalizeNotificationTypeName(string? typeName) => typeName switch
+        {
+            "SHIFT_STARTED" => "Начало смены",
+            "SHIFT_FINISHED" => "Завершение смены",
+            _ => typeName
+        };
+
         private static NotificationItemDto MapToDto(Notification n)
         {
             return new NotificationItemDto
@@ -82,8 +89,9 @@ namespace APIDeliveryCRM.Controllers
                 Id = n.ID_Notification,
                 Title = n.Title ?? "",
                 Message = n.Message ?? "",
-                TypeName = n.NotificationType?.Name,
+                TypeName = LocalizeNotificationTypeName(n.NotificationType?.Name),
                 OrderId = n.Order_id,
+                ShiftId = n.Shift_id,
                 IsRead = n.Is_read,
                 SentAt = n.Sent_at,
                 Priority = n.Priority,

@@ -6,6 +6,7 @@
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
 @using WebBlazorDeliveryCRM.Components.Shared
+@using System.Globalization
 @using WebBlazorDeliveryCRM.Utilities
 @inject AuthenticationStateProvider AuthState
 @inject CouriersApiService CouriersApi
@@ -20,7 +21,8 @@
         Мои заказы
     </h1>
     <p class="subtitle">
-        Активные назначения на вас. Можно сменить статус доставки (как в панели компании). Координаты точек — для навигации в картографических сервисах.
+        Активные назначения на вас. Пошаговый маршрут и навигатор — в <a href="/courier/route">«Мой маршрут»</a>.
+        Здесь можно открыть внешнюю навигацию до адреса доставки.
     </p>
 </div>
 
@@ -51,7 +53,63 @@ else
         }
         else
         {
-            <div class="table-responsive">
+            <div class="courier-orders-cards d-md-none">
+                @foreach (var o in _orders.OrderByDescending(x => x.Created_at))
+                {
+                    var sel = _pendingStatus.GetValueOrDefault(o.ID_Order, o.Status_id);
+                    var createdLocal = o.Created_at.ToLocalTime();
+                    <article class="courier-order-card">
+                        <div class="courier-order-card__head">
+                            <div>
+                                <div class="courier-order-card__number">Заказ №@o.Order_Number</div>
+                                <div class="courier-order-card__meta">@createdLocal.ToString("dd.MM.yyyy") · @createdLocal.ToString("HH:mm")</div>
+                            </div>
+                            <div class="courier-order-card__badges">
+                                <span class="badge text-bg-secondary courier-order-card__kind">@FormatRouteKind(o.DeliveryRouteKind)</span>
+                                <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@OrderStatusUi.ToneForStatusName(o.OrderStatus?.Name)" />
+                            </div>
+                        </div>
+                        <div class="courier-order-card__route">
+                            @foreach (var line in GetRouteAddressLines(o))
+                            {
+                                <div class="courier-order-card__route-line">@line</div>
+                            }
+                        </div>
+                        <div class="courier-order-card__actions">
+                            @if (TryGetNavTarget(o, out var tLat, out var tLon))
+                            {
+                                <div class="courier-order-card__nav d-flex flex-wrap gap-1 w-100 mb-2">
+                                    @if (CourierNavigationUrls.YandexRoute(_courierLat, _courierLon, tLat, tLon) is { } yx)
+                                    {
+                                        <a class="btn btn-outline-primary btn-sm" href="@yx" target="_blank" rel="noopener">Яндекс</a>
+                                    }
+                                    @if (CourierNavigationUrls.GoogleRoute(_courierLat, _courierLon, tLat, tLon) is { } gl)
+                                    {
+                                        <a class="btn btn-outline-secondary btn-sm" href="@gl" target="_blank" rel="noopener">Google</a>
+                                    }
+                                    <a class="btn btn-outline-secondary btn-sm" href="/courier/route">Маршрут</a>
+                                </div>
+                            }
+                            <select class="form-select form-select-sm"
+                                    value="@sel"
+                                    @onchange="e => OnStatusSelect(o.ID_Order, e.Value?.ToString())">
+                                @foreach (var s in _statuses)
+                                {
+                                    <option value="@s.Id">@(s.Name ?? $"#{s.Id}")</option>
+                                }
+                            </select>
+                            <button type="button" class="btn btn-sm btn-primary dms-btn-primary d-inline-flex align-items-center justify-content-center gap-1"
+                                    disabled="@(_statusBusyId == o.ID_Order || sel == o.Status_id)"
+                                    @onclick="() => ApplyStatusAsync(o.ID_Order, sel)">
+                                <HugeIcon Name="sent" CssClass="dms-icon-sm" />
+                                <span>Сохранить</span>
+                            </button>
+                        </div>
+                    </article>
+                }
+            </div>
+
+            <div class="table-responsive d-none d-md-block">
                 <table class="table table-sm align-middle mb-0 dms-data-table">
                     <thead>
                     <tr>
@@ -74,10 +132,20 @@ else
                             </td>
                             <td>
                                 <div class="small">@FormatRouteKind(o.DeliveryRouteKind)</div>
-                                <div class="small text-muted">@AddressLine(o)</div>
+                                @foreach (var line in GetRouteAddressLines(o))
+                                {
+                                    <div class="small text-muted">@line</div>
+                                }
                             </td>
                             <td>
-                                <div class="d-flex flex-wrap gap-2">
+                                <div class="d-flex flex-wrap gap-2 align-items-center">
+                                    @if (TryGetNavTarget(o, out var tLat, out var tLon))
+                                    {
+                                        @if (CourierNavigationUrls.YandexRoute(_courierLat, _courierLon, tLat, tLon) is { } yx)
+                                        {
+                                            <a class="btn btn-outline-primary btn-sm" href="@yx" target="_blank" rel="noopener" title="Навигатор">↗</a>
+                                        }
+                                    }
                                     <select class="form-select form-select-sm" style="min-width: 10rem;"
                                             value="@sel"
                                             @onchange="e => OnStatusSelect(o.ID_Order, e.Value?.ToString())">
@@ -111,6 +179,8 @@ else
     private bool _loading = true;
     private bool _reloadBusy;
     private int? _statusBusyId;
+    private double _courierLat = 55.7558;
+    private double _courierLon = 37.6173;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -126,6 +196,16 @@ else
 
         var profile = await CouriersApi.GetByUserIdAsync(uid);
         _profileId = profile?.ID_CourierProfile;
+        if (profile != null)
+        {
+            var lat = (double)profile.Current_lat;
+            var lon = (double)profile.Current_lon;
+            if (Math.Abs(lat) >= 0.001 || Math.Abs(lon) >= 0.001)
+            {
+                _courierLat = lat;
+                _courierLon = lon;
+            }
+        }
         _statuses = await OrdersApi.GetOrderStatusesAsync();
         if (_profileId.HasValue)
             await ReloadAsync();
@@ -199,17 +279,85 @@ else
         _ => string.IsNullOrWhiteSpace(k) ? "Маршрут" : k
     };
 
-    private static string AddressLine(OrderDto o)
+    private static IReadOnlyList<string> GetRouteAddressLines(OrderDto o)
     {
-        var d = o.DeliveryAddress;
-        var p = o.PickupAddress;
-        if (HasCoords(d))
-            return $"Доставка: {d!.Latitude:0.####}, {d.Longitude:0.####}";
-        if (HasCoords(p))
-            return $"Забор: {p!.Latitude:0.####}, {p.Longitude:0.####}";
-        return "Координаты не указаны";
+        var lines = new List<string>();
+
+        if (o.RouteStops is { Count: > 0 })
+        {
+            foreach (var stop in o.RouteStops.OrderBy(s => s.SortOrder))
+            {
+                var label = string.IsNullOrWhiteSpace(stop.Title)
+                    ? StopKindLabel(stop.Kind)
+                    : stop.Title!.Trim();
+                var addr = AddressFormat.OneLine(stop.Address);
+                if (!string.IsNullOrWhiteSpace(label) && addr != "—")
+                    lines.Add($"{label}: {addr}");
+                else if (!string.IsNullOrWhiteSpace(label))
+                    lines.Add(label);
+                else if (addr != "—")
+                    lines.Add(addr);
+            }
+
+            if (lines.Count > 0)
+                return lines;
+        }
+
+        var pickup = FormatAddressPoint("Забор", o.PickupAddress);
+        var delivery = FormatAddressPoint("Доставка", o.DeliveryAddress);
+
+        if (pickup != null)
+            lines.Add(pickup);
+        if (delivery != null && delivery != pickup)
+            lines.Add(delivery);
+
+        if (lines.Count == 0)
+            lines.Add("Адрес не указан");
+
+        return lines;
     }
 
-    private static bool HasCoords(AddressShortDto? a)
-        => a?.Latitude is { } lat && a.Longitude is { } lon && (lat != 0 || lon != 0);
+    private static string? FormatAddressPoint(string label, AddressShortDto? address)
+    {
+        var formatted = AddressFormat.OneLine(address);
+        if (formatted == "—")
+            return null;
+        return $"{label}: {formatted}";
+    }
+
+    private static string StopKindLabel(string? kind) => kind switch
+    {
+        "SenderPickup" => "Забор у отправителя",
+        "Hub" => "Склад / хаб",
+        "RecipientDelivery" => "Доставка получателю",
+        _ => kind ?? "Точка маршрута"
+    };
+
+    private static bool TryGetNavTarget(OrderDto o, out double lat, out double lon)
+    {
+        lat = lon = 0;
+        if (TryCoords(o.DeliveryAddress, out lat, out lon))
+            return true;
+
+        if (o.RouteStops is { Count: > 0 })
+        {
+            foreach (var stop in o.RouteStops.OrderBy(s => s.SortOrder))
+            {
+                if (TryCoords(stop.Address, out lat, out lon))
+                    return true;
+            }
+        }
+
+        return TryCoords(o.PickupAddress, out lat, out lon);
+    }
+
+    private static bool TryCoords(AddressShortDto? address, out double lat, out double lon)
+    {
+        lat = lon = 0;
+        if (address?.Latitude is not { } la || address.Longitude is not { } lo)
+            return false;
+        lat = (double)la;
+        lon = (double)lo;
+        return Math.Abs(lat) >= 0.001 || Math.Abs(lon) >= 0.001;
+    }
 }

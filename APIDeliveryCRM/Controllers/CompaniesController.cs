@@ -1,10 +1,8 @@
-using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
-using APIDeliveryCRM.ContextDb;
+using APIDeliveryCRM.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace APIDeliveryCRM.Controllers;
 
@@ -13,11 +11,11 @@ namespace APIDeliveryCRM.Controllers;
 [Authorize(Roles = "Клиент")]
 public class CompaniesController : Controller
 {
-    private readonly ContextDB _context;
+    private readonly ICompanyService _companyService;
 
-    public CompaniesController(ContextDB context)
+    public CompaniesController(ICompanyService companyService)
     {
-        _context = context;
+        _companyService = companyService;
     }
 
     /// <summary>Службы доставки, в которые клиент может направить новый заказ (активная подписка + компания учётной записи).</summary>
@@ -28,23 +26,9 @@ public class CompaniesController : Controller
         if (!userId.HasValue)
             return Unauthorized();
 
-        var client = await _context.ClientProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(c => c.User_id == userId.Value);
-        if (client == null)
+        var (list, clientMissing) = await _companyService.GetCompaniesForCustomerOrderAsync(userId.Value);
+        if (clientMissing)
             return BadRequest(new { message = "Профиль клиента не найден." });
-
-        var now = DateTime.UtcNow;
-        var activeCompanyIds = await _context.Companies.AsNoTracking()
-            .Where(c => c.Is_Active && (c.SubscriptionExpiresAt == default || c.SubscriptionExpiresAt >= now))
-            .Select(c => c.ID_Company)
-            .ToListAsync();
-
-        var list = await _context.Companies.AsNoTracking()
-            .Where(c => activeCompanyIds.Contains(c.ID_Company) || c.ID_Company == client.Company_id)
-            .OrderBy(c => c.ID_Company == client.Company_id ? 0 : 1)
-            .ThenBy(c => c.Name)
-            .Select(c => new { id = c.ID_Company, name = c.Name })
-            .ToListAsync();
 
         return Ok(list);
     }

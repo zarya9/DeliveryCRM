@@ -330,6 +330,17 @@ public class ChatService : IChatService
             .Select(u => new { u.ID_User, u.Name, u.FName })
             .ToListAsync();
 
+        var companyDisplayName = await _context.Companies.AsNoTracking()
+            .Where(c => c.ID_Company == companyId)
+            .Select(c => c.Name)
+            .FirstOrDefaultAsync() ?? string.Empty;
+
+        var viewerIsClient = await _context.Users.AsNoTracking()
+            .Include(u => u.Role)
+            .Where(u => u.ID_User == userId)
+            .Select(u => u.Role != null && u.Role.Name == "Клиент")
+            .FirstOrDefaultAsync();
+
         var list = new List<object>();
         foreach (var room in rooms.OrderByDescending(r => r.LastMessage_at ?? r.Created_at))
         {
@@ -371,7 +382,7 @@ public class ChatService : IChatService
             {
                 var peer = users.FirstOrDefault(u => u.ID_User == peerUserId.Value);
                 if (peer != null)
-                    name = $"{peer.FName} {peer.Name}".Trim();
+                    name = FormatDirectChatDisplayName(companyDisplayName, peer.Name, peer.FName, viewerIsClient);
             }
 
             list.Add(new
@@ -619,6 +630,28 @@ public class ChatService : IChatService
         return created.ID_ChatRoomType;
     }
 
+    /// <summary>
+    /// Личный чат: для клиента — «Компания: Фамилия Имя»; для сотрудников — только «Фамилия Имя».
+    /// </summary>
+    private static string FormatDirectChatDisplayName(
+        string? companyName,
+        string? surname,
+        string? givenName,
+        bool includeCompanyPrefix)
+    {
+        var company = (companyName ?? string.Empty).Trim();
+        var last = (surname ?? string.Empty).Trim();
+        var first = (givenName ?? string.Empty).Trim();
+        var person = string.Join(" ", new[] { last, first }.Where(p => !string.IsNullOrEmpty(p)));
+        if (!includeCompanyPrefix)
+            return string.IsNullOrEmpty(person) ? "Сотрудник" : person;
+        if (string.IsNullOrEmpty(company))
+            return string.IsNullOrEmpty(person) ? "Сотрудник" : person;
+        if (string.IsNullOrEmpty(person))
+            return company;
+        return $"{company}: {person}";
+    }
+
     private static string NormalizeRoomKind(string? roomTypeName)
     {
         if (string.IsNullOrWhiteSpace(roomTypeName))
@@ -683,7 +716,12 @@ public class ChatService : IChatService
             .ToListAsync();
 
         foreach (var userId in participantIds)
+        {
+            // Clients.User — надёжная доставка по IUserIdProvider (JWT sub / NameIdentifier).
+            await _hubContext.Clients.User(userId.ToString()).SendAsync(method, payload);
+            // Дублируем в кастомную группу для старых клиентов.
             await _hubContext.Clients.Group($"User_{userId}").SendAsync(method, payload);
+        }
     }
 
     // #region agent log

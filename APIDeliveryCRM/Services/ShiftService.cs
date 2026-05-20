@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
+using APIDeliveryCRM.Responses;
 using Microsoft.EntityFrameworkCore;
 
 namespace APIDeliveryCRM.Services
@@ -66,7 +67,9 @@ namespace APIDeliveryCRM.Services
 
         public async Task<bool> EndShiftAsync(int shiftId)
         {
-            var shift = await _context.CourierShifts.FirstOrDefaultAsync(s => s.ID_Shift == shiftId);
+            var shift = await _context.CourierShifts
+                .Include(s => s.CourierProfile).ThenInclude(c => c.User)
+                .FirstOrDefaultAsync(s => s.ID_Shift == shiftId);
             if (shift == null || shift.TimeEnd != null)
             {
                 return false;
@@ -81,6 +84,18 @@ namespace APIDeliveryCRM.Services
                 courier.LastActivity_at = DateTime.UtcNow;
             }
             await _context.SaveChangesAsync();
+
+            ShiftClosureSummaryDto? closure = null;
+            try
+            {
+                closure = await _plannerService.FinalizeShiftAsync(shiftId);
+            }
+            catch
+            {
+                // Finalize must not block shift end.
+            }
+
+            await TryNotifyLogisticiansShiftEndedAsync(shift, closure);
             await TryRebuildCompanyPlanAsync(shift.Company_id, "shift.ended");
             return true;
         }
@@ -167,13 +182,59 @@ namespace APIDeliveryCRM.Services
             if (logistIds.Count == 0)
                 return;
 
-            var notificationTypeId = await ResolveShiftNotificationTypeIdAsync();
+            var notificationTypeId = await ResolveShiftNotificationTypeIdAsync(
+                "Начало смены",
+                "Курьер начал смену.",
+                "SHIFT_STARTED");
             var fio = BuildCourierShortName(courier.User.FName, courier.User.Name, courier.User.Patronumic);
             var title = "Начало смены курьера";
             var message = $"{fio} начал смену.";
 
             foreach (var logistUserId in logistIds)
                 await _notificationService.SendAsync(logistUserId, notificationTypeId, title, message);
+        }
+
+        private async Task NotifyLogisticiansShiftEndedAsync(CourierShift shift, ShiftClosureSummaryDto? closure)
+        {
+            var courier = shift.CourierProfile ?? await _context.CourierProfiles.AsNoTracking()
+                .Include(c => c.User)
+                .FirstOrDefaultAsync(c => c.ID_CourierProfile == shift.Courier_id);
+            if (courier?.User == null)
+                return;
+
+            var companyId = shift.Company_id;
+            var roleNames = new[] { "Логист", "Логистика" };
+            var logistIds = await _context.Users.AsNoTracking()
+                .Where(u => u.Company_id == companyId && roleNames.Contains(u.Role.Name))
+                .Select(u => u.ID_User)
+                .Distinct()
+                .ToListAsync();
+            if (logistIds.Count == 0)
+                return;
+
+            var notificationTypeId = await ResolveShiftNotificationTypeIdAsync(
+                "Завершение смены",
+                "Курьер завершил смену. Доступен итоговый маршрут и пересчёт топлива.",
+                "SHIFT_FINISHED");
+
+            var fio = closure?.CourierName ?? BuildCourierShortName(courier.User.FName, courier.User.Name, courier.User.Patronumic);
+            var title = "Завершение смены курьера";
+            string message;
+            if (closure != null && closure.TotalDistanceKm > 0)
+            {
+                message =
+                    $"{fio} завершил смену. Итоговый маршрут: {closure.TotalDistanceKm:0.#} км, " +
+                    $"топливо ~{closure.EstimatedFuelLiters:0.#} л (≈ {closure.EstimatedFuelCostRub:0.#} ₽). " +
+                    $"Выполнено заказов: {closure.OrdersCompletedCount}. " +
+                    "Откройте итог смены для просмотра маршрута и пересчёта.";
+            }
+            else
+            {
+                message = $"{fio} завершил смену. Откройте итог смены для просмотра маршрута.";
+            }
+
+            foreach (var logistUserId in logistIds)
+                await _notificationService.SendAsync(logistUserId, notificationTypeId, title, message, shiftId: shift.ID_Shift);
         }
 
         private async Task TryNotifyLogisticiansShiftStartedAsync(int courierProfileId, int companyId)
@@ -188,19 +249,42 @@ namespace APIDeliveryCRM.Services
             }
         }
 
-        private async Task<int> ResolveShiftNotificationTypeIdAsync()
+        private async Task TryNotifyLogisticiansShiftEndedAsync(CourierShift shift, ShiftClosureSummaryDto? closure)
         {
-            var id = await _context.NotificationTypes
-                .Where(t => t.Name == "SHIFT_STARTED")
-                .Select(t => t.ID_NotificationType)
-                .FirstOrDefaultAsync();
-            if (id > 0)
-                return id;
+            try
+            {
+                await NotifyLogisticiansShiftEndedAsync(shift, closure);
+            }
+            catch
+            {
+                // Shift lifecycle must not fail if notification insert fails.
+            }
+        }
+
+        private async Task<int> ResolveShiftNotificationTypeIdAsync(string displayName, string description, string? legacyCode = null)
+        {
+            var type = await _context.NotificationTypes
+                .FirstOrDefaultAsync(t =>
+                    t.Name == displayName ||
+                    (!string.IsNullOrEmpty(legacyCode) && t.Name == legacyCode));
+
+            if (type != null)
+            {
+                if (!string.Equals(type.Name, displayName, StringComparison.Ordinal))
+                {
+                    type.Name = displayName;
+                    if (string.IsNullOrWhiteSpace(type.Description))
+                        type.Description = description;
+                    await _context.SaveChangesAsync();
+                }
+
+                return type.ID_NotificationType;
+            }
 
             var created = new NotificationType
             {
-                Name = "SHIFT_STARTED",
-                Description = "Курьер начал смену."
+                Name = displayName,
+                Description = description
             };
             _context.NotificationTypes.Add(created);
             await _context.SaveChangesAsync();

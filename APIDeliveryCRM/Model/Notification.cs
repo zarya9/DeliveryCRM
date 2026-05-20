@@ -30,6 +30,10 @@ namespace APIDeliveryCRM.Model
         public int? Order_id { get; set; }
         public Order? Order { get; set; }
 
+        [ForeignKey(nameof(CourierShift))]
+        public int? Shift_id { get; set; }
+        public CourierShift? CourierShift { get; set; }
+
         public bool Is_read { get; set; }
         public byte Priority { get; set; } = 0;
         public bool Is_critical { get; set; }

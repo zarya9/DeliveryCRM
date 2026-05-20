@@ -1,0 +1,98 @@
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@implements IDisposable
+@inject CourierProximityState Proximity
+@inject OrdersApiService OrdersApi
+@inject AppNotificationService Notify
+
+@if (_stop is not null)
+{
+    <div class="courier-proximity-banner" role="status">
+        <div class="courier-proximity-banner__body">
+            <div class="courier-proximity-banner__text">
+                <strong>Вы рядом с заказом №@_stop.OrderNumber</strong>
+                <span class="d-block small">@_stop.Title · ~@_stop.DistanceMeters.ToString("0") м</span>
+                @if (!string.IsNullOrWhiteSpace(_stop.AddressLine))
+                {
+                    <span class="d-block small text-muted">@_stop.AddressLine</span>
+                }
+            </div>
+            <button type="button"
+                    class="btn btn-success btn-sm flex-shrink-0"
+                    disabled="@_busy"
+                    @onclick="ConfirmDeliveredAsync">
+                @(_busy ? "…" : "Заказ доставлен")
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    private NearbyDeliveryStopDto? _stop;
+    private bool _busy;
+
+    protected override void OnInitialized()
+    {
+        Proximity.Changed += OnProximityChanged;
+        _stop = Proximity.PrimaryNearby;
+    }
+
+    private void OnProximityChanged()
+    {
+        _stop = Proximity.PrimaryNearby;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ConfirmDeliveredAsync()
+    {
+        if (_stop is null)
+            return;
+
+        _busy = true;
+        try
+        {
+            if (_stop.AssignmentId > 0)
+            {
+                var result = await OrdersApi.CompleteRouteStopAsync(_stop.AssignmentId, null);
+                if (result == null)
+                {
+                    Notify.ShowError("Не удалось отметить доставку. Проверьте смену и маршрут.");
+                    return;
+                }
+
+                if (result.OrderDelivered)
+                    Notify.ShowSuccess($"Заказ №{result.OrderNumber} доставлен. Клиенту отправлено уведомление.");
+                else
+                    Notify.ShowSuccess($"Точка выполнена. Статус: {result.NewStatusName ?? "обновлён"}.");
+            }
+            else
+            {
+                var statuses = await OrdersApi.GetOrderStatusesAsync();
+                var deliveredId = statuses.FirstOrDefault(s =>
+                    string.Equals(s.Name, "Доставлен", StringComparison.OrdinalIgnoreCase))?.Id;
+                if (!deliveredId.HasValue || deliveredId.Value <= 0)
+                {
+                    Notify.ShowError("Статус «Доставлен» не найден в системе.");
+                    return;
+                }
+
+                var ok = await OrdersApi.ChangeStatusAsync(_stop.OrderId, deliveredId.Value);
+                if (!ok)
+                {
+                    Notify.ShowError("Не удалось отметить заказ как доставленный.");
+                    return;
+                }
+
+                Notify.ShowSuccess($"Заказ №{_stop.OrderNumber} доставлен. Клиенту отправлено уведомление.");
+            }
+
+            Proximity.Clear();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public void Dispose() => Proximity.Changed -= OnProximityChanged;
+}

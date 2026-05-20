@@ -18,6 +18,7 @@ namespace APIDeliveryCRM.Interfaces
         Task<IActionResult> GetBoundCardsAsync(int clientProfileId);
         Task<IActionResult> GetClientDetailsAsync(int clientProfileId);
         Task<IActionResult> AddClientNoteAsync(AddClientNoteRequest request);
+        Task<IActionResult> GetChatContactUserIdAsync(int clientUserId, int? orderId = null);
     }
 }
 

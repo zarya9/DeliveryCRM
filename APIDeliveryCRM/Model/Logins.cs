@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APIDeliveryCRM.Model
@@ -21,5 +21,7 @@ namespace APIDeliveryCRM.Model
         [ForeignKey(nameof(User))]
         public int ID_User { get; set; }
         public User User { get; set; } = null!;
+
+        public ICollection<PasswordResetCode> PasswordResetCodes { get; set; } = new List<PasswordResetCode>();
     }
 }

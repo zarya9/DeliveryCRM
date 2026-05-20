@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
 using APIDeliveryCRM.Interfaces;
@@ -15,12 +15,18 @@ namespace APIDeliveryCRM.Controllers
     {
         private readonly IUserLoginService _userService;
         private readonly IUserPresenceService _presenceService;
+        private readonly IPasswordResetService _passwordResetService;
         private readonly ContextDB _context;
 
-        public UsersController(IUserLoginService userService, IUserPresenceService presenceService, ContextDB context)
+        public UsersController(
+            IUserLoginService userService,
+            IUserPresenceService presenceService,
+            IPasswordResetService passwordResetService,
+            ContextDB context)
         {
             _userService = userService;
             _presenceService = presenceService;
+            _passwordResetService = passwordResetService;
             _context = context;
         }
 
@@ -99,6 +105,20 @@ namespace APIDeliveryCRM.Controllers
         public async Task<IActionResult> LoginAsync(LoginRequest dto)
         {
             return await _userService.LoginAsync(dto);
+        }
+
+        [HttpPost("password-reset/request")]
+        [AllowAnonymous]
+        public Task<IActionResult> RequestPasswordReset([FromBody] RequestPasswordResetRequest dto)
+        {
+            return _passwordResetService.RequestResetCodeAsync(dto, HttpContext.RequestAborted);
+        }
+
+        [HttpPost("password-reset/complete")]
+        [AllowAnonymous]
+        public Task<IActionResult> CompletePasswordReset([FromBody] CompletePasswordResetRequest dto)
+        {
+            return _passwordResetService.CompleteResetAsync(dto, HttpContext.RequestAborted);
         }
 
         [HttpPost]

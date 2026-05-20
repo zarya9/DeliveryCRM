@@ -62,6 +62,38 @@ public class OrdersApiService
         return res.IsSuccessStatusCode;
     }
 
+    public async Task<(bool ok, string? error)> RevokeCourierAsync(int orderId, string? reason = null)
+    {
+        var suffix = string.IsNullOrWhiteSpace(reason)
+            ? string.Empty
+            : $"?reason={Uri.EscapeDataString(reason)}";
+        var res = await _http.PostAsync($"/api/Orders/{orderId}/revoke-courier{suffix}", null);
+        if (res.IsSuccessStatusCode)
+            return (true, null);
+
+        try
+        {
+            await using var stream = await res.Content.ReadAsStreamAsync();
+            using var doc = await JsonDocument.ParseAsync(stream);
+            if (doc.RootElement.TryGetProperty("message", out var m))
+                return (false, m.GetString());
+        }
+        catch
+        {
+            /* ignore */
+        }
+
+        return (false, $"Ошибка {(int)res.StatusCode}");
+    }
+
+    public async Task<RevokeCourierOrdersResultDto?> RevokeFromCourierAsync(RevokeCourierOrdersRequestDto request)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/Orders/revoke-from-courier", request);
+        if (!resp.IsSuccessStatusCode)
+            return null;
+        return await resp.Content.ReadFromJsonAsync<RevokeCourierOrdersResultDto>(JsonOpts);
+    }
+
     public async Task<OrderDispatchDto?> AutoDispatchAsync(int orderId)
     {
         var resp = await _http.PostAsync($"/api/Orders/{orderId}/auto-dispatch", null);
@@ -74,6 +106,17 @@ public class OrdersApiService
     {
         var res = await _http.PostAsync($"/api/Orders/{orderId}/status?statusId={statusId}", null);
         return res.IsSuccessStatusCode;
+    }
+
+    public async Task<RouteStopCompletionResultDto?> CompleteRouteStopAsync(int assignmentId, int? courierProfileId = null)
+    {
+        var url = courierProfileId.HasValue
+            ? $"/api/Orders/assignments/{assignmentId}/complete?courierId={courierProfileId.Value}"
+            : $"/api/Orders/assignments/{assignmentId}/complete";
+        var resp = await _http.PostAsync(url, null);
+        if (!resp.IsSuccessStatusCode)
+            return null;
+        return await resp.Content.ReadFromJsonAsync<RouteStopCompletionResultDto>(JsonOpts);
     }
 
     public async Task<List<OrderTimelineEventDto>> GetTimelineAsync(int orderId)

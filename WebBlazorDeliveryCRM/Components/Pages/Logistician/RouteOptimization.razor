@@ -15,7 +15,9 @@
 @inject IConfiguration Configuration
 @inject IHttpClientFactory HttpClientFactory
 @inject AppNotificationService Notify
-@implements IDisposable
+@inject ShiftPlannerApiService PlannerApi
+@inject LogisticianRoutePlanningSession RouteSession
+@implements IAsyncDisposable
 
 <PageTitle>Маршруты — Логист</PageTitle>
 
@@ -36,6 +38,10 @@
     <p class="text-muted">
     </p>
     <div class="dms-scroll-route-points">
+        @if (_routePoints.Count == 0)
+        {
+            <p class="text-muted mb-0">Список точек пуст. Нажмите «+ Точка» или импортируйте из заказов / курьеров.</p>
+        }
         @for (var i = 0; i < _routePoints.Count; i++)
         {
             var idx = i;
@@ -51,7 +57,7 @@
                        disabled="@(_isBuildingRoute || _routePoints[idx].Source == "courier")" />
                 <span class="badge text-bg-secondary">@_routePoints[idx].Source</span>
                 <button class="btn btn-outline-danger"
-                        disabled="@(_isBuildingRoute || _routePoints.Count <= 2)"
+                        disabled="@_isBuildingRoute"
                         @onclick="(() => RemovePoint(idx))">
                     Удалить
                 </button>
@@ -83,9 +89,29 @@
     <div class="border-top pt-3 mt-3">
         <h3 class="h6 mb-2">Назначение курьеру</h3>
         <p class="small text-muted mb-2">
-            Доступно для точек с импорта <strong>«Из заказов»</strong> (и складских вставок по ним): одному курьеру назначаются все заказы, которые есть в текущем списке точек.
-            Точечное назначение и автоподбор — на панели <a href="/logistician">распределения заказов</a>.
+            Нужны точки с импорта <strong>«Из заказов»</strong> (и складские вставки по ним). Если на карте несколько цветных отрезков (лимит ~9 ч по «ногам» OSRM), выберите отрезок — на него пойдут только заказы точек этого участка.
+            Полное распределение — на панели <a href="/logistician">распределения заказов</a>.
         </p>
+        @if (_routeDriverSegments.Count > 1)
+        {
+            <div class="mb-2 small">
+                <span class="text-muted d-block mb-1">Отрезок на карте (как у цветных линий):</span>
+                @for (var si = 0; si < _routeDriverSegments.Count; si++)
+                {
+                    var seg = _routeDriverSegments[si];
+                    var sIdx = si;
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="routeSegPick" id="@($"rseg-{sIdx}")"
+                               checked="@(_selectedSegmentIndex == sIdx)"
+                               @onchange="@(() => OnSegmentSelected(sIdx))" />
+                        <label class="form-check-label" for="@($"rseg-{sIdx}")">
+                            Отрезок @(sIdx + 1) (<strong>@seg.ColorLabel</strong>): точки @(seg.FromWaypointIndex + 1)–@(seg.ToWaypointIndex + 1),
+                            заказов: <strong>@seg.OrderIds.Count</strong>
+                        </label>
+                    </div>
+                }
+            </div>
+        }
         <div class="d-flex flex-wrap gap-2 align-items-end">
             <div>
                 <label class="form-label small mb-0" for="route-assign-courier">Курьер</label>
@@ -102,9 +128,15 @@
             </div>
             <button type="button"
                     class="btn btn-success btn-sm"
-                    disabled="@(_assignRouteBusy || RouteOrderIdsCount == 0 || _routeAssignCourierId == 0)"
+                    disabled="@(_assignRouteBusy || AssignableOrderIdsCount == 0 || _routeAssignCourierId == 0)"
                     @onclick="AssignRouteOrdersToCourierAsync">
-                @(_assignRouteBusy ? "Назначаем…" : $"Назначить на заказы маршрута ({RouteOrderIdsCount})")
+                @(_assignRouteBusy ? "Назначаем…" : $"Назначить ({AssignableOrderIdsCount})")
+            </button>
+            <button type="button"
+                    class="btn btn-outline-danger btn-sm"
+                    disabled="@(_revokeRouteBusy || _routeAssignCourierId == 0 || AssignableOrderIdsCount == 0)"
+                    @onclick="RevokeRouteOrdersFromCourierAsync">
+                @(_revokeRouteBusy ? "…" : $"Отозвать ({AssignableOrderIdsCount})")
             </button>
             <a class="btn btn-link btn-sm py-0" href="/logistician">Распределение заказов</a>
         </div>
@@ -217,23 +249,32 @@
 @code {
     private List<CourierProfileDto>? _couriers;
     private List<LogisticsHubListItemDto> _hubs = new();
-    private readonly List<RoutePointInput> _routePoints = new()
-    {
-        new() { Address = "Москва, Красная площадь", Source = "manual" },
-        new() { Address = "Москва, ВДНХ", Source = "manual" }
-    };
+    private List<RoutePlanningPointDto> _routePoints => RouteSession.RoutePoints;
     private readonly Dictionary<string, (double lat, double lon)> _geocodeCache = new(StringComparer.OrdinalIgnoreCase);
     private DateTimeOffset _nominatimNextAllowedUtc = DateTimeOffset.MinValue;
     private CancellationTokenSource? _routeCts;
     private bool _isBuildingRoute;
-    private string? _routeMessage;
-    private double _fuelPer100Km = 10.0;
+    private string? _routeMessage
+    {
+        get => RouteSession.RouteMessage;
+        set => RouteSession.RouteMessage = value;
+    }
+    private double _fuelPer100Km
+    {
+        get => RouteSession.FuelPer100Km;
+        set => RouteSession.FuelPer100Km = value;
+    }
     private readonly List<RouteCompareItem> _routeCompare = new();
     private RouteCompareItem? _bestRoute;
     private TimeSpan _savingTime = TimeSpan.Zero;
     private double _savingFuelLiters;
-    private int _routeAssignCourierId;
+    private int _routeAssignCourierId
+    {
+        get => RouteSession.RouteAssignCourierId;
+        set => RouteSession.RouteAssignCourierId = value;
+    }
     private bool _assignRouteBusy;
+    private bool _revokeRouteBusy;
 
     /// <summary>Число различных заказов в списке точек (импорт из заказов).</summary>
     private int RouteOrderIdsCount => _routePoints
@@ -241,6 +282,12 @@
         .Select(p => p.RelatedOrderId!.Value)
         .Distinct()
         .Count();
+
+    private readonly List<RouteDriverSegmentVm> _routeDriverSegments = new();
+    private int _selectedSegmentIndex;
+
+    private int AssignableOrderIdsCount => GetDistinctOrderIdsForAssignment().Count;
+
     private bool _mapReady;
     private IDisposable? _trackingHandler;
     private readonly Dictionary<int, string> _courierPlaceById = new();
@@ -287,6 +334,7 @@
                 await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
                 _mapReady = true;
                 await StartLiveTrackingAsync();
+                await RestoreMapAndRouteFromSessionAsync();
                 if (_hubs.Count > 0 && !_hubs.Any(h => h.Latitude.HasValue && h.Longitude.HasValue))
                     _routeMessage = "Склады найдены, но у них нет координат (latitude/longitude), поэтому точки не показываются на карте.";
             }
@@ -328,7 +376,45 @@
         }
     }
 
-    private void AddAddress() => _routePoints.Add(new RoutePointInput { Address = string.Empty, Source = "manual" });
+    private async Task RestoreMapAndRouteFromSessionAsync()
+    {
+        if (!_mapReady)
+            return;
+        try
+        {
+            var withCoords = _routePoints.Where(p => p.Lat.HasValue && p.Lon.HasValue).ToList();
+            if (withCoords.Count >= 2)
+            {
+                var pts = withCoords.Select((p, i) => new
+                {
+                    lat = p.Lat!.Value,
+                    lon = p.Lon!.Value,
+                    title = $"{i + 1}. {(string.IsNullOrWhiteSpace(p.Address) ? "Точка" : p.Address)}"
+                }).ToList();
+                await JS.InvokeVoidAsync("leafletMap.setRouteWaypoints", pts);
+            }
+
+            if (RouteSession.MapCenterLat is { } clat &&
+                RouteSession.MapCenterLon is { } clon &&
+                RouteSession.MapZoom is { } czoom)
+            {
+                await JS.InvokeVoidAsync("leafletMap.setView", clat, clon, czoom);
+            }
+
+            if (withCoords.Count >= 2)
+                await RefreshRouteSegmentsAsync(withCoords, CancellationToken.None);
+        }
+        catch
+        {
+            // карта может быть недоступна
+        }
+    }
+
+    private void AddAddress()
+    {
+        _routePoints.Add(new RoutePlanningPointDto { Address = string.Empty, Source = "manual" });
+        ClearRouteSegmentsState();
+    }
 
     private string GetCourierPlaceLabel(CourierProfileDto c)
     {
@@ -489,8 +575,8 @@
     private void RemovePoint(int index)
     {
         if (index < 0 || index >= _routePoints.Count) return;
-        if (_routePoints.Count <= 2) return;
         _routePoints.RemoveAt(index);
+        ClearRouteSegmentsState();
     }
 
     private void MovePointUp(int index)
@@ -499,6 +585,7 @@
         var item = _routePoints[index];
         _routePoints.RemoveAt(index);
         _routePoints.Insert(index - 1, item);
+        ClearRouteSegmentsState();
     }
 
     private void MovePointDown(int index)
@@ -507,6 +594,145 @@
         var item = _routePoints[index];
         _routePoints.RemoveAt(index);
         _routePoints.Insert(index + 1, item);
+        ClearRouteSegmentsState();
+    }
+
+    private void ClearRouteSegmentsState()
+    {
+        _routeDriverSegments.Clear();
+        _selectedSegmentIndex = 0;
+    }
+
+    private void OnSegmentSelected(int index)
+    {
+        _selectedSegmentIndex = index;
+        StateHasChanged();
+    }
+
+    private List<int> GetDistinctOrderIdsForAssignment()
+    {
+        if (_routeDriverSegments.Count > 0 &&
+            _selectedSegmentIndex >= 0 &&
+            _selectedSegmentIndex < _routeDriverSegments.Count)
+        {
+            return _routeDriverSegments[_selectedSegmentIndex].OrderIds.Distinct().OrderBy(x => x).ToList();
+        }
+
+        return _routePoints
+            .Where(p => p.RelatedOrderId is > 0)
+            .Select(p => p.RelatedOrderId!.Value)
+            .Distinct()
+            .OrderBy(x => x)
+            .ToList();
+    }
+
+    private string GetOsrmHttpBaseUrl()
+    {
+        var b = (Configuration["Osrm:RouterBaseUrl"] ?? "").Trim().TrimEnd('/');
+        return string.IsNullOrEmpty(b) ? "https://router.project-osrm.org" : b;
+    }
+
+    private void ApplyRouteSegmentsFromOsrm(List<RoutePlanningPointDto> activePoints, OsrmRouteDto route)
+    {
+        ClearRouteSegmentsState();
+        var wpCount = activePoints.Count;
+        if (wpCount < 2)
+            return;
+
+        var legDurs = route.legs?.Select(l => l.duration).ToList() ?? new List<double>();
+        var ranges = SplitWaypointRangesByLegDuration(legDurs, wpCount, 9 * 3600.0);
+        var colors = new[] { "синий", "оранжевый", "зелёный", "фиолетовый", "малиновый" };
+        for (var i = 0; i < ranges.Count; i++)
+        {
+            var (from, to) = ranges[i];
+            var orderIds = new List<int>();
+            for (var wi = from; wi <= to; wi++)
+            {
+                var oid = activePoints[wi].RelatedOrderId;
+                if (oid is > 0 && !orderIds.Contains(oid.Value))
+                    orderIds.Add(oid.Value);
+            }
+
+            _routeDriverSegments.Add(new RouteDriverSegmentVm
+            {
+                FromWaypointIndex = from,
+                ToWaypointIndex = to,
+                ColorLabel = colors[i % colors.Length],
+                OrderIds = orderIds
+            });
+        }
+    }
+
+    private static List<(int from, int to)> SplitWaypointRangesByLegDuration(
+        IReadOnlyList<double> legDurations,
+        int wpCount,
+        double maxLegAccSec)
+    {
+        if (wpCount < 2 || legDurations.Count == 0)
+            return new List<(int, int)> { (0, Math.Max(0, wpCount - 1)) };
+        if (legDurations.Count != wpCount - 1)
+            return new List<(int, int)> { (0, wpCount - 1) };
+
+        var segs = new List<(int from, int to)>();
+        var bs = 0;
+        var acc = 0.0;
+        for (var li = 0; li < legDurations.Count; li++)
+        {
+            var d = legDurations[li];
+            if (acc + d > maxLegAccSec && acc > 0)
+            {
+                segs.Add((bs, li));
+                bs = li;
+                acc = d;
+            }
+            else
+            {
+                acc += d;
+            }
+        }
+
+        segs.Add((bs, wpCount - 1));
+        return segs;
+    }
+
+    private async Task RefreshRouteSegmentsAsync(List<RoutePlanningPointDto> activePoints, CancellationToken ct)
+    {
+        if (activePoints.Count < 2)
+        {
+            ClearRouteSegmentsState();
+            return;
+        }
+
+        foreach (var p in activePoints)
+        {
+            if (!p.Lat.HasValue || !p.Lon.HasValue)
+            {
+                ClearRouteSegmentsState();
+                return;
+            }
+        }
+
+        try
+        {
+            var coords = string.Join(";",
+                activePoints.Select(p =>
+                    $"{p.Lon!.Value.ToString(CultureInfo.InvariantCulture)},{p.Lat!.Value.ToString(CultureInfo.InvariantCulture)}"));
+            var osrmUrl = $"{GetOsrmHttpBaseUrl()}/route/v1/driving/{coords}?overview=false&steps=false";
+            var client = HttpClientFactory.CreateClient("UnauthorizedClient");
+            var osrm = await client.GetFromJsonAsync<OsrmRouteResponse>(osrmUrl, ct);
+            var best = osrm?.routes?.OrderBy(r => r.duration).FirstOrDefault();
+            if (best is null)
+            {
+                ClearRouteSegmentsState();
+                return;
+            }
+
+            ApplyRouteSegmentsFromOsrm(activePoints, best);
+        }
+        catch
+        {
+            ClearRouteSegmentsState();
+        }
     }
 
     private async Task BuildRouteFromPointsAsync()
@@ -531,6 +757,7 @@
 
         try
         {
+            ClearRouteSegmentsState();
             var points = new List<object>();
             for (var i = 0; i < activePoints.Count; i++)
             {
@@ -554,9 +781,7 @@
             }
 
             await JS.InvokeVoidAsync("leafletMap.setRouteWaypoints", points);
-            _routeMessage =
-                $"Маршрут построен: {points.Count} точек. На карте несколько цветных отрезков, если суммарное время по «ногам» OSRM превышает 9 ч (упрощённо).";
-            await CompareRoutesInternalAsync(activePoints, _routeCts.Token);
+            await CompareRoutesInternalAsync(activePoints, _routeCts.Token, refreshRouteSegments: true);
         }
         catch (OperationCanceledException)
         {
@@ -580,14 +805,14 @@
 
         var items = _couriers?
             .Where(c => c.Current_lat != 0 || c.Current_lon != 0)
-            .Select(c => new RoutePointInput
+            .Select(c => new RoutePlanningPointDto
             {
                 Address = $"{c.User?.FName} {c.User?.Name}".Trim(),
                 Source = "courier",
                 Lat = (double)c.Current_lat,
                 Lon = (double)c.Current_lon
             })
-            .ToList() ?? new List<RoutePointInput>();
+            .ToList() ?? new List<RoutePlanningPointDto>();
 
         if (items.Count == 0)
         {
@@ -596,6 +821,7 @@
         }
 
         _routePoints.Clear();
+        ClearRouteSegmentsState();
         _routePoints.AddRange(items);
         _routeMessage = $"Импортировано из курьеров: {items.Count} точек.";
     }
@@ -604,11 +830,12 @@
     {
         var orders = await OrdersApi.GetAllAsync(null) ?? new List<OrderDto>();
         var ordered = orders
-            .Where(o => !IsOrderClosedForRouting(o))
+            .Where(o => !IsOrderClosedForRouting(o) && o.Courier_id is null)
             .OrderBy(o => o.Created_at)
             .ToList();
 
         _routePoints.Clear();
+        ClearRouteSegmentsState();
         const int maxPoints = 120;
         foreach (var o in ordered)
         {
@@ -648,7 +875,7 @@
     /// <summary>
     /// Забор → при ViaHub или разных городах — склад(а) компании → доставка.
     /// </summary>
-    private void AppendOrderRoutePoints(OrderDto o, List<RoutePointInput> list, int maxPoints)
+    private void AppendOrderRoutePoints(OrderDto o, List<RoutePlanningPointDto> list, int maxPoints)
     {
         if (list.Count >= maxPoints)
             return;
@@ -714,13 +941,13 @@
     private static string? NormalizeCity(string? c)
         => string.IsNullOrWhiteSpace(c) ? null : c.Trim();
 
-    private bool TryAppendHubWaypoint(OrderDto order, LogisticsHubListItemDto hub, string legTitleSuffix, List<RoutePointInput> list)
+    private bool TryAppendHubWaypoint(OrderDto order, LogisticsHubListItemDto hub, string legTitleSuffix, List<RoutePlanningPointDto> list)
     {
         if (!hub.Latitude.HasValue || !hub.Longitude.HasValue)
             return false;
 
         var q = HubGeocodeLine(hub);
-        list.Add(new RoutePointInput
+        list.Add(new RoutePlanningPointDto
         {
             Address = $"Заказ №{order.Order_Number}: {legTitleSuffix} — {q}",
             Source = "hub",
@@ -787,7 +1014,7 @@
         OrderDto order,
         AddressShortDto? addr,
         string legLabel,
-        List<RoutePointInput> list)
+        List<RoutePlanningPointDto> list)
     {
         if (addr is null)
             return false;
@@ -799,7 +1026,7 @@
         {
             if (addr.Latitude is { } la && addr.Longitude is { } lo)
             {
-                list.Add(new RoutePointInput
+                list.Add(new RoutePlanningPointDto
                 {
                     Address = $"Заказ №{order.Order_Number}: {legLabel}",
                     Source = "order",
@@ -813,7 +1040,7 @@
             return false;
         }
 
-        list.Add(new RoutePointInput
+        list.Add(new RoutePlanningPointDto
         {
             Address = $"Заказ №{order.Order_Number}: {legLabel} — {query}",
             Source = "order",
@@ -827,37 +1054,35 @@
         if (_assignRouteBusy || _routeAssignCourierId <= 0)
             return;
 
-        var orderIds = _routePoints
-            .Where(p => p.RelatedOrderId is > 0)
-            .Select(p => p.RelatedOrderId!.Value)
-            .Distinct()
-            .ToList();
-
+        var orderIds = GetDistinctOrderIdsForAssignment();
         if (orderIds.Count == 0)
         {
-            Notify.ShowWarning("В списке точек нет заказов. Сначала нажмите «Импорт из заказов».");
+            Notify.ShowWarning(
+                _routeDriverSegments.Count > 1
+                    ? "В выбранном отрезке нет заказов (только ручные точки). Выберите другой отрезок или импортируйте заказы."
+                    : "В списке точек нет заказов. Сначала нажмите «Импорт из заказов» и постройте маршрут.");
             return;
         }
 
         _assignRouteBusy = true;
         StateHasChanged();
-        var ok = 0;
-        var fail = 0;
         try
         {
-            foreach (var oid in orderIds)
+            var stops = await BuildApplyRouteStopsAsync();
+            if (stops.Count == 0)
             {
-                var success = await OrdersApi.AssignCourierAsync(oid, _routeAssignCourierId);
-                if (success) ok++;
-                else fail++;
+                Notify.ShowWarning("Не удалось получить координаты точек маршрута. Постройте маршрут на карте или укажите адреса.");
+                return;
             }
 
-            if (fail == 0)
-                Notify.ShowSuccess($"Курьер назначен на {ok} заказ(ов).");
-            else if (ok == 0)
-                Notify.ShowError($"Не удалось назначить на {fail} заказ(ов).");
-            else
-                Notify.ShowWarning($"Успешно: {ok}, ошибок: {fail}.");
+            var plan = await PlannerApi.ApplyCourierRouteAsync(_routeAssignCourierId, stops);
+            if (plan == null)
+            {
+                Notify.ShowError("Не удалось передать маршрут курьеру. Проверьте координаты и заказы.");
+                return;
+            }
+
+            Notify.ShowSuccess($"Маршрут передан курьеру: {plan.Stops.Count} точек, {plan.OrdersCount} заказ(ов). Курьер увидит тот же порядок на карте.");
         }
         catch (Exception ex)
         {
@@ -868,6 +1093,89 @@
             _assignRouteBusy = false;
             StateHasChanged();
         }
+    }
+
+    private async Task RevokeRouteOrdersFromCourierAsync()
+    {
+        if (_revokeRouteBusy || _routeAssignCourierId <= 0)
+            return;
+
+        var orderIds = GetDistinctOrderIdsForAssignment();
+        if (orderIds.Count == 0)
+        {
+            Notify.ShowWarning("В маршруте нет заказов для отзыва.");
+            return;
+        }
+
+        _revokeRouteBusy = true;
+        StateHasChanged();
+        try
+        {
+            var result = await OrdersApi.RevokeFromCourierAsync(new RevokeCourierOrdersRequestDto
+            {
+                CourierId = _routeAssignCourierId,
+                OrderIds = orderIds
+            });
+            if (result is null)
+            {
+                Notify.ShowError("Не удалось отозвать заказы у курьера.");
+                return;
+            }
+
+            if (result.RevokedCount > 0)
+                Notify.ShowSuccess($"Отозвано заказов: {result.RevokedCount}. Они снова доступны для импорта на карту.");
+            if (result.FailedCount > 0)
+                Notify.ShowWarning($"Не отозвано: {result.FailedCount}. {string.Join(" ", result.Errors.Take(3))}");
+        }
+        catch (Exception ex)
+        {
+            Notify.ShowError(ex.Message);
+        }
+        finally
+        {
+            _revokeRouteBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private List<RoutePlanningPointDto> GetRoutePointsForAssignment()
+    {
+        if (_routeDriverSegments.Count > 0 &&
+            _selectedSegmentIndex >= 0 &&
+            _selectedSegmentIndex < _routeDriverSegments.Count)
+        {
+            var seg = _routeDriverSegments[_selectedSegmentIndex];
+            return _routePoints
+                .Skip(seg.FromWaypointIndex)
+                .Take(seg.ToWaypointIndex - seg.FromWaypointIndex + 1)
+                .ToList();
+        }
+
+        return _routePoints.ToList();
+    }
+
+    private async Task<List<ApplyCourierRouteStopDto>> BuildApplyRouteStopsAsync()
+    {
+        var points = GetRoutePointsForAssignment();
+        var list = new List<ApplyCourierRouteStopDto>();
+        var seq = 1;
+        foreach (var p in points)
+        {
+            var coords = await ResolvePointCoordinatesAsync(p, CancellationToken.None);
+            if (coords is null)
+                continue;
+
+            list.Add(new ApplyCourierRouteStopDto
+            {
+                Sequence = seq++,
+                OrderId = p.RelatedOrderId,
+                Title = string.IsNullOrWhiteSpace(p.Address) ? null : p.Address.Trim(),
+                Latitude = coords.Value.lat,
+                Longitude = coords.Value.lon
+            });
+        }
+
+        return list;
     }
 
     private async Task OptimizeRouteOrderAsync()
@@ -904,6 +1212,7 @@
 
             var ordered = OptimizeNearestNeighbor(activePoints);
             _routePoints.Clear();
+            ClearRouteSegmentsState();
             _routePoints.AddRange(ordered);
             _routeMessage = "Порядок точек оптимизирован (ближайший сосед).";
         }
@@ -920,6 +1229,7 @@
 
     private async Task ClearCustomRouteAsync()
     {
+        ClearRouteSegmentsState();
         _routeMessage = null;
         _routeCompare.Clear();
         _bestRoute = null;
@@ -938,6 +1248,7 @@
     private async Task CompareRoutesAsync()
     {
         if (_isBuildingRoute) return;
+        ClearRouteSegmentsState();
         var activePoints = _routePoints
             .Where(p => p.Lat.HasValue || p.Lon.HasValue || !string.IsNullOrWhiteSpace(p.Address))
             .ToList();
@@ -980,20 +1291,28 @@
         }
     }
 
-    private async Task CompareRoutesInternalAsync(List<RoutePointInput> activePoints, CancellationToken ct)
+    private async Task CompareRoutesInternalAsync(
+        List<RoutePlanningPointDto> activePoints,
+        CancellationToken ct,
+        bool refreshRouteSegments = false)
     {
         var coords = activePoints
             .Select(p => $"{p.Lon!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{p.Lat!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}")
             .ToList();
-        var osrmUrl = $"https://router.project-osrm.org/route/v1/driving/{string.Join(";", coords)}?overview=false";
+        var osrmUrl = $"{GetOsrmHttpBaseUrl()}/route/v1/driving/{string.Join(";", coords)}?overview=false&steps=false";
         var client = HttpClientFactory.CreateClient("UnauthorizedClient");
         var osrm = await client.GetFromJsonAsync<OsrmRouteResponse>(osrmUrl, ct);
         var bestOsrm = osrm?.routes?.OrderBy(r => r.duration).FirstOrDefault();
         if (bestOsrm is null)
         {
             _routeMessage = "Не удалось получить данные OSRM для сравнения.";
+            if (refreshRouteSegments)
+                ClearRouteSegmentsState();
             return;
         }
+
+        if (refreshRouteSegments)
+            ApplyRouteSegmentsFromOsrm(activePoints, bestOsrm);
 
         var osrmDuration = TimeSpan.FromSeconds(bestOsrm.duration);
         var osrmDistanceKm = bestOsrm.distance / 1000.0;
@@ -1021,10 +1340,12 @@
         var slowest = _routeCompare.OrderByDescending(x => x.Duration).First();
         _savingTime = slowest.Duration - best.Duration;
         _savingFuelLiters = Math.Max(0, slowest.FuelLiters - best.FuelLiters);
-        _routeMessage = "Сравнение готово.";
+        _routeMessage = refreshRouteSegments
+            ? $"Маршрут построен: {activePoints.Count} точек. Цветные отрезки на карте — при длительных «ногах» OSRM (упрощённо до 9 ч); выберите отрезок ниже для назначения курьера."
+            : "Сравнение готово.";
     }
 
-    private async Task<(double lat, double lon)?> ResolvePointCoordinatesAsync(RoutePointInput p, CancellationToken cancellationToken)
+    private async Task<(double lat, double lon)?> ResolvePointCoordinatesAsync(RoutePlanningPointDto p, CancellationToken cancellationToken)
     {
         if (p.Lat.HasValue && p.Lon.HasValue)
             return (p.Lat.Value, p.Lon.Value);
@@ -1146,10 +1467,10 @@
         return false;
     }
 
-    private static List<RoutePointInput> OptimizeNearestNeighbor(List<RoutePointInput> points)
+    private static List<RoutePlanningPointDto> OptimizeNearestNeighbor(List<RoutePlanningPointDto> points)
     {
-        var remaining = new List<RoutePointInput>(points.Skip(1));
-        var ordered = new List<RoutePointInput> { points[0] };
+        var remaining = new List<RoutePlanningPointDto>(points.Skip(1));
+        var ordered = new List<RoutePlanningPointDto> { points[0] };
         while (remaining.Count > 0)
         {
             var current = ordered[^1];
@@ -1177,21 +1498,21 @@
 
     private static double DegreesToRadians(double deg) => deg * Math.PI / 180.0;
 
-    private static string BuildYandexRouteUrl(List<RoutePointInput> points)
+    private static string BuildYandexRouteUrl(List<RoutePlanningPointDto> points)
     {
         var rtext = string.Join("~", points.Select(p =>
             $"{p.Lat!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{p.Lon!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}"));
         return $"https://yandex.ru/maps/?rtext={Uri.EscapeDataString(rtext)}&rtt=auto";
     }
 
-    private static string BuildDgisRouteUrl(RoutePointInput from, RoutePointInput to)
+    private static string BuildDgisRouteUrl(RoutePlanningPointDto from, RoutePlanningPointDto to)
     {
         var fromLonLat = $"{from.Lon!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{from.Lat!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
         var toLonLat = $"{to.Lon!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{to.Lat!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
         return $"https://2gis.ru/routeSearch/rsType/car/from/{fromLonLat}/to/{toLonLat}";
     }
 
-    private static string BuildOsmRouteUrl(RoutePointInput from, RoutePointInput to)
+    private static string BuildOsmRouteUrl(RoutePlanningPointDto from, RoutePlanningPointDto to)
     {
         var fromLatLon = $"{from.Lat!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{from.Lon!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
         var toLatLon = $"{to.Lat!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{to.Lon!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
@@ -1214,6 +1535,14 @@
         if (minutes < 5)
             return $"{hours} ч";
         return $"{hours} ч {minutes} мин";
+    }
+
+    private sealed class RouteDriverSegmentVm
+    {
+        public int FromWaypointIndex { get; init; }
+        public int ToWaypointIndex { get; init; }
+        public string ColorLabel { get; init; } = "";
+        public List<int> OrderIds { get; init; } = new();
     }
 
     private sealed class RouteCompareItem
@@ -1239,6 +1568,7 @@
 
     private sealed class OsrmRouteResponse
     {
+        public string? code { get; set; }
         public List<OsrmRouteDto>? routes { get; set; }
     }
 
@@ -1246,21 +1576,44 @@
     {
         public double distance { get; set; }
         public double duration { get; set; }
+        public List<OsrmLegDto>? legs { get; set; }
     }
 
-    private sealed class RoutePointInput
+    private sealed class OsrmLegDto
     {
-        public Guid Id { get; set; } = Guid.NewGuid();
-        public string Address { get; set; } = string.Empty;
-        public string Source { get; set; } = "manual";
-        public double? Lat { get; set; }
-        public double? Lon { get; set; }
-        /// <summary>Заказ при импорте из заказов; для массового назначения курьера.</summary>
-        public int? RelatedOrderId { get; set; }
+        public double duration { get; set; }
     }
 
-    public void Dispose()
+    private sealed class MapViewSnapshot
     {
+        [System.Text.Json.Serialization.JsonPropertyName("lat")]
+        public double Lat { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("lng")]
+        public double Lng { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("zoom")]
+        public int Zoom { get; set; }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_mapReady)
+            {
+                var v = await JS.InvokeAsync<MapViewSnapshot?>("leafletMap.getView");
+                if (v != null)
+                {
+                    RouteSession.MapCenterLat = v.Lat;
+                    RouteSession.MapCenterLon = v.Lng;
+                    RouteSession.MapZoom = v.Zoom;
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
         try
         {
             _reverseGeoCts?.Cancel();

@@ -6,6 +6,7 @@
 @inject ClientsApiService ClientsApi
 @inject AppNotificationService Notify
 @inject IConfiguration Configuration
+@inject NavigationManager Navigation
 
 <PageTitle>@Title</PageTitle>
 
@@ -84,33 +85,9 @@
         }
         Смена пароля
     </h2>
-    <p class="text-muted small mb-2">Если не помните пароль, откройте форму восстановления.</p>
-    <button type="button" class="btn btn-link p-0" @onclick="OpenPasswordModal">Забыли пароль?</button>
+    <p class="text-muted small mb-2">Смена пароля — через восстановление по коду из письма.</p>
+    <button type="button" class="btn btn-link btn-sm p-0" @onclick="GoForgotPassword">Забыли пароль?</button>
 </div>
-
-@if (_showPasswordModal)
-{
-    <div class="profile-modal-backdrop" @onclick="ClosePasswordModal">
-        <div class="profile-modal-card" @onclick:stopPropagation="true">
-            <h3 class="h5 mb-2">Смена пароля</h3>
-            <p class="small text-muted mb-3">Введите текущий пароль и новый пароль для обновления.</p>
-            <div class="mb-2">
-                <label class="form-label">Текущий пароль</label>
-                <input type="password" class="form-control" @bind="_currentPassword" autocomplete="current-password" />
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Новый пароль</label>
-                <input type="password" class="form-control" @bind="_newPassword" autocomplete="new-password" />
-            </div>
-            <div class="d-flex gap-2 justify-content-end">
-                <button type="button" class="btn btn-outline-secondary" @onclick="ClosePasswordModal">Отмена</button>
-                <button type="button" class="btn btn-primary" disabled="@_savingPassword" @onclick="SavePasswordAsync">
-                    @(_savingPassword ? "Сохранение..." : "Сменить пароль")
-                </button>
-            </div>
-        </div>
-    </div>
-}
 
 @code {
     [Parameter] public string Title { get; set; } = "Данные о сотруднике";
@@ -127,12 +104,8 @@
     private string _roleName = "—";
     private string _companyName = "—";
     private string _birthDateText = "Не указана";
-    private string _currentPassword = string.Empty;
-    private string _newPassword = string.Empty;
     private bool _savingProfile;
-    private bool _savingPassword;
     private bool _isEditProfile;
-    private bool _showPasswordModal;
     private long _avatarVersion = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     private bool _avatarFailed;
 
@@ -230,40 +203,6 @@
         }
     }
 
-    private async Task SavePasswordAsync()
-    {
-        if (string.IsNullOrWhiteSpace(_currentPassword) || string.IsNullOrWhiteSpace(_newPassword))
-        {
-            Notify.ShowWarning("Введите текущий и новый пароль.");
-            return;
-        }
-
-        _savingPassword = true;
-        try
-        {
-            var (ok, error) = await AccountApi.UpdateMyAccountAsync(new WebBlazorDeliveryCRM.Models.UpdateMyAccountRequestDto
-            {
-                CurrentPassword = _currentPassword,
-                NewPassword = _newPassword
-            });
-
-            if (!ok)
-            {
-                Notify.ShowError(error ?? "Не удалось сменить пароль.");
-                return;
-            }
-
-            _currentPassword = string.Empty;
-            _newPassword = string.Empty;
-            Notify.ShowSuccess("Пароль обновлён.");
-            ClosePasswordModal();
-        }
-        finally
-        {
-            _savingPassword = false;
-        }
-    }
-
     private async Task OnAvatarSelected(InputFileChangeEventArgs e)
     {
         var file = e.File;
@@ -291,8 +230,12 @@
     }
 
     private void ToggleEditProfile() => _isEditProfile = !_isEditProfile;
-    private void OpenPasswordModal() => _showPasswordModal = true;
-    private void ClosePasswordModal() => _showPasswordModal = false;
+
+    private void GoForgotPassword()
+    {
+        var q = string.IsNullOrWhiteSpace(_email) ? string.Empty : $"?email={Uri.EscapeDataString(_email)}";
+        Navigation.NavigateTo("/forgot-password" + q, forceLoad: true);
+    }
     private void OnAvatarError()
     {
         _avatarFailed = true;

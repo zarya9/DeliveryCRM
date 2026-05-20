@@ -707,19 +707,6 @@ h1:focus {
     background-color: #2f2f2f;
 }
 
-[data-theme="dark"] .apexcharts-menu {
-    background: #ffffff !important;
-    border: 1px solid #d1d5db !important;
-}
-
-[data-theme="dark"] .apexcharts-menu-item {
-    color: #0f172a !important;
-}
-
-[data-theme="dark"] .apexcharts-toolbar svg {
-    fill: #e2e8f0 !important;
-}
-
 [data-theme="dark"] input:-webkit-autofill,
 [data-theme="dark"] input:-webkit-autofill:hover,
 [data-theme="dark"] input:-webkit-autofill:focus,

@@ -19,7 +19,7 @@ builder.Services
     .AddCookie(options =>
     {
         options.LoginPath = "/login";
-        options.AccessDeniedPath = "/login";
+        options.AccessDeniedPath = "/access-denied";
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
     });
@@ -42,10 +42,12 @@ builder.Services.AddScoped<TrackingHubClientService>();
 builder.Services.AddScoped<ChatApiService>();
 builder.Services.AddScoped<ChatUnreadStateService>();
 builder.Services.AddScoped<OrdersApiService>();
+builder.Services.AddScoped<LogisticianRoutePlanningSession>();
 builder.Services.AddScoped<LogisticsHubsApiService>();
 builder.Services.AddScoped<ClientsApiService>();
 builder.Services.AddScoped<ClientsDetailsApiService>();
 builder.Services.AddScoped<CouriersApiService>();
+builder.Services.AddScoped<CourierProximityState>();
 builder.Services.AddScoped<ShiftPlannerApiService>();
 builder.Services.AddScoped<VehiclesApiService>();
 builder.Services.AddScoped<AuditApiService>();

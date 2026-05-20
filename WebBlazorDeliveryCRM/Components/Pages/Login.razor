@@ -3,6 +3,7 @@
 @layout LoginLayout
 @attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
 @using Microsoft.AspNetCore.WebUtilities
+@using WebBlazorDeliveryCRM.Services
 @inject AuthApiService AuthApi
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Navigation
@@ -32,6 +33,9 @@
             <div class="mb-3">
                 <label class="form-label">Пароль</label>
                 <input type="password" class="form-control" placeholder="••••••••" @bind="_password" />
+            </div>
+            <div class="mb-2 text-end">
+                <a class="small" href="/forgot-password">Забыли пароль?</a>
             </div>
             <button type="button" class="btn btn-primary dms-btn-primary w-100" disabled="@_loading" @onclick="HandleLogin">
                 @(_loading ? "Вход..." : "Войти")
@@ -125,7 +129,6 @@
         <p class="mt-3 mb-0 small text-secondary">
             @if (_activeTab == AuthTab.Login)
             {
-                <span>Нет аккаунта? <button type="button" class="btn btn-link p-0 align-baseline" @onclick="() => SetTab(AuthTab.Register)">Зарегистрироваться</button></span>
             }
             else
             {
@@ -160,12 +163,12 @@
     {
         if (!firstRender) return;
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
-        if (state.User.Identity?.IsAuthenticated == true)
-        {
-            var role = state.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
-                       ?? state.User.FindFirst("role")?.Value;
-            NavigateAfterLogin(role);
-        }
+        if (state.User.Identity?.IsAuthenticated != true)
+            return;
+
+        var role = state.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
+                   ?? state.User.FindFirst("role")?.Value;
+        NavigateAfterLogin(role);
     }
 
     private async Task HandleLogin()
@@ -321,13 +324,25 @@
 
     private void NavigateAfterLogin(string? role)
     {
-        if (TryGetSafeReturnUrl(out var returnPath))
+        if (TryGetSafeReturnUrl(out var returnPath) && AuthRouteHelper.CanAccessPathForRole(role, returnPath))
         {
-            Navigation.NavigateTo(returnPath, forceLoad: true);
+            SafeNavigate(returnPath);
             return;
         }
 
-        RedirectByRole(role);
+        SafeNavigate(AuthRouteHelper.GetDefaultPathForRole(role));
+    }
+
+    private void SafeNavigate(string url)
+    {
+        try
+        {
+            Navigation.NavigateTo(url, replace: true);
+        }
+        catch (Microsoft.AspNetCore.Components.NavigationException)
+        {
+            // Blazor debug: redirect interrupts render.
+        }
     }
 
     private bool TryGetSafeReturnUrl(out string path)
@@ -347,22 +362,6 @@
 
         path = candidate;
         return true;
-    }
-
-    private void RedirectByRole(string? role)
-    {
-        if (role == "Клиент")
-            Navigation.NavigateTo("/customer", forceLoad: true);
-        else if (role == "Менеджер")
-            Navigation.NavigateTo("/manager", forceLoad: true);
-        else if (role == "Логист")
-            Navigation.NavigateTo("/logistician", forceLoad: true);
-        else if (role == "Админ" || role == "Администратор")
-            Navigation.NavigateTo("/admin/employees", forceLoad: true);
-        else if (role == "Курьер")
-            Navigation.NavigateTo("/home", forceLoad: true);
-        else
-            Navigation.NavigateTo("/home", forceLoad: true);
     }
 
     private static string? GetRoleFromToken(string token)

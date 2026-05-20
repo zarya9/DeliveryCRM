@@ -1,0 +1,144 @@
+@page "/logistician/shifts/{ShiftId:int}"
+@layout LogisticianLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Логист,Логистика,Администратор,Админ,Менеджер")]
+@using System.Globalization
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@inject CouriersApiService CouriersApi
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject IConfiguration Configuration
+@implements IAsyncDisposable
+
+<PageTitle>Итог смены — Логист</PageTitle>
+
+<div class="dms-page-header">
+    <h1>Итог смены</h1>
+    <p class="subtitle">@_subtitle</p>
+</div>
+
+@if (_loading)
+{
+    <p class="text-muted">Загрузка…</p>
+}
+else if (_summary is null)
+{
+    <div class="alert alert-warning">Итог смены не найден.</div>
+}
+else
+{
+    <div class="dms-stat-grid mb-3">
+        <KpiCard Title="Курьер" Value="@_summary.CourierName" Meta="@($"Смена #{_summary.ShiftId}")" />
+        <KpiCard Title="Пробег" Value="@($"{_summary.TotalDistanceKm:0.#} км")" Meta="итоговый маршрут" />
+        <KpiCard Title="Топливо" Value="@($"{_summary.EstimatedFuelLiters:0.#} л")" Meta="@($"≈ {_summary.EstimatedFuelCostRub:0.#} ₽")" />
+        <KpiCard Title="Заказов" Value="@_summary.OrdersCompletedCount.ToString()" Meta="@($"точек: {_summary.RouteStopsCompletedCount}")" />
+    </div>
+
+    <div class="dms-card mb-3">
+        <p class="small text-muted mb-2">
+            Начало: @_summary.TimeStart.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+            @if (_summary.TimeEnd.HasValue)
+            {
+                <span> · Завершение: @_summary.TimeEnd.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+            }
+            @if (_summary.PlanVersion > 0)
+            {
+                <span> · Версия плана: @_summary.PlanVersion</span>
+            }
+        </p>
+        <div class="d-flex gap-2 flex-wrap">
+            <a class="btn btn-outline-secondary btn-sm" href="@($"/logistician/couriers/{_summary.CourierProfileId}")">Карточка курьера</a>
+            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ReloadAsync">Обновить</button>
+        </div>
+    </div>
+
+    <div class="dms-card mb-3">
+        <h2 class="dms-card-title mb-2">Итоговый маршрут на карте</h2>
+        <div id="shift-summary-map" style="height: 480px; width: 100%; border-radius: 8px;"></div>
+    </div>
+
+    @if (_summary.Waypoints.Count > 0)
+    {
+        <div class="dms-card">
+            <h2 class="dms-card-title mb-2">Точки маршрута</h2>
+            <ol class="list-unstyled mb-0 courier-route-stops">
+                @foreach (var w in _summary.Waypoints.OrderBy(x => x.Sequence))
+                {
+                    <li class="mb-2 d-flex gap-2 align-items-start">
+                        <span class="courier-route-stop__seq flex-shrink-0 bg-primary">@w.Sequence</span>
+                        <div>
+                            <div class="fw-semibold">@(w.Title ?? "Точка")</div>
+                            @if (w.OrderId is > 0)
+                            {
+                                <div class="small text-muted">Заказ #@w.OrderId</div>
+                            }
+                        </div>
+                    </li>
+                }
+            </ol>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public int ShiftId { get; set; }
+
+    private ShiftClosureSummaryDto? _summary;
+    private string _subtitle = "Загрузка…";
+    private bool _loading = true;
+    private bool _mapReady;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await ReloadAsync();
+        await InitMapAsync();
+        await RefreshMapAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _summary = await CouriersApi.GetShiftSummaryAsync(ShiftId);
+        _subtitle = _summary is null
+            ? "Данные недоступны"
+            : $"{_summary.CourierName} — итоговый маршрут и расход топлива";
+        _loading = false;
+        if (_mapReady)
+            await RefreshMapAsync();
+        StateHasChanged();
+    }
+
+    private async Task InitMapAsync()
+    {
+        if (_mapReady) return;
+        var osrmUrl = Configuration["Osrm:RouterBaseUrl"];
+        await JS.InvokeVoidAsync("leafletMap.init", "shift-summary-map", 55.7558, 37.6173, 11, null, osrmUrl, false, "ru");
+        _mapReady = true;
+    }
+
+    private async Task RefreshMapAsync()
+    {
+        if (!_mapReady || _summary?.Waypoints is not { Count: >= 1 }) return;
+
+        await JS.InvokeVoidAsync("leafletMap.clearMarkers");
+        await JS.InvokeVoidAsync("leafletMap.clearRoute");
+
+        var waypoints = _summary.Waypoints
+            .OrderBy(w => w.Sequence)
+            .Select(w => new { lat = w.Lat, lon = w.Lon, title = w.Title ?? $"Точка {w.Sequence}" })
+            .ToList<object>();
+
+        await JS.InvokeVoidAsync("leafletMap.setMarkers", waypoints);
+        if (waypoints.Count >= 2)
+            await JS.InvokeVoidAsync("leafletMap.setRouteWaypoints", waypoints);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (!_mapReady) return;
+        try { await JS.InvokeVoidAsync("leafletMap.dispose"); }
+        catch { /* disconnect */ }
+        _mapReady = false;
+    }
+}

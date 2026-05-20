@@ -68,6 +68,12 @@
                                 <span> · Заказ #@n.OrderId</span>
                             }
                         </div>
+                        @if (n.ShiftId.HasValue)
+                        {
+                            <a class="btn btn-sm btn-outline-primary mt-2" href="@($"/logistician/shifts/{n.ShiftId.Value}")">
+                                Итоговый маршрут смены
+                            </a>
+                        }
                     </div>
                     @if (!n.IsRead)
                     {

@@ -8,6 +8,7 @@
 @using WebBlazorDeliveryCRM.Services
 @inject AuthenticationStateProvider AuthState
 @inject CouriersApiService CouriersApi
+@inject CourierProximityState Proximity
 @inject AppNotificationService Notify
 @inject IJSRuntime JS
 @implements IAsyncDisposable
@@ -211,6 +212,7 @@ else
             }
 
             _online = false;
+            Proximity.Clear();
             await RefreshShiftStateAsync();
             Notify.ShowSuccess("Смена завершена.");
         }
@@ -239,9 +241,11 @@ else
             var firstPos = await TryGetPositionSafeAsync();
             if (firstPos.HasValue)
             {
-                var (okLoc, errLoc) = await CouriersApi.UpdateLocationAsync(_profileId.Value, firstPos.Value.lat, firstPos.Value.lon);
+                var (okLoc, errLoc, nearby) = await CouriersApi.UpdateLocationAsync(_profileId.Value, firstPos.Value.lat, firstPos.Value.lon);
                 if (!okLoc)
                     _lastGeoError = errLoc ?? "Ошибка отправки координат.";
+                else
+                    Proximity.SetNearby(nearby);
             }
             else if (string.IsNullOrWhiteSpace(_lastGeoError))
             {
@@ -271,6 +275,7 @@ else
         {
             await CouriersApi.SetOnlineAsync(_profileId.Value, false);
             _online = false;
+            Proximity.Clear();
             Notify.ShowInfo("Вы вышли из сети.");
         }
         finally
@@ -295,11 +300,17 @@ else
             return;
         try
         {
-            var (ok, err) = await CouriersApi.UpdateLocationAsync(_profileId.Value, (decimal)lat, (decimal)lon);
+            var (ok, err, nearby) = await CouriersApi.UpdateLocationAsync(_profileId.Value, (decimal)lat, (decimal)lon);
             if (!ok)
+            {
                 _lastGeoError = err ?? "Ошибка отправки координат.";
+                Proximity.Clear();
+            }
             else
+            {
                 _lastGeoError = null;
+                Proximity.SetNearby(nearby);
+            }
         }
         catch
         {

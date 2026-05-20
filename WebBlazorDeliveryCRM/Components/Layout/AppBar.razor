@@ -6,6 +6,7 @@
 @inject NotificationPopupService PopupNotifications
 @inject IJSRuntime JS
 @using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Models
 @using System.Security.Claims
 
 <div class="dms-appbar">
@@ -184,38 +185,43 @@
 
     private void AttachChatHandlers()
     {
-        if (_chatHandlersAttached || ChatHub.Connection is null)
+        if (_chatHandlersAttached)
             return;
 
-        ChatHub.Connection.On<IncomingChatSignal>("ReceiveMessage", payload =>
-        {
-            return InvokeAsync(async () =>
-            {
-                if (payload.senderId == _currentUserId)
-                    return;
+        ChatHub.MessageReceived += OnAppBarChatMessageAsync;
 
-                if (IsDirectRoom(payload.chatRoomId))
+        if (ChatHub.Connection is not null)
+        {
+            ChatHub.Connection.On<IncomingNotificationSignal>("NotificationReceived", payload =>
+            {
+                return InvokeAsync(async () =>
                 {
-                    var sender = string.IsNullOrWhiteSpace(payload.senderName) ? "Сотрудник" : payload.senderName!;
-                    Notify.ShowInfo($"Новое личное сообщение от {sender}.", pushWhenHidden: true);
-                }
-
-                await ChatUnreadState.RefreshAsync();
+                    var title = string.IsNullOrWhiteSpace(payload.title) ? "Уведомление" : payload.title!;
+                    var body = string.IsNullOrWhiteSpace(payload.message) ? "Новое событие в системе." : payload.message!;
+                    PopupNotifications.Raise(new NotificationPopupService.PopupNotification(payload.id, title, body, NotificationsHref));
+                    await Notify.ShowPushWhenHiddenAsync(title, body);
+                });
             });
-        });
-
-        ChatHub.Connection.On<IncomingNotificationSignal>("NotificationReceived", payload =>
-        {
-            return InvokeAsync(async () =>
-            {
-                var title = string.IsNullOrWhiteSpace(payload.title) ? "Уведомление" : payload.title!;
-                var body = string.IsNullOrWhiteSpace(payload.message) ? "Новое событие в системе." : payload.message!;
-                PopupNotifications.Raise(new NotificationPopupService.PopupNotification(payload.id, title, body, NotificationsHref));
-                await Notify.ShowPushWhenHiddenAsync(title, body);
-            });
-        });
+        }
 
         _chatHandlersAttached = true;
+    }
+
+    private Task OnAppBarChatMessageAsync(ChatIncomingMessage payload)
+    {
+        return InvokeAsync(async () =>
+        {
+            if (payload.SenderId == _currentUserId)
+                return;
+
+            if (IsDirectRoom(payload.ChatRoomId))
+            {
+                var sender = string.IsNullOrWhiteSpace(payload.SenderName) ? "Сотрудник" : payload.SenderName!;
+                Notify.ShowInfo($"Новое личное сообщение от {sender}.", pushWhenHidden: true);
+            }
+
+            await ChatUnreadState.RefreshAsync();
+        });
     }
 
     private bool IsDirectRoom(int roomId)
@@ -232,13 +238,6 @@
         public string Accent { get; set; } = string.Empty;
         public string Background { get; set; } = "plain";
         public string Radius { get; set; } = "12";
-    }
-
-    private sealed class IncomingChatSignal
-    {
-        public int chatRoomId { get; set; }
-        public int senderId { get; set; }
-        public string? senderName { get; set; }
     }
 
     private sealed class IncomingNotificationSignal
