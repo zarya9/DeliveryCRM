@@ -49,9 +49,7 @@ public class ChatHubClientService : IAsyncDisposable
             {
                 options.AccessTokenProvider = () =>
                 {
-                    var token = _httpContextAccessor.HttpContext?.Request.Cookies[AuthCookieConstants.CookieName]
-                                ?? _circuitHolder.JwtToken
-                                ?? _tokenCache.GetToken();
+                    var token = AuthSessionTokenResolver.Resolve(_httpContextAccessor, _circuitHolder, _tokenCache);
                     if (string.IsNullOrWhiteSpace(token))
                         return Task.FromResult<string?>(null);
                     if (AuthTokenParser.TryCreatePrincipal(token)?.Identity?.IsAuthenticated != true)

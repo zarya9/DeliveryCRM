@@ -1,0 +1,121 @@
+@using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Utilities
+@inject OrdersApiService OrdersApi
+
+@if (OrderId > 0)
+{
+    <div class="employee-modal-backdrop" @onclick="CloseAsync">
+        <div class="employee-modal employee-modal--order-detail" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <h2 class="h5 mb-0">
+                    @if (_order is not null)
+                    {
+                        <span>Заказ №@_order.Order_Number</span>
+                    }
+                    else
+                    {
+                        <span>Карточка заказа</span>
+                    }
+                </h2>
+                <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseAsync"></button>
+            </div>
+
+            @if (_loading)
+            {
+                <p class="text-muted mb-0">Загрузка…</p>
+            }
+            else if (_order is null)
+            {
+                <p class="text-muted mb-0">Заказ не найден или нет доступа.</p>
+            }
+            else
+            {
+                <div class="mb-2"><strong>Название:</strong> @(string.IsNullOrWhiteSpace(_order.Name) ? "—" : _order.Name)</div>
+                <div class="mb-2">
+                    <strong>Статус:</strong>
+                    <StatusBadge Text="@(_order.OrderStatus?.Name ?? "—")" Tone="@OrderStatusUi.ToneForStatusName(_order.OrderStatus?.Name)" />
+                </div>
+                <div class="mb-2">
+                    <strong>Окно доставки:</strong> @DeliveryWindowFormatter.Format(_order)
+                </div>
+                <div class="mb-2"><strong>Клиент:</strong> @FormatClient(_order)</div>
+                <div class="mb-2"><strong>Курьер:</strong> @FormatCourier(_order)</div>
+                <div class="mb-2">
+                    <strong>Стоимость:</strong>
+                    @((_order.Final_cost > 0 ? _order.Final_cost : _order.Estimated_cost).ToString("N2")) ₽
+                </div>
+                @if (_order.PickupAddress is not null || _order.DeliveryAddress is not null)
+                {
+                    <div class="mb-2">
+                        <strong>Маршрут:</strong>
+                        <div class="small text-muted mt-1">
+                            @if (_order.PickupAddress is not null)
+                            {
+                                <div>Забор: @AddressFormat.OneLine(_order.PickupAddress)</div>
+                            }
+                            @if (_order.DeliveryAddress is not null)
+                            {
+                                <div>Доставка: @AddressFormat.OneLine(_order.DeliveryAddress)</div>
+                            }
+                        </div>
+                    </div>
+                }
+            }
+
+            <div class="d-flex justify-content-end mt-3">
+                <button type="button" class="btn btn-outline-secondary" @onclick="CloseAsync">Закрыть</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public int OrderId { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private OrderDto? _order;
+    private bool _loading = true;
+    private int _loadedOrderId;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (OrderId <= 0)
+        {
+            _order = null;
+            _loading = false;
+            return;
+        }
+
+        if (_loadedOrderId == OrderId && !_loading)
+            return;
+
+        _loading = true;
+        _loadedOrderId = OrderId;
+        _order = await OrdersApi.GetByIdAsync(OrderId);
+        _loading = false;
+    }
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+
+    private static string FormatClient(OrderDto o)
+    {
+        var u = o.ClientProfile?.User;
+        if (u is null)
+            return "—";
+        var name = $"{u.FName} {u.Name}".Trim();
+        return string.IsNullOrEmpty(name) ? "—" : name;
+    }
+
+    private static string FormatCourier(OrderDto o)
+    {
+        var u = o.CourierProfile?.User;
+        if (u is null)
+            return "Не назначен";
+        var name = $"{u.FName} {u.Name}".Trim();
+        return string.IsNullOrEmpty(name) ? "Назначен" : name;
+    }
+}

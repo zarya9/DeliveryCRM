@@ -1,4 +1,4 @@
-<span class="badge @ResolveClass()">@Text</span>
+<span class="dms-status-badge @ResolveClass()">@Text</span>
 
 @code {
     [Parameter] public string? Text { get; set; }
@@ -14,7 +14,7 @@
             "info" => "bg-info text-dark",
             "primary" => "bg-primary",
             "soft" => "dms-badge-soft",
-            _ => "bg-secondary"
+            _ => "dms-badge-neutral"
         };
     }
 }

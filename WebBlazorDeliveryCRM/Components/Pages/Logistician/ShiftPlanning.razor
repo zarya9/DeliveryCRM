@@ -94,7 +94,7 @@
                         <div class="courier-hub-card-head__main">
                             <h3 class="hub-card-title">@($"{c.User?.FName} {c.User?.Name}".Trim())</h3>
                             <div class="mb-2">
-                                <StatusBadge Text="@(state.active ? "В смене" : "Не в смене")" Tone="@(state.active ? "success" : "neutral")" />
+                                <StatusBadge Text="@(state.active ? "На смене" : "Не на смене")" Tone="@(state.active ? "success" : "neutral")" />
                             </div>
                         </div>
                         <UserAvatarThumb @key="c.User_id"
@@ -127,7 +127,7 @@
     var m = _modalShiftCourier;
     var mState = _shiftByCourier.GetValueOrDefault(m.ID_CourierProfile);
     var mPlan = _planner?.Plans?.FirstOrDefault(p => p.CourierId == m.ID_CourierProfile);
-    <div class="employee-modal-backdrop" @onclick="CloseShiftCourierModal">
+    <div class="employee-modal-backdrop">
         <div class="employee-modal employee-modal--fleet-form" @onclick:stopPropagation="true">
             <div class="d-flex align-items-start gap-3 mb-3">
                 <UserAvatarThumb UserId="m.User_id"
@@ -140,7 +140,7 @@
             </div>
             <div class="mb-2">
                 <strong>Статус смены:</strong>
-                <StatusBadge Text="@(mState.active ? "В смене" : "Не в смене")" Tone="@(mState.active ? "success" : "neutral")" />
+                <StatusBadge Text="@(mState.active ? "На смене" : "Не на смене")" Tone="@(mState.active ? "success" : "neutral")" />
             </div>
             <div class="mb-3">
                 <strong>Маршрут:</strong>

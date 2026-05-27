@@ -1,6 +1,7 @@
 @implements IDisposable
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthStateProvider
+@inject ChatUnreadStateService ChatUnreadState
 
 <div class="desktop-layout">
     <aside class="desktop-sidebar">
@@ -28,7 +29,13 @@
         @foreach (var item in _mobileNavItems)
         {
             <NavLink href="@item.Href" class="mobile-nav-item" Match="@(item.Exact ? NavLinkMatch.All : NavLinkMatch.Prefix)" title="@item.Text" aria-label="@item.Text">
-                <HugeIcon Name="@item.Icon" CssClass="mobile-nav-icon" />
+                <span class="mobile-nav-icon-slot mobile-nav-icon-slot--with-badge">
+                    <HugeIcon Name="@item.Icon" CssClass="mobile-nav-icon" />
+                    @if (_mobileChatUnread > 0 && string.Equals(item.Icon, "message-01", StringComparison.OrdinalIgnoreCase))
+                    {
+                        <span class="mobile-nav-badge" aria-label="Непрочитанные сообщения">@(_mobileChatUnread > 99 ? "99+" : _mobileChatUnread.ToString())</span>
+                    }
+                </span>
                 <span class="visually-hidden">@item.Text</span>
             </NavLink>
         }
@@ -40,6 +47,7 @@
 @code {
     private ErrorBoundary? _errorBoundary;
     private List<MobileNavItem> _mobileNavItems = new();
+    private int _mobileChatUnread;
 
     [Parameter]
     public RenderFragment? SidebarContent { get; set; }
@@ -50,6 +58,9 @@
     protected override async Task OnInitializedAsync()
     {
         Navigation.LocationChanged += OnLocationChanged;
+        ChatUnreadState.Changed += OnChatUnreadChanged;
+        await ChatUnreadState.RefreshAsync();
+        _mobileChatUnread = ChatUnreadState.TotalChatUnreadCount;
         await RefreshMobileNavAsync();
     }
 
@@ -69,6 +80,12 @@
         _mobileNavItems = BuildMobileNav(path, role);
     }
 
+    private void OnChatUnreadChanged()
+    {
+        _mobileChatUnread = ChatUnreadState.TotalChatUnreadCount;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
     private async Task<string?> ResolveRoleAsync()
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
@@ -84,10 +101,9 @@
             return
             [
                 new("/courier/shift", "calendar-03", "Смена", true),
-                new("/courier/manual-location", "maps-location-01", "Карта", false),
+                new("/courier/route", "route-02", "Маршрут", false),
                 new("/courier/orders", "invoice-01", "Заказы", false),
                 new("/courier/chat", "message-01", "Чат", false),
-                new("/courier/notifications", "notification-01", "Уведомления", false),
                 new("/courier/profile", "user-03", "Профиль", false)
             ];
         if (path.StartsWith("logistician"))
@@ -125,5 +141,6 @@
     public void Dispose()
     {
         Navigation.LocationChanged -= OnLocationChanged;
+        ChatUnreadState.Changed -= OnChatUnreadChanged;
     }
 }

@@ -8,6 +8,7 @@ using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
 using APIDeliveryCRM.Responses;
+using APIDeliveryCRM.Utilities;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -49,7 +50,7 @@ namespace APIDeliveryCRM.Services
 
         public async Task<Order> GetByIdAsync(int id)
         {
-            return await _context.Orders
+            var order = await _context.Orders
                 .Include(o => o.ClientProfile)
                 .Include(o => o.CourierProfile)
                 .Include(o => o.OrderStatus)
@@ -63,6 +64,9 @@ namespace APIDeliveryCRM.Services
                 .Include(o => o.RouteStops).ThenInclude(s => s.Address)
                 .Include(o => o.RouteStops).ThenInclude(s => s.LogisticsHub)
                 .FirstOrDefaultAsync(o => o.ID_Order == id);
+            if (order != null)
+                await EnrichClientOrdersAsync(new List<Order> { order });
+            return order;
         }
 
         public async Task<IReadOnlyList<Order>> GetAllAsync(int? companyId = null, DateTime? fromUtc = null, DateTime? toUtc = null)
@@ -93,7 +97,7 @@ namespace APIDeliveryCRM.Services
 
         public async Task<IReadOnlyList<Order>> GetByClientAsync(int clientProfileId)
         {
-            return await _context.Orders
+            var orders = await _context.Orders
                 .Where(o => o.Client_id == clientProfileId)
                 .Include(o => o.OrderStatus)
                 .Include(o => o.CourierProfile)
@@ -105,6 +109,57 @@ namespace APIDeliveryCRM.Services
                 .Include(o => o.DeliveryAddress)
                 .OrderByDescending(o => o.Created_at)
                 .ToListAsync();
+            await EnrichClientOrdersAsync(orders);
+            return orders;
+        }
+
+        private async Task EnrichClientOrdersAsync(List<Order> orders)
+        {
+            if (orders.Count == 0)
+                return;
+
+            var orderIds = orders.Select(o => o.ID_Order).ToList();
+            var refundedIds = await _context.OrderTimelineEvents.AsNoTracking()
+                .Where(e => orderIds.Contains(e.Order_id) && e.EventType == "PAYMENT_REFUNDED")
+                .Select(e => e.Order_id)
+                .Distinct()
+                .ToListAsync();
+            var refundedSet = refundedIds.ToHashSet();
+
+            var repaired = false;
+            foreach (var order in orders)
+            {
+                order.CanDeleteByClient = CanClientDeleteOrder(order, order.OrderStatus?.Name);
+
+                if (OrderStatusRules.IsCancelled(order.OrderStatus?.Name) &&
+                    order.Is_paid &&
+                    !refundedSet.Contains(order.ID_Order))
+                {
+                    order.Is_paid = false;
+                    _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+                    {
+                        Order_id = order.ID_Order,
+                        EventType = "PAYMENT_REFUNDED",
+                        Title = "Возврат оплаты",
+                        Message = "Оплата отменена, средства возвращены клиенту (тестовый режим MockPay).",
+                        NewStatus_id = order.Status_id
+                    });
+                    refundedSet.Add(order.ID_Order);
+                    repaired = true;
+                }
+
+                order.WasPaymentRefunded = refundedSet.Contains(order.ID_Order);
+
+                if (order.Delivered_at.HasValue &&
+                    TryGetDeliveryWindowMismatch(order, out var mismatchKind, out _))
+                {
+                    order.DeliveryWindowMismatch = true;
+                    order.DeliveryWindowMismatchKind = mismatchKind;
+                }
+            }
+
+            if (repaired)
+                await _context.SaveChangesAsync();
         }
 
         public async Task<IReadOnlyList<Order>> GetByCourierAsync(int courierProfileId)
@@ -280,12 +335,7 @@ namespace APIDeliveryCRM.Services
                 routeKind: routeKind,
                 createdAtUtc: DateTime.UtcNow,
                 fuelCostRub: fuelCostRub);
-            var (windowFromUtc, windowToUtc, etaUtc) = EstimateDeliveryWindowUtc(
-                nowUtc: DateTime.UtcNow,
-                priority: request.Priority,
-                hasCourierAssigned: request.Courier_id.HasValue,
-                routeKind: routeKind,
-                distanceKm: distanceKm);
+            var deliveryWindow = DeliveryWindowPolicy.Compute(DateTime.UtcNow, request.Priority);
 
             // EF Core не переводит Select(...).DefaultIfEmpty(0).MaxAsync() в SQL (Npgsql).
             var maxOrderNumber = await _context.Orders.MaxAsync(o => (int?)o.Order_Number) ?? 0;
@@ -316,8 +366,8 @@ namespace APIDeliveryCRM.Services
                 OriginHub_id = routeKind == DeliveryRouteKind.ViaHub ? originHub!.ID_LogisticsHub : null,
                 DestinationHub_id = routeKind == DeliveryRouteKind.ViaHub ? destHub!.ID_LogisticsHub : null,
                 Priority = request.Priority,
-                Sla_due_at = request.RequestedDeliveryAtUtc?.ToUniversalTime() ?? windowToUtc,
-                Eta_at = etaUtc
+                Sla_due_at = request.RequestedDeliveryAtUtc?.ToUniversalTime() ?? deliveryWindow.SlaDueUtc,
+                Eta_at = deliveryWindow.EtaUtc
             };
 
             foreach (var stop in stops)
@@ -331,7 +381,7 @@ namespace APIDeliveryCRM.Services
                 Order_id = order.ID_Order,
                 EventType = "ORDER_CREATED",
                 Title = "Заказ создан",
-                Message = $"Создан новый заказ. Маршрут: {BuildRouteLabel(routeKind, originHub, destHub)}. Ориентировочная доставка: {FormatDeliveryWindowRu(windowFromUtc, windowToUtc)}. Предварительная стоимость: {estimatedCost:0.##} ₽."
+                Message = $"Создан новый заказ. Маршрут: {BuildRouteLabel(routeKind, originHub, destHub)}. Ориентировочная доставка: {deliveryWindow.DisplayText}. Предварительная стоимость: {estimatedCost:0.##} ₽."
             });
             await _context.SaveChangesAsync();
             await PublishOrderEventAsync("order.created", order, new
@@ -339,8 +389,8 @@ namespace APIDeliveryCRM.Services
                 routeKind = order.DeliveryRouteKind.ToString(),
                 priority = order.Priority,
                 etaAt = order.Eta_at,
-                deliveryWindowFromUtc = windowFromUtc,
-                deliveryWindowToUtc = windowToUtc,
+                deliveryWindowFromUtc = deliveryWindow.EtaUtc,
+                deliveryWindowToUtc = deliveryWindow.SlaDueUtc,
                 estimatedCost
             });
             await TryRebuildPlannerAsync(order.Company_id, "order.created");
@@ -354,7 +404,7 @@ namespace APIDeliveryCRM.Services
             return order;
         }
 
-        public async Task<bool> ChangeStatusAsync(int orderId, int statusId)
+        public async Task<bool> ChangeStatusAsync(int orderId, int statusId, int? actorUserId = null)
         {
             var order = await _context.Orders
                 .Include(o => o.OrderStatus)
@@ -367,10 +417,16 @@ namespace APIDeliveryCRM.Services
             }
 
             var oldStatusId = order.Status_id;
+            var oldStatusName = order.OrderStatus?.Name;
+            var wasDeliveredBefore = order.Delivered_at.HasValue;
             var status = await _context.OrderStatuses.AsNoTracking()
                 .FirstOrDefaultAsync(s => s.ID_OrderStatus == statusId);
             order.Status_id = statusId;
             ApplyMilestoneTimestamps(order, status?.Name, statusId);
+            var justDelivered = !wasDeliveredBefore && order.Delivered_at.HasValue;
+            string? deliveryWindowMismatchMessage = null;
+            if (justDelivered)
+                deliveryWindowMismatchMessage = ApplyDeliveryWindowComplianceFields(order);
             UpdateSlaFlags(order);
             order.Eta_at = EstimateEtaUtc(DateTime.UtcNow, order.Priority, order.Courier_id.HasValue);
             var isSlaRisk = IsSlaRisk(order);
@@ -387,6 +443,19 @@ namespace APIDeliveryCRM.Services
                 OldStatus_id = oldStatusId,
                 NewStatus_id = statusId
             });
+
+            var notifyStaffCancellation = false;
+            var cancelWasPaid = false;
+            var cancelReason = string.Empty;
+
+            if (OrderStatusRules.IsCancelled(newStatusName) && !OrderStatusRules.IsCancelled(oldStatusName))
+            {
+                order.Courier_id = null;
+                order.Plan_locked_shiftPlan_id = null;
+                order.Plan_locked_at = null;
+                (cancelWasPaid, cancelReason) = await ApplyOrderCancellationEffectsAsync(order, actorUserId, "Заказ отменён.", oldStatusId);
+                notifyStaffCancellation = true;
+            }
 
             var activeAssignment = await _context.ShiftAssignments
                 .Where(a => a.Order_id == order.ID_Order && (a.Status == ShiftAssignmentStatus.Pending || a.Status == ShiftAssignmentStatus.InProgress))
@@ -409,6 +478,10 @@ namespace APIDeliveryCRM.Services
             }
 
             await _context.SaveChangesAsync();
+            if (notifyStaffCancellation)
+                await NotifyStaffOrderCancelledAsync(order, cancelWasPaid, cancelReason, actorUserId);
+            if (!string.IsNullOrWhiteSpace(deliveryWindowMismatchMessage))
+                await PublishDeliveryWindowMismatchAlertsAsync(order, deliveryWindowMismatchMessage!, actorUserId);
             await PublishOrderEventAsync("order.status_changed", order, new
             {
                 oldStatusId,
@@ -674,8 +747,13 @@ namespace APIDeliveryCRM.Services
 
             var oldStatusId = order.Status_id;
             var hubHandoffBefore = order.HandoffStage;
+            var wasDeliveredBefore = order.Delivered_at.HasValue;
             order.Status_id = targetStatusId.Value;
             ApplyMilestoneTimestamps(order, targetStatusName, targetStatusId.Value);
+            var justDelivered = isFinalDelivery && !wasDeliveredBefore && order.Delivered_at.HasValue;
+            string? deliveryWindowMismatchMessage = null;
+            if (justDelivered)
+                deliveryWindowMismatchMessage = ApplyDeliveryWindowComplianceFields(order);
             UpdateSlaFlags(order);
             order.Eta_at = EstimateEtaUtc(DateTime.UtcNow, order.Priority, order.Courier_id.HasValue && !isFinalDelivery);
 
@@ -706,6 +784,11 @@ namespace APIDeliveryCRM.Services
             await SendStatusAutomationAsync(order, targetStatusId.Value);
 
             await _context.SaveChangesAsync();
+
+            if (stopKind == OrderRouteStopKind.SenderPickup || isFinalDelivery)
+                await SendCourierPickupDeliveryAlertsAsync(order, courierProfileId, stopKind == OrderRouteStopKind.SenderPickup, isFinalDelivery, actorUserId);
+            if (!string.IsNullOrWhiteSpace(deliveryWindowMismatchMessage))
+                await PublishDeliveryWindowMismatchAlertsAsync(order, deliveryWindowMismatchMessage!, actorUserId);
             try
             {
                 await _shiftPlanner.RecalculateActivePlanDistanceAsync(courierProfileId);
@@ -738,7 +821,9 @@ namespace APIDeliveryCRM.Services
                 NewStatusId = order.Status_id,
                 NewStatusName = statusEntity?.Name ?? targetStatusName,
                 OrderDelivered = isFinalDelivery,
-                HubHandoffTriggered = hubHandoffTriggered
+                HubHandoffTriggered = hubHandoffTriggered,
+                DeliveryWindowMismatch = !string.IsNullOrWhiteSpace(deliveryWindowMismatchMessage),
+                DeliveryWindowWarning = deliveryWindowMismatchMessage
             }, null);
         }
 
@@ -746,10 +831,10 @@ namespace APIDeliveryCRM.Services
             int courierProfileId,
             double lat,
             double lon,
-            double maxMeters = 50)
+            double maxMeters = 15)
         {
             if (maxMeters <= 0)
-                maxMeters = 50;
+                maxMeters = 15;
 
             var assignments = await _context.ShiftAssignments
                 .Include(a => a.Order).ThenInclude(o => o!.DeliveryAddress)
@@ -777,10 +862,15 @@ namespace APIDeliveryCRM.Services
                         stopKind = OrderRouteStopKind.SenderPickup;
                 }
 
-                if (!IsFinalDeliveryStop(assignment.Stage, stopKind))
+                if (stopKind == OrderRouteStopKind.Hub)
                     continue;
 
-                if (!TryResolveAssignmentCoordinates(assignment, out var stopLat, out var stopLon))
+                var isPickup = stopKind == OrderRouteStopKind.SenderPickup;
+                var isDelivery = IsFinalDeliveryStop(assignment.Stage, stopKind);
+                if (!isPickup && !isDelivery)
+                    continue;
+
+                if (!TryResolveAssignmentCoordinates(assignment, stopKind, out var stopLat, out var stopLon))
                     continue;
 
                 var distanceM = HaversineMeters(lat, lon, stopLat, stopLon);
@@ -789,11 +879,11 @@ namespace APIDeliveryCRM.Services
 
                 var title = assignment.OrderRouteStop?.Title?.Trim();
                 if (string.IsNullOrWhiteSpace(title))
-                    title = stopKind == OrderRouteStopKind.RecipientDelivery
-                        ? "Доставка получателю"
-                        : assignment.Notes?.Trim() ?? "Точка доставки";
+                    title = isPickup
+                        ? "Забор у отправителя"
+                        : "Доставка получателю";
 
-                var addressLine = FormatAssignmentAddressLine(assignment);
+                var addressLine = FormatAssignmentAddressLine(assignment, stopKind);
 
                 nearby.Add(new NearbyDeliveryStopDto
                 {
@@ -802,7 +892,8 @@ namespace APIDeliveryCRM.Services
                     OrderNumber = order.Order_Number,
                     Title = title,
                     AddressLine = addressLine,
-                    DistanceMeters = Math.Round(distanceM, 0)
+                    DistanceMeters = Math.Round(distanceM, 0),
+                    StopKind = isPickup ? "Pickup" : "Delivery"
                 });
             }
 
@@ -841,7 +932,8 @@ namespace APIDeliveryCRM.Services
                     OrderNumber = order.Order_Number,
                     Title = "Доставка получателю",
                     AddressLine = JoinAddress(delivery),
-                    DistanceMeters = Math.Round(distanceM, 0)
+                    DistanceMeters = Math.Round(distanceM, 0),
+                    StopKind = "Delivery"
                 });
             }
 
@@ -1007,8 +1099,7 @@ namespace APIDeliveryCRM.Services
                 return null;
 
             var risk = IsSlaRisk(order);
-            var windowFrom = order.Eta_at?.AddHours(-Math.Max(2, Math.Ceiling(((order.Sla_due_at ?? order.Eta_at ?? DateTime.UtcNow) - (order.Eta_at ?? DateTime.UtcNow)).TotalHours)));
-            var windowTo = order.Sla_due_at;
+            var (windowFrom, windowTo) = GetDeliveryWindowUtc(order);
             return new OrderEtaDto
             {
                 OrderId = order.ID_Order,
@@ -1019,46 +1110,9 @@ namespace APIDeliveryCRM.Services
                 DelayReason = order.Delay_reason,
                 DeliveryWindowFromUtc = windowFrom,
                 DeliveryWindowToUtc = windowTo,
-                DeliveryWindowText = FormatDeliveryWindowRu(windowFrom, windowTo)
+                DeliveryWindowText = DeliveryWindowPolicy.FormatDisplayText(
+                    order.Priority, order.Sla_due_at, order.Eta_at, order.Created_at)
             };
-        }
-
-        private static (DateTime fromUtc, DateTime toUtc, DateTime etaUtc) EstimateDeliveryWindowUtc(
-            DateTime nowUtc,
-            byte priority,
-            bool hasCourierAssigned,
-            DeliveryRouteKind routeKind,
-            decimal distanceKm)
-        {
-            var safeDistance = Math.Max(1m, distanceKm);
-            var speedKmh = routeKind switch
-            {
-                DeliveryRouteKind.DirectIntercity => 62m,
-                DeliveryRouteKind.ViaHub => 48m,
-                _ => 32m
-            };
-            var routeHandlingHours = routeKind switch
-            {
-                DeliveryRouteKind.ViaHub => 8m,
-                DeliveryRouteKind.DirectIntercity => 5m,
-                _ => 2m
-            };
-            var travelHours = safeDistance / speedKmh + routeHandlingHours;
-            var priorityFactor = priority switch
-            {
-                2 => 0.70m,
-                1 => 0.82m,
-                _ => 1.00m
-            };
-            travelHours *= priorityFactor;
-            if (!hasCourierAssigned)
-                travelHours += 2.0m;
-
-            var center = nowUtc.AddHours((double)travelHours);
-            var halfWindowHours = Math.Max(2.0, Math.Ceiling((double)travelHours * 0.25));
-            var from = center.AddHours(-halfWindowHours);
-            var to = center.AddHours(halfWindowHours);
-            return (from, to, center);
         }
 
         private static decimal CalculateEstimatedCost(
@@ -1426,44 +1480,6 @@ namespace APIDeliveryCRM.Services
         private static string NormalizeCity(string? city)
             => string.IsNullOrWhiteSpace(city) ? string.Empty : city.Trim().ToLowerInvariant();
 
-        private static string FormatDeliveryWindowRu(DateTime? fromUtc, DateTime? toUtc)
-        {
-            if (!fromUtc.HasValue && !toUtc.HasValue)
-                return "дата уточняется";
-            if (!fromUtc.HasValue)
-                return $"до {FormatDayMonthRu(toUtc!.Value)}";
-            if (!toUtc.HasValue)
-                return $"с {FormatDayMonthRu(fromUtc.Value)}";
-
-            var from = fromUtc.Value;
-            var to = toUtc.Value;
-            if (from.Date == to.Date)
-                return FormatDayMonthRu(from);
-
-            if (from.Month == to.Month && from.Year == to.Year)
-                return $"с {from:dd} по {to:dd} {GetMonthRu(to.Month)}";
-
-            return $"с {FormatDayMonthRu(from)} по {FormatDayMonthRu(to)}";
-        }
-
-        private static string FormatDayMonthRu(DateTime dt) => $"{dt:dd} {GetMonthRu(dt.Month)}";
-
-        private static string GetMonthRu(int month) => month switch
-        {
-            1 => "января",
-            2 => "февраля",
-            3 => "марта",
-            4 => "апреля",
-            5 => "мая",
-            6 => "июня",
-            7 => "июля",
-            8 => "августа",
-            9 => "сентября",
-            10 => "октября",
-            11 => "ноября",
-            12 => "декабря",
-            _ => string.Empty
-        };
 
         private static DateTime EstimateEtaUtc(DateTime nowUtc, byte priority, bool hasCourierAssigned)
         {
@@ -1481,7 +1497,11 @@ namespace APIDeliveryCRM.Services
             return nowUtc.AddMinutes(baseMinutes);
         }
 
-        private static bool TryResolveAssignmentCoordinates(ShiftAssignment assignment, out double lat, out double lon)
+        private static bool TryResolveAssignmentCoordinates(
+            ShiftAssignment assignment,
+            OrderRouteStopKind? stopKind,
+            out double lat,
+            out double lon)
         {
             lat = 0;
             lon = 0;
@@ -1498,6 +1518,37 @@ namespace APIDeliveryCRM.Services
             if (order == null)
                 return false;
 
+            var notes = assignment.Notes ?? string.Empty;
+            if (!stopKind.HasValue)
+            {
+                if (notes.Contains("забор", StringComparison.OrdinalIgnoreCase))
+                    stopKind = OrderRouteStopKind.SenderPickup;
+                else if (notes.Contains("доставк", StringComparison.OrdinalIgnoreCase))
+                    stopKind = OrderRouteStopKind.RecipientDelivery;
+            }
+
+            if (stopKind == OrderRouteStopKind.SenderPickup)
+            {
+                var pickup = order.PickupAddress;
+                if (pickup?.Latitude is { } pLat && pickup.Longitude is { } pLon && (pLat != 0 || pLon != 0))
+                {
+                    lat = (double)pLat;
+                    lon = (double)pLon;
+                    return true;
+                }
+            }
+
+            if (notes.Contains("забор", StringComparison.OrdinalIgnoreCase))
+            {
+                var pickup = order.PickupAddress;
+                if (pickup?.Latitude is { } pLat2 && pickup.Longitude is { } pLon2 && (pLat2 != 0 || pLon2 != 0))
+                {
+                    lat = (double)pLat2;
+                    lon = (double)pLon2;
+                    return true;
+                }
+            }
+
             var delivery = order.DeliveryAddress;
             if (delivery?.Latitude is { } dLat && delivery.Longitude is { } dLon && (dLat != 0 || dLon != 0))
             {
@@ -1509,7 +1560,7 @@ namespace APIDeliveryCRM.Services
             return false;
         }
 
-        private static string FormatAssignmentAddressLine(ShiftAssignment assignment)
+        private static string FormatAssignmentAddressLine(ShiftAssignment assignment, OrderRouteStopKind? stopKind)
         {
             var routeAddr = assignment.OrderRouteStop?.Address;
             if (routeAddr != null)
@@ -1517,6 +1568,17 @@ namespace APIDeliveryCRM.Services
                 var line = JoinAddress(routeAddr);
                 if (!string.IsNullOrWhiteSpace(line))
                     return line;
+            }
+
+            if (stopKind == OrderRouteStopKind.SenderPickup)
+            {
+                var pickup = assignment.Order?.PickupAddress;
+                if (pickup != null)
+                {
+                    var line = JoinAddress(pickup);
+                    if (!string.IsNullOrWhiteSpace(line))
+                        return line;
+                }
             }
 
             var delivery = assignment.Order?.DeliveryAddress;
@@ -1652,6 +1714,27 @@ namespace APIDeliveryCRM.Services
                 return false;
 
             return true;
+        }
+
+        private static bool CanClientDeleteOrder(Order order, string? statusName)
+        {
+            if (order.Courier_id.HasValue || order.Delivered_at.HasValue ||
+                order.Pickup_started_at.HasValue || order.In_transit_at.HasValue || order.Arrived_at.HasValue)
+                return false;
+
+            if (OrderStatusRules.IsCancelled(statusName) || OrderStatusRules.IsDelivered(statusName, order.Delivered_at))
+                return false;
+
+            var name = statusName?.Trim() ?? string.Empty;
+            if (name.Length == 0)
+                return true;
+
+            if (name.Contains("нов", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("созда", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("ожида", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return false;
         }
 
         private static bool IsFinalDeliveryStop(ShiftAssignmentStage stage, OrderRouteStopKind? kind)
@@ -1939,6 +2022,12 @@ namespace APIDeliveryCRM.Services
                 body = $"Ваш заказ №{orderNumber} успешно доставлен.";
                 return true;
             }
+            if (s.Contains("отмен") || s.Contains("cancel"))
+            {
+                title = "Заказ отменён";
+                body = $"Заказ №{orderNumber} отменён. Если оплата была списана, средства будут возвращены на карту.";
+                return true;
+            }
             title = string.Empty;
             body = string.Empty;
             return false;
@@ -1975,6 +2064,415 @@ namespace APIDeliveryCRM.Services
             });
             await _context.SaveChangesAsync();
             return (true, null);
+        }
+
+        public async Task<(bool ok, string? error)> DeleteMineAsync(int orderId, int userId)
+        {
+            var client = await _context.ClientProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.User_id == userId);
+            if (client == null)
+                return (false, "Профиль клиента не найден.");
+
+            var order = await _context.Orders
+                .Include(o => o.OrderStatus)
+                .FirstOrDefaultAsync(o => o.ID_Order == orderId && o.Client_id == client.ID_ClientProfile);
+            if (order == null)
+                return (false, "Заказ не найден.");
+
+            var statusName = order.OrderStatus?.Name ?? string.Empty;
+            if (!CanClientDeleteOrder(order, statusName))
+                return (false, "Отменить можно только новый заказ, пока курьер не назначен и доставка не началась.");
+
+            var hasActiveAssignments = await _context.ShiftAssignments.AsNoTracking()
+                .AnyAsync(a => a.Order_id == order.ID_Order &&
+                               (a.Status == ShiftAssignmentStatus.Pending || a.Status == ShiftAssignmentStatus.InProgress));
+            if (hasActiveAssignments)
+                return (false, "Заказ уже находится в плане доставки и не может быть удалён клиентом.");
+
+            var cancelledStatusId = await ResolveStatusIdByNameAsync("Отменён клиентом");
+            if (cancelledStatusId == null || cancelledStatusId == 0)
+                cancelledStatusId = await ResolveStatusIdByNameAsync("Отменён");
+            if (cancelledStatusId == null || cancelledStatusId == 0)
+                return (false, "Не настроен статус отмены заказа.");
+
+            var oldStatusId = order.Status_id;
+            order.Status_id = cancelledStatusId.Value;
+            order.Courier_id = null;
+            order.Plan_locked_shiftPlan_id = null;
+            order.Plan_locked_at = null;
+            order.Delay_reason = "Заказ отменён клиентом.";
+            var (cancelWasPaid, cancelReason) = await ApplyOrderCancellationEffectsAsync(order, userId, "Заказ отменён клиентом.", oldStatusId);
+            _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+            {
+                Order_id = order.ID_Order,
+                EventType = "CLIENT_CANCELLED",
+                Title = "Заказ отменён клиентом",
+                Message = "Клиент отменил заказ до передачи в доставку.",
+                OldStatus_id = oldStatusId,
+                NewStatus_id = cancelledStatusId,
+                ActorUser_id = userId
+            });
+            await _context.SaveChangesAsync();
+            await NotifyStaffOrderCancelledAsync(order, cancelWasPaid, cancelReason, userId);
+            await PublishOrderEventAsync("order.cancelled_by_client", order, new { userId });
+            await TryRebuildPlannerAsync(order.Company_id, "order.cancelled_by_client");
+            return (true, null);
+        }
+
+        private async Task<(bool wasPaid, string reason)> ApplyOrderCancellationEffectsAsync(Order order, int? actorUserId, string reason, int? oldStatusId)
+        {
+            var wasPaid = order.Is_paid;
+            if (wasPaid)
+            {
+                order.Is_paid = false;
+                _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+                {
+                    Order_id = order.ID_Order,
+                    EventType = "PAYMENT_REFUNDED",
+                    Title = "Возврат оплаты",
+                    Message = "Оплата отменена, средства возвращены клиенту (тестовый режим MockPay).",
+                    OldStatus_id = oldStatusId,
+                    NewStatus_id = order.Status_id,
+                    ActorUser_id = actorUserId
+                });
+            }
+
+            await NotifyClientOrderCancelledAsync(order, wasPaid, reason);
+            return (wasPaid, reason);
+        }
+
+        private async Task NotifyClientOrderCancelledAsync(Order order, bool wasPaid, string reason)
+        {
+            var typeId = await ResolveNotificationTypeIdAsync();
+            if (typeId <= 0)
+                return;
+
+            var clientUserId = await _context.ClientProfiles.AsNoTracking()
+                .Where(c => c.ID_ClientProfile == order.Client_id)
+                .Select(c => c.User_id)
+                .FirstOrDefaultAsync();
+
+            var refundNote = wasPaid
+                ? " Оплата возвращена на карту (тестовый MockPay)."
+                : string.Empty;
+            var clientTitle = "Заказ отменён";
+            var clientMessage = $"Заказ №{order.Order_Number} отменён.{refundNote}";
+
+            if (clientUserId > 0)
+            {
+                await _notificationService.SendAsync(
+                    clientUserId,
+                    typeId,
+                    clientTitle,
+                    clientMessage,
+                    order.ID_Order,
+                    priority: wasPaid ? (byte)1 : (byte)0,
+                    isCritical: wasPaid);
+            }
+        }
+
+        private async Task NotifyStaffOrderCancelledAsync(Order order, bool wasPaid, string reason, int? actorUserId)
+        {
+            var typeId = await ResolveNotificationTypeIdAsync();
+            if (typeId <= 0)
+                return;
+
+            var refundNote = wasPaid
+                ? " Оплата возвращена на карту (тестовый MockPay)."
+                : string.Empty;
+            var managerTitle = wasPaid
+                ? $"Отменён оплаченный заказ №{order.Order_Number}"
+                : $"Заказ №{order.Order_Number} отменён";
+            var actorNote = actorUserId.HasValue && actorUserId.Value > 0
+                ? $" Инициатор: пользователь #{actorUserId.Value}."
+                : string.Empty;
+            var managerMessage = $"{reason}{refundNote}{actorNote}";
+
+            var staffUserIds = await GetStaffUserIdsForOrderAlertsAsync(order.Company_id);
+            await _notificationService.SendManyAsync(
+                staffUserIds,
+                typeId,
+                managerTitle,
+                managerMessage,
+                order.ID_Order,
+                skipUserId: actorUserId,
+                priority: wasPaid ? (byte)1 : (byte)0,
+                isCritical: wasPaid,
+                requiresAck: wasPaid);
+        }
+
+        private async Task<IReadOnlyList<int>> GetStaffUserIdsForOrderAlertsAsync(int companyId)
+        {
+            return await _context.Users.AsNoTracking()
+                .Where(u => u.Company_id == companyId &&
+                            (u.Role.Name == "Менеджер" || u.Role.Name == "Логист" || u.Role.Name == "Логистика" ||
+                             u.Role.Name == "Админ" || u.Role.Name == "Администратор"))
+                .Select(u => u.ID_User)
+                .ToListAsync();
+        }
+
+        private async Task SendCourierPickupDeliveryAlertsAsync(
+            Order order,
+            int courierProfileId,
+            bool isPickup,
+            bool isDelivery,
+            int? actorUserId)
+        {
+            var typeId = await ResolveNotificationTypeIdAsync();
+            if (typeId <= 0)
+                return;
+
+            var orderName = string.IsNullOrWhiteSpace(order.Name)
+                ? $"№{order.Order_Number}"
+                : order.Name.Trim();
+
+            var courier = await _context.CourierProfiles.AsNoTracking()
+                .Include(c => c.User)
+                .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId);
+            var courierName = courier?.User is null
+                ? "Курьер"
+                : $"{courier.User.FName} {courier.User.Name}".Trim();
+
+            var clientUserId = await _context.ClientProfiles.AsNoTracking()
+                .Where(c => c.ID_ClientProfile == order.Client_id)
+                .Select(c => c.User_id)
+                .FirstOrDefaultAsync();
+
+            if (clientUserId > 0)
+            {
+                var clientTitle = isPickup ? "Заказ забран" : "Заказ доставлен";
+                var clientBody = isPickup
+                    ? $"Ваш заказ \"{orderName}\" забран"
+                    : $"Ваш заказ \"{orderName}\" доставлен";
+                await _notificationService.SendAsync(
+                    clientUserId,
+                    typeId,
+                    clientTitle,
+                    clientBody,
+                    order.ID_Order,
+                    priority: order.Priority,
+                    isCritical: order.Priority >= 2,
+                    requiresAck: order.Priority >= 2);
+            }
+
+            var staffIds = await GetStaffUserIdsForOrderAlertsAsync(order.Company_id);
+            if (staffIds.Count == 0)
+                return;
+
+            var staffTitle = isPickup ? "Забор заказа" : "Доставка заказа";
+            var staffBody = isPickup
+                ? $"Курьер {courierName} забрал заказ \"{orderName}\""
+                : $"Курьер {courierName} доставил заказ \"{orderName}\"";
+            await _notificationService.SendManyAsync(
+                staffIds,
+                typeId,
+                staffTitle,
+                staffBody,
+                order.ID_Order,
+                skipUserId: actorUserId,
+                priority: order.Priority >= 2 ? (byte)1 : (byte)0,
+                isCritical: order.Priority >= 2);
+        }
+
+        private static (DateTime? fromUtc, DateTime? toUtc) GetDeliveryWindowUtc(Order order)
+        {
+            if (!order.Eta_at.HasValue && !order.Sla_due_at.HasValue)
+                return (null, null);
+
+            var to = order.Sla_due_at;
+            if (order.Eta_at.HasValue)
+                return (order.Eta_at, to);
+
+            if (!to.HasValue)
+                return (null, null);
+
+            var tz = GetMoscowTimeZone();
+            var dueLocal = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(to.Value, DateTimeKind.Utc), tz);
+            var dayStartLocal = DateOnly.FromDateTime(dueLocal).ToDateTime(new TimeOnly(9, 0), DateTimeKind.Unspecified);
+            var from = TimeZoneInfo.ConvertTimeToUtc(dayStartLocal, tz);
+            return (from, to);
+        }
+
+        private static TimeZoneInfo GetMoscowTimeZone()
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById("Europe/Moscow");
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById("Russian Standard Time");
+            }
+        }
+
+        private static bool TryGetDeliveryWindowMismatch(Order order, out string kind, out string reasonRu)
+        {
+            kind = string.Empty;
+            reasonRu = string.Empty;
+            if (!order.Delivered_at.HasValue)
+                return false;
+
+            var (fromUtc, toUtc) = GetDeliveryWindowUtc(order);
+            if (!fromUtc.HasValue && !toUtc.HasValue)
+                return false;
+
+            var tz = GetMoscowTimeZone();
+            var deliveredLocal = TimeZoneInfo.ConvertTimeFromUtc(order.Delivered_at.Value, tz);
+            var deliveredDay = DateOnly.FromDateTime(deliveredLocal);
+            var plannedFromDay = fromUtc.HasValue
+                ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(fromUtc.Value, tz))
+                : (DateOnly?)null;
+            var plannedToDay = toUtc.HasValue
+                ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(toUtc.Value, tz))
+                : (DateOnly?)null;
+            var windowText = DeliveryWindowPolicy.FormatDisplayText(
+                order.Priority, order.Sla_due_at, order.Eta_at, order.Created_at);
+            var deliveredText = DeliveryWindowPolicy.FormatDayMonthRu(deliveredLocal);
+
+            if (plannedFromDay.HasValue && deliveredDay < plannedFromDay)
+            {
+                kind = "early";
+                reasonRu = $"Доставка выполнена {deliveredText} — раньше обещанного окна ({windowText}).";
+                return true;
+            }
+
+            if (plannedToDay.HasValue && deliveredDay > plannedToDay)
+            {
+                kind = "late";
+                reasonRu = $"Доставка выполнена {deliveredText} — позже обещанного окна ({windowText}).";
+                return true;
+            }
+
+            if (fromUtc.HasValue && order.Delivered_at.Value < fromUtc.Value)
+            {
+                kind = "early";
+                reasonRu = $"Доставка выполнена раньше начала окна ({windowText}).";
+                return true;
+            }
+
+            if (toUtc.HasValue && order.Delivered_at.Value > toUtc.Value)
+            {
+                kind = "late";
+                reasonRu = $"Доставка выполнена позже конца окна ({windowText}).";
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Фиксирует несоответствие окна доставки в заказе и таймлайне. Возвращает текст проблемы или null.</summary>
+        private string? ApplyDeliveryWindowComplianceFields(Order order)
+        {
+            if (!TryGetDeliveryWindowMismatch(order, out var kind, out var reasonRu))
+                return null;
+
+            order.Delay_reason = reasonRu;
+            if (kind == "late" && !order.Sla_breached_at.HasValue)
+                order.Sla_breached_at = order.Delivered_at ?? DateTime.UtcNow;
+
+            order.DeliveryWindowMismatch = true;
+            order.DeliveryWindowMismatchKind = kind;
+
+            _context.OrderTimelineEvents.Add(new OrderTimelineEvent
+            {
+                Order_id = order.ID_Order,
+                EventType = "DELIVERY_WINDOW_MISMATCH",
+                Title = kind == "early" ? "Доставка раньше срока" : "Доставка вне окна",
+                Message = reasonRu,
+                NewStatus_id = order.Status_id
+            });
+
+            return reasonRu;
+        }
+
+        private async Task PublishDeliveryWindowMismatchAlertsAsync(Order order, string reasonRu, int? actorUserId)
+        {
+            var typeId = await ResolveNotificationTypeIdAsync();
+            if (typeId <= 0)
+                return;
+
+            var isLate = order.DeliveryWindowMismatchKind == "late";
+            var staffTitle = isLate
+                ? $"Заказ №{order.Order_Number}: доставка не в срок"
+                : $"Заказ №{order.Order_Number}: доставка вне окна";
+            var staffUserIds = await GetStaffUserIdsForOrderAlertsAsync(order.Company_id);
+            await _notificationService.SendManyAsync(
+                staffUserIds,
+                typeId,
+                staffTitle,
+                reasonRu,
+                order.ID_Order,
+                skipUserId: actorUserId,
+                priority: isLate ? (byte)1 : (byte)0,
+                isCritical: isLate,
+                requiresAck: isLate);
+
+            var clientUserId = await _context.ClientProfiles.AsNoTracking()
+                .Where(c => c.ID_ClientProfile == order.Client_id)
+                .Select(c => c.User_id)
+                .FirstOrDefaultAsync();
+            if (clientUserId > 0)
+            {
+                var clientMessage = isLate
+                    ? $"Заказ №{order.Order_Number} доставлен позже обещанного срока. Менеджер свяжется с вами или напишите в чат по заказу."
+                    : $"Заказ №{order.Order_Number} доставлен раньше запланированного окна. Если возникли вопросы — напишите менеджеру в чате по заказу.";
+                await _notificationService.SendAsync(
+                    clientUserId,
+                    typeId,
+                    "Доставка вне обещанного окна",
+                    clientMessage,
+                    order.ID_Order,
+                    priority: isLate ? (byte)1 : (byte)0,
+                    isCritical: isLate);
+            }
+
+            await CreateDeliveryWindowMismatchTicketAsync(order, reasonRu, actorUserId, isLate);
+        }
+
+        private async Task CreateDeliveryWindowMismatchTicketAsync(Order order, string reasonRu, int? actorUserId, bool isLate)
+        {
+            var ticketExists = await _context.SupportTickets.AsNoTracking()
+                .AnyAsync(t => t.Order_id == order.ID_Order &&
+                               t.Category == SupportTicketCategory.Complaint &&
+                               t.Status != SupportTicketStatus.Closed &&
+                               t.Title.Contains("окно доставки"));
+            if (ticketExists)
+                return;
+
+            var createdBy = actorUserId;
+            if (!createdBy.HasValue || createdBy.Value <= 0)
+            {
+                createdBy = await _context.Users.AsNoTracking()
+                    .Where(u => u.Company_id == order.Company_id &&
+                                (u.Role.Name == "Менеджер" || u.Role.Name == "Админ" || u.Role.Name == "Администратор"))
+                    .Select(u => u.ID_User)
+                    .FirstOrDefaultAsync();
+            }
+
+            if (!createdBy.HasValue || createdBy.Value <= 0)
+                return;
+
+            var now = DateTime.UtcNow;
+            var ticket = new SupportTicket
+            {
+                Company_id = order.Company_id,
+                Order_id = order.ID_Order,
+                ClientProfile_id = order.Client_id,
+                Title = isLate
+                    ? $"Нарушение окна доставки — заказ №{order.Order_Number}"
+                    : $"Доставка вне окна — заказ №{order.Order_Number}",
+                Description = $"{reasonRu} Требуется связаться с клиентом и зафиксировать решение (извинения, компенсация, повторная доставка).",
+                Category = SupportTicketCategory.Complaint,
+                Priority = isLate ? (byte)1 : (byte)0,
+                Status = SupportTicketStatus.New,
+                CreatedByUser_id = createdBy.Value,
+                Created_at = now,
+                Sla_due_at = now.AddHours(isLate ? 4 : 24),
+                Delay_reason = reasonRu
+            };
+            _context.SupportTickets.Add(ticket);
+            await _context.SaveChangesAsync();
         }
 
         private async Task PublishOrderEventAsync(string eventType, Order order, object details)

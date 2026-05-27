@@ -9,4 +9,6 @@ public class RouteStopCompletionResultDto
     public string? NewStatusName { get; set; }
     public bool OrderDelivered { get; set; }
     public bool HubHandoffTriggered { get; set; }
+    public bool DeliveryWindowMismatch { get; set; }
+    public string? DeliveryWindowWarning { get; set; }
 }

@@ -180,7 +180,8 @@ public class CouriersApiService
                 OrderNumber = item.TryGetProperty("orderNumber", out var n) ? n.GetInt32() : 0,
                 Title = item.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "",
                 AddressLine = item.TryGetProperty("addressLine", out var ad) ? ad.GetString() ?? "" : "",
-                DistanceMeters = item.TryGetProperty("distanceMeters", out var d) ? d.GetDouble() : 0
+                DistanceMeters = item.TryGetProperty("distanceMeters", out var d) ? d.GetDouble() : 0,
+                StopKind = item.TryGetProperty("stopKind", out var sk) ? sk.GetString() ?? "Delivery" : "Delivery"
             });
         }
 

@@ -79,6 +79,9 @@ namespace APIDeliveryCRM.Controllers
         {
             "SHIFT_STARTED" => "Начало смены",
             "SHIFT_FINISHED" => "Завершение смены",
+            "SlaRisk" => "Риск SLA",
+            "SLA_RISK" => "Риск SLA",
+            "chat_message" => "Сообщение в чате",
             _ => typeName
         };
 

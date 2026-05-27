@@ -1,6 +1,7 @@
 @page "/courier/orders"
 @layout CourierLayout
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Курьер")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CourierAccessRoles.AuthorizeList)]
+@using WebBlazorDeliveryCRM.Services
 @using System.Security.Claims
 @using Microsoft.AspNetCore.Components.Authorization
 @using WebBlazorDeliveryCRM.Models
@@ -22,7 +23,7 @@
     </h1>
     <p class="subtitle">
         Активные назначения на вас. Пошаговый маршрут и навигатор — в <a href="/courier/route">«Мой маршрут»</a>.
-        Здесь можно открыть внешнюю навигацию до адреса доставки.
+        
     </p>
 </div>
 

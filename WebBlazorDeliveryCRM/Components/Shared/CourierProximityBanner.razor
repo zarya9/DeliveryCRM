@@ -4,13 +4,14 @@
 @inject CourierProximityState Proximity
 @inject OrdersApiService OrdersApi
 @inject AppNotificationService Notify
+@inject NavigationManager Nav
 
-@if (_stop is not null)
+@if (_stop is not null && !IsRouteMapPage)
 {
     <div class="courier-proximity-banner" role="status">
         <div class="courier-proximity-banner__body">
             <div class="courier-proximity-banner__text">
-                <strong>Вы рядом с заказом №@_stop.OrderNumber</strong>
+                <strong>Заказ №@_stop.OrderNumber</strong>
                 <span class="d-block small">@_stop.Title · ~@_stop.DistanceMeters.ToString("0") м</span>
                 @if (!string.IsNullOrWhiteSpace(_stop.AddressLine))
                 {
@@ -20,8 +21,8 @@
             <button type="button"
                     class="btn btn-success btn-sm flex-shrink-0"
                     disabled="@_busy"
-                    @onclick="ConfirmDeliveredAsync">
-                @(_busy ? "…" : "Заказ доставлен")
+                    @onclick="ConfirmAsync">
+                @(_busy ? "…" : ActionButtonLabel)
             </button>
         </div>
     </div>
@@ -30,6 +31,15 @@
 @code {
     private NearbyDeliveryStopDto? _stop;
     private bool _busy;
+
+    private bool IsPickup =>
+        string.Equals(_stop?.StopKind, "Pickup", StringComparison.OrdinalIgnoreCase);
+
+    private string ActionButtonLabel => IsPickup ? "Забрал" : "Доставлен";
+
+    /// <summary>На «Карта маршрута» свой toast сверху — не дублируем нижний баннер.</summary>
+    private bool IsRouteMapPage =>
+        Nav.Uri.Contains("/courier/route", StringComparison.OrdinalIgnoreCase);
 
     protected override void OnInitialized()
     {
@@ -43,7 +53,7 @@
         InvokeAsync(StateHasChanged);
     }
 
-    private async Task ConfirmDeliveredAsync()
+    private async Task ConfirmAsync()
     {
         if (_stop is null)
             return;
@@ -56,14 +66,35 @@
                 var result = await OrdersApi.CompleteRouteStopAsync(_stop.AssignmentId, null);
                 if (result == null)
                 {
-                    Notify.ShowError("Не удалось отметить доставку. Проверьте смену и маршрут.");
+                    Notify.ShowError("Не удалось обновить статус. Проверьте смену и маршрут.");
                     return;
                 }
 
                 if (result.OrderDelivered)
                     Notify.ShowSuccess($"Заказ №{result.OrderNumber} доставлен. Клиенту отправлено уведомление.");
+                else if (IsPickup)
+                    Notify.ShowSuccess($"Заказ №{result.OrderNumber} забран. Статус: {result.NewStatusName ?? "В пути"}.");
                 else
                     Notify.ShowSuccess($"Точка выполнена. Статус: {result.NewStatusName ?? "обновлён"}.");
+            }
+            else if (IsPickup)
+            {
+                var statuses = await OrdersApi.GetOrderStatusesAsync();
+                var inTransitId = statuses.FirstOrDefault(s =>
+                    string.Equals(s.Name, "В пути", StringComparison.OrdinalIgnoreCase))?.Id;
+                if (!inTransitId.HasValue || inTransitId.Value <= 0)
+                {
+                    Notify.ShowError("Статус «В пути» не найден в системе.");
+                    return;
+                }
+
+                if (!await OrdersApi.ChangeStatusAsync(_stop.OrderId, inTransitId.Value))
+                {
+                    Notify.ShowError("Не удалось отметить забор заказа.");
+                    return;
+                }
+
+                Notify.ShowSuccess($"Заказ №{_stop.OrderNumber} забран.");
             }
             else
             {
@@ -76,8 +107,7 @@
                     return;
                 }
 
-                var ok = await OrdersApi.ChangeStatusAsync(_stop.OrderId, deliveredId.Value);
-                if (!ok)
+                if (!await OrdersApi.ChangeStatusAsync(_stop.OrderId, deliveredId.Value))
                 {
                     Notify.ShowError("Не удалось отметить заказ как доставленный.");
                     return;

@@ -1,6 +1,7 @@
 @page "/courier/shift"
 @layout CourierLayout
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Курьер")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CourierAccessRoles.AuthorizeList)]
+@using WebBlazorDeliveryCRM.Services
 @using System.Linq
 @using System.Security.Claims
 @using Microsoft.AspNetCore.Components.Authorization
@@ -20,10 +21,7 @@
         <HugeIcon Name="calendar-03" CssClass="dms-page-title-icon" />
         Смена и координаты
     </h1>
-    <p class="subtitle">
-        Сначала начните смену. В сеть и передача координат доступны только при активной смене. Разрешите доступ к геолокации в браузере.
-        Позиция обновляется непрерывно (GPS watch) и отправляется на сервер каждые несколько секунд при движении.
-    </p>
+    
 </div>
 
 @if (_loading)
@@ -92,8 +90,6 @@ else
                 <div class="alert alert-warning py-2 small mb-0">@_lastGeoError</div>
             }
             <p class="small text-muted mb-0 mt-2">
-                Нет GPS или нужен тест?
-                <a href="/courier/manual-location">Задать точку на карте вручную</a> (джойстик и перетаскивание).
             </p>
         }
     </div>

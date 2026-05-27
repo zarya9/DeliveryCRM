@@ -44,12 +44,11 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider
             return Task.FromResult(Anonymous());
         }
 
-        // HttpContext есть, но в запросе ещё нет валидной cookie (например сразу после входа до
-        // синхронизации cookie или в части SignalR-вызовов). Нельзя затирать circuit/кэш —
-        // иначе HttpClient потеряет Bearer и API ответит 401.
+        // HttpContext есть, но cookie в этом запросе нет (часть SignalR / сразу после входа).
+        // Не сбрасываем circuit, пока в holder/cache ещё валидный JWT.
         if (http is not null)
         {
-            var wireToken = _circuitHolder.JwtToken ?? _tokenCache.GetToken();
+            var wireToken = AuthSessionTokenResolver.Resolve(_httpContextAccessor, _circuitHolder, _tokenCache);
             if (!string.IsNullOrEmpty(wireToken))
             {
                 var fromWire = AuthTokenParser.TryCreatePrincipal(wireToken);
@@ -66,10 +65,15 @@ public class CustomAuthenticationStateProvider : AuthenticationStateProvider
             return Task.FromResult(Anonymous());
         }
 
-        // Здесь работаем через SignalR-циркит, чтобы не терять вход между интерактивными рендерами.
+        // SignalR-circuit: principal уже в holder — синхронизируем кэш для HttpClient.
         var cached = _circuitHolder.Principal;
         if (cached?.Identity?.IsAuthenticated == true)
+        {
+            var jwt = _circuitHolder.JwtToken;
+            if (!string.IsNullOrEmpty(jwt))
+                _tokenCache.SetToken(jwt);
             return Task.FromResult(new AuthenticationState(cached));
+        }
 
         return Task.FromResult(Anonymous());
     }

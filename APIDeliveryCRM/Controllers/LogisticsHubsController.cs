@@ -83,8 +83,15 @@ public class LogisticsHubsController : Controller
         if (!userId.HasValue)
             return Unauthorized(new { message = "Не указан пользователь в токене." });
 
-        var hub = await _hubService.CreateAsync(companyId.Value, userId.Value, request);
-        return Ok(new { id = hub.ID_LogisticsHub });
+        try
+        {
+            var hub = await _hubService.CreateAsync(companyId.Value, userId.Value, request);
+            return Ok(new { id = hub.ID_LogisticsHub });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]
@@ -95,11 +102,18 @@ public class LogisticsHubsController : Controller
         if (!companyId.HasValue)
             return Unauthorized(new { message = "Не указана компания в токене." });
 
-        var updated = await _hubService.UpdateAsync(companyId.Value, id, request);
-        if (updated == null)
-            return NotFound();
+        try
+        {
+            var updated = await _hubService.UpdateAsync(companyId.Value, id, request);
+            if (updated == null)
+                return NotFound();
 
-        return Ok(new { id = updated.ID_LogisticsHub });
+            return Ok(new { id = updated.ID_LogisticsHub });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [Authorize(Roles = "Логист,Администратор,Админ,Менеджер")]

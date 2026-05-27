@@ -1,6 +1,7 @@
 @page "/courier/notifications"
 @layout CourierLayout
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Курьер")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CourierAccessRoles.AuthorizeList)]
+@using WebBlazorDeliveryCRM.Services
 
 <PageTitle>Уведомления — Курьер</PageTitle>
 
@@ -9,9 +10,7 @@
         <HugeIcon Name="notification-01" CssClass="dms-page-title-icon" />
         Уведомления
     </h1>
-    <p class="subtitle">
-        События компании: сообщения в чатах, смены статусов заказов и напоминания. Список обновляется вручную и при push через SignalR.
-    </p>
+   
 </div>
 
 <NotificationsInbox ToolbarTitleIconName="notification-01" />

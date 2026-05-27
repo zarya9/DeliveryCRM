@@ -7,6 +7,7 @@
 @inject OrdersApiService OrdersApi
 @inject CouriersApiService CouriersApi
 @inject AppNotificationService Notify
+@inject NavigationManager Navigation
 
 <PageTitle>Заказы — Менеджер</PageTitle>
 
@@ -196,34 +197,49 @@
         <h2 class="dms-card-title mb-0">Лента изменений</h2>
         <span class="text-muted small">последние события из выбранных заказов</span>
     </div>
-    @if (TimelineEvents.Count == 0)
+    @if (_selectedIds.Count == 0)
     {
-        <p class="text-muted mb-0">Событий пока нет.</p>
+        <p class="text-muted mb-0">Отметьте заказы в таблице — здесь появятся события.</p>
+    }
+    else if (TimelineEvents.Count == 0)
+    {
+        <p class="text-muted mb-0">Событий по выбранным заказам пока нет.</p>
     }
     else
     {
-        <ul class="orders-timeline">
-            @foreach (var ev in TimelineEvents)
-            {
-                <li class="orders-timeline-item">
-                    <span class="orders-timeline-icon orders-timeline-icon-@ev.Tone">
-                        <HugeIcon Name="@ev.Icon" CssClass="dms-icon-sm" />
-                    </span>
-                    <div class="orders-timeline-body">
-                        <div class="orders-timeline-title">@ev.Title</div>
-                        <div class="orders-timeline-meta">
-                            <span>Заказ №@ev.OrderNumber</span>
-                            <span>·</span>
-                            <span>@ev.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+        <div class="orders-timeline-scroll">
+            <ul class="orders-timeline">
+                @foreach (var ev in TimelineEvents)
+                {
+                    <li class="orders-timeline-item">
+                        <span class="orders-timeline-icon orders-timeline-icon-@ev.Tone">
+                            <HugeIcon Name="@ev.Icon" CssClass="dms-icon-sm" />
+                        </span>
+                        <div class="orders-timeline-body">
+                            <div class="orders-timeline-title">@ev.Title</div>
+                            <div class="orders-timeline-meta">
+                                <span>Заказ №@ev.OrderNumber</span>
+                                <span>·</span>
+                                <span>@ev.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                            </div>
                         </div>
-                    </div>
-                </li>
-            }
-        </ul>
+                    </li>
+                }
+            </ul>
+        </div>
     }
 </div>
 
+@if (_openOrderId is > 0)
+{
+    <StaffOrderDetailModal OrderId="_openOrderId.Value" OnClose="CloseOpenOrderModalAsync" />
+}
+
 @code {
+    [SupplyParameterFromQuery(Name = "openOrderId")]
+    public int? OpenOrderId { get; set; }
+
+    private int? _openOrderId;
     private readonly List<OrderDto> _orders = new();
     private readonly List<OrderStatusOptionDto> _statuses = new();
     private readonly List<CourierProfileDto> _couriers = new();
@@ -267,7 +283,7 @@
         get
         {
             var events = new List<TimelineVm>();
-            foreach (var o in _orders)
+            foreach (var o in _orders.Where(x => _selectedIds.Contains(x.ID_Order)))
             {
                 events.Add(new TimelineVm
                 {
@@ -341,7 +357,7 @@
             }
             return events
                 .OrderByDescending(x => x.At)
-                .Take(12)
+                .Take(50)
                 .ToList();
         }
     }
@@ -350,6 +366,20 @@
     {
         await LoadAuxiliaryAsync();
         await ReloadAsync();
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (OpenOrderId is > 0)
+            _openOrderId = OpenOrderId.Value;
+    }
+
+    private Task CloseOpenOrderModalAsync()
+    {
+        _openOrderId = null;
+        OpenOrderId = null;
+        Navigation.NavigateTo("/manager/orders", replace: true);
+        return Task.CompletedTask;
     }
 
     private async Task LoadAuxiliaryAsync()

@@ -252,16 +252,26 @@ namespace APIDeliveryCRM.Migrations
                     b.Property<int>("ChatRoom_id")
                         .HasColumnType("integer");
 
+                    b.Property<byte>("DeliveryStatus")
+                        .HasColumnType("smallint");
+
                     b.Property<DateTime?>("Edited_at")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("Is_deleted")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("MentionedUserIds")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<string>("MessageText")
                         .IsRequired()
                         .HasMaxLength(5000)
                         .HasColumnType("character varying(5000)");
+
+                    b.Property<int?>("ReplyToMessage_id")
+                        .HasColumnType("integer");
 
                     b.Property<int>("Sender_id")
                         .HasColumnType("integer");
@@ -272,6 +282,8 @@ namespace APIDeliveryCRM.Migrations
                     b.HasKey("ID_ChatMessage");
 
                     b.HasIndex("ChatRoom_id");
+
+                    b.HasIndex("ReplyToMessage_id");
 
                     b.HasIndex("Sender_id");
 
@@ -1255,6 +1267,39 @@ namespace APIDeliveryCRM.Migrations
                     b.HasIndex("User_id");
 
                     b.ToTable("ManagerProfiles", "пользователи_и_доступ");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.MessageReaction", b =>
+                {
+                    b.Property<int>("ID_MessageReaction")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("ID_MessageReaction"));
+
+                    b.Property<int>("ChatMessage_id")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("Created_at")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Emoji")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int>("User_id")
+                        .HasColumnType("integer");
+
+                    b.HasKey("ID_MessageReaction");
+
+                    b.HasIndex("User_id");
+
+                    b.HasIndex("ChatMessage_id", "User_id", "Emoji")
+                        .IsUnique()
+                        .HasDatabaseName("UX_MessageReactions_Message_User_Emoji");
+
+                    b.ToTable("MessageReactions", "коммуникации");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.Notification", b =>
@@ -2687,6 +2732,11 @@ namespace APIDeliveryCRM.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("APIDeliveryCRM.Model.ChatMessage", "ReplyToMessage")
+                        .WithMany()
+                        .HasForeignKey("ReplyToMessage_id")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("APIDeliveryCRM.Model.User", "Sender")
                         .WithMany("SentMessages")
                         .HasForeignKey("Sender_id")
@@ -2694,6 +2744,8 @@ namespace APIDeliveryCRM.Migrations
                         .IsRequired();
 
                     b.Navigation("ChatRoom");
+
+                    b.Navigation("ReplyToMessage");
 
                     b.Navigation("Sender");
                 });
@@ -3078,6 +3130,25 @@ namespace APIDeliveryCRM.Migrations
                         .IsRequired();
 
                     b.Navigation("Company");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.MessageReaction", b =>
+                {
+                    b.HasOne("APIDeliveryCRM.Model.ChatMessage", "ChatMessage")
+                        .WithMany("Reactions")
+                        .HasForeignKey("ChatMessage_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("APIDeliveryCRM.Model.User", "User")
+                        .WithMany()
+                        .HasForeignKey("User_id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ChatMessage");
 
                     b.Navigation("User");
                 });
@@ -3633,6 +3704,11 @@ namespace APIDeliveryCRM.Migrations
                     b.Navigation("DeliveryOrders");
 
                     b.Navigation("PickupOrders");
+                });
+
+            modelBuilder.Entity("APIDeliveryCRM.Model.ChatMessage", b =>
+                {
+                    b.Navigation("Reactions");
                 });
 
             modelBuilder.Entity("APIDeliveryCRM.Model.ChatRoom", b =>

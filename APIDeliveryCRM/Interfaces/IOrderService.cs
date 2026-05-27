@@ -16,9 +16,9 @@ namespace APIDeliveryCRM.Interfaces
         Task<CustomerOrderCreateResult> CreateMineFromCustomerAsync(int userId, CustomerCreateOrderRequest request);
         Task<Order> CreateAsync(CreateOrderRequest request);
         Task<Order> UpdateAsync(Order order);
-        Task<bool> ChangeStatusAsync(int orderId, int statusId);
+        Task<bool> ChangeStatusAsync(int orderId, int statusId, int? actorUserId = null);
         Task<(bool ok, RouteStopCompletionResultDto? result, string? error)> CompleteRouteStopAsync(int assignmentId, int courierProfileId, int? actorUserId = null);
-        Task<IReadOnlyList<NearbyDeliveryStopDto>> GetNearbyDeliverableStopsAsync(int courierProfileId, double lat, double lon, double maxMeters = 50);
+        Task<IReadOnlyList<NearbyDeliveryStopDto>> GetNearbyDeliverableStopsAsync(int courierProfileId, double lat, double lon, double maxMeters = 15);
         Task<bool> AssignCourierAsync(int orderId, int courierProfileId);
         Task<OrderDispatchDto?> AutoDispatchAsync(int orderId);
         Task<bool> ManualOverrideCourierAsync(int orderId, int courierProfileId, string? reason, int? actorUserId = null);
@@ -32,6 +32,7 @@ namespace APIDeliveryCRM.Interfaces
         Task<IReadOnlyList<OrderTimelineEvent>> GetTimelineAsync(int orderId);
         Task<OrderEtaDto?> GetEtaAsync(int orderId);
         Task<(bool ok, string? error)> ClientCompleteOrderPaymentAsync(int orderId, int userId);
+        Task<(bool ok, string? error)> DeleteMineAsync(int orderId, int userId);
     }
 }
 

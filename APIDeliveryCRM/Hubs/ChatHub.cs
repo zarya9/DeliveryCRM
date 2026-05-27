@@ -47,7 +47,9 @@ namespace APIDeliveryCRM.Hubs
             var companyId = GetCompanyIdFromContext();
 
             if (userId.HasValue)
+            {
                 _presence.UserDisconnected(userId.Value);
+            }
 
             if (companyId.HasValue && userId.HasValue)
             {
@@ -79,12 +81,18 @@ namespace APIDeliveryCRM.Hubs
         public async Task JoinRoom(int chatRoomId)
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, $"ChatRoom_{chatRoomId}");
+            var userId = GetUserIdFromContext();
+            if (userId.HasValue)
+                _presence.SetViewingRoom(userId.Value, chatRoomId);
             await Clients.Group($"ChatRoom_{chatRoomId}").SendAsync("UserJoined", Context.ConnectionId);
         }
 
         public async Task LeaveRoom(int chatRoomId)
         {
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"ChatRoom_{chatRoomId}");
+            var userId = GetUserIdFromContext();
+            if (userId.HasValue)
+                _presence.ClearViewingRoom(userId.Value, chatRoomId);
             await Clients.Group($"ChatRoom_{chatRoomId}").SendAsync("UserLeft", Context.ConnectionId);
         }
 
@@ -95,6 +103,7 @@ namespace APIDeliveryCRM.Hubs
             if (!currentUserId.HasValue)
                 return;
 
+            // Только трансляция — сохранение через  POST /api/chat/messages
             await Clients.Group($"ChatRoom_{chatRoomId}").SendAsync("ReceiveMessage", new
             {
                 chatRoomId,
@@ -124,6 +133,24 @@ namespace APIDeliveryCRM.Hubs
                 userId,
                 messageId,
                 readAt = DateTime.UtcNow
+            });
+        }
+
+        /// <summary>
+        /// Клиент сообщает, что сообщение доставлено (DeliveryStatus = Delivered).
+        /// Сервер транслирует отправителю.
+        /// </summary>
+        public async Task MessageDelivered(int chatRoomId, int messageId)
+        {
+            var userId = GetUserIdFromContext();
+            if (!userId.HasValue) return;
+
+            await Clients.Group($"ChatRoom_{chatRoomId}").SendAsync("MessageDelivered", new
+            {
+                chatRoomId,
+                messageId,
+                deliveredToUserId = userId.Value,
+                deliveredAt = DateTime.UtcNow
             });
         }
     }

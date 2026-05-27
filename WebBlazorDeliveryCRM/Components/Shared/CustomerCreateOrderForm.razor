@@ -1,6 +1,7 @@
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
 @using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Utilities
 @using System.Globalization
 @using System.Net
 @using System.Text.RegularExpressions
@@ -15,7 +16,13 @@
 @using System.Security.Claims
 
 <style>
-    .order-wizard-root { overflow-x: hidden; }
+    .order-wizard-root { overflow-x: hidden; max-width: 100%; }
+    .order-wizard-scroll .form-control,
+    .order-wizard-scroll .form-select,
+    .order-wizard-scroll textarea {
+        max-width: 100%;
+        box-sizing: border-box;
+    }
     .order-wizard-scroll {
         overflow-y: auto;
         overflow-x: hidden;
@@ -447,7 +454,7 @@
                 return;
             }
 
-            var windowText = FormatDeliveryWindow(created);
+            var windowText = DeliveryWindowFormatter.Format(created);
             Notify.ShowSuccess($"Заказ №{created.Order_Number}. Стоимость: {created.Estimated_cost:0.##} ₽. Доставим {windowText}.");
             ResetForm();
             await OnSuccess.InvokeAsync();
@@ -782,18 +789,4 @@
         return sb.ToString();
     }
 
-    private static string FormatDeliveryWindow(OrderDto o)
-    {
-        if (o.Eta_at.HasValue && o.Sla_due_at.HasValue)
-        {
-            if (o.Eta_at.Value.Date == o.Sla_due_at.Value.Date)
-                return o.Eta_at.Value.ToString("dd.MM");
-            return $"с {o.Eta_at:dd.MM} по {o.Sla_due_at:dd.MM}";
-        }
-        if (o.Sla_due_at.HasValue)
-            return $"до {o.Sla_due_at:dd.MM}";
-        if (o.Eta_at.HasValue)
-            return $"с {o.Eta_at:dd.MM}";
-        return "в ближайшее время";
-    }
 }

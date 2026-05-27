@@ -2,6 +2,7 @@
 @using WebBlazorDeliveryCRM.Services
 @inject NotificationPopupService PopupService
 @inject NotificationsApiService NotificationsApi
+@inject NotificationsUnreadStateService UnreadState
 @inject NavigationManager Navigation
 
 @if (_items.Count > 0)
@@ -12,8 +13,8 @@
             <div class="global-notification-toast" role="button" tabindex="0" @onclick="() => Open(item)">
                 <button type="button"
                         class="global-notification-close"
-                        title="Отметить прочитанным"
-                        @onclick="(e) => Dismiss(item)"
+                        title="Закрыть"
+                        @onclick="() => DismissAsync(item)"
                         @onclick:stopPropagation="true">
                     ×
                 </button>
@@ -26,6 +27,9 @@
 
 @code {
     private readonly List<ToastVm> _items = new();
+    private readonly Dictionary<ToastVm, CancellationTokenSource> _autoDismiss = new();
+
+    private const int ToastVisibleMs = 2000;
 
     protected override void OnInitialized()
     {
@@ -34,33 +38,106 @@
 
     private void OnRaised(NotificationPopupService.PopupNotification n)
     {
-        _items.Add(new ToastVm
+        var title = string.IsNullOrWhiteSpace(n.Title) ? "Уведомление" : n.Title!;
+        var message = string.IsNullOrWhiteSpace(n.Message) ? string.Empty : n.Message!;
+        var existing = _items.FirstOrDefault(x => x.Title == title && x.Message == message);
+        if (existing is not null)
         {
-            NotificationId = n.NotificationId,
-            TargetUrl = string.IsNullOrWhiteSpace(n.TargetUrl) ? "/manager/notifications" : n.TargetUrl,
-            Title = string.IsNullOrWhiteSpace(n.Title) ? "Уведомление" : n.Title!,
-            Message = string.IsNullOrWhiteSpace(n.Message) ? "Новое событие в системе." : n.Message!,
-            CreatedAt = DateTime.UtcNow
-        });
+            existing.CreatedAt = DateTime.UtcNow;
+            existing.TargetUrl = string.IsNullOrWhiteSpace(n.TargetUrl) ? existing.TargetUrl : n.TargetUrl;
+            ScheduleAutoDismiss(existing);
+        }
+        else
+        {
+            var item = new ToastVm
+            {
+                NotificationId = n.NotificationId,
+                TargetUrl = string.IsNullOrWhiteSpace(n.TargetUrl) ? "/manager/notifications" : n.TargetUrl,
+                Title = title,
+                Message = message,
+                CreatedAt = DateTime.UtcNow,
+                IsChatToast = IsChatTarget(n.TargetUrl)
+            };
+            _items.Add(item);
+            ScheduleAutoDismiss(item);
+        }
+
         _ = InvokeAsync(StateHasChanged);
+    }
+
+    private static bool IsChatTarget(string? targetUrl)
+        => !string.IsNullOrWhiteSpace(targetUrl)
+           && targetUrl.Contains("/chat", StringComparison.OrdinalIgnoreCase);
+
+    private void ScheduleAutoDismiss(ToastVm item)
+    {
+        if (_autoDismiss.TryGetValue(item, out var previous))
+        {
+            previous.Cancel();
+            previous.Dispose();
+        }
+
+        var cts = new CancellationTokenSource();
+        _autoDismiss[item] = cts;
+        _ = AutoDismissAfterDelayAsync(item, cts.Token);
+    }
+
+    private async Task AutoDismissAfterDelayAsync(ToastVm item, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(ToastVisibleMs, cancellationToken);
+            if (cancellationToken.IsCancellationRequested || !_items.Contains(item))
+                return;
+
+            await InvokeAsync(async () => await DismissAsync(item));
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 
     private void Open(ToastVm item)
     {
+        CancelAutoDismiss(item);
         Navigation.NavigateTo(item.TargetUrl);
+        _ = DismissAsync(item);
     }
 
-    private async Task Dismiss(ToastVm item)
+    private async Task DismissAsync(ToastVm item)
     {
-        if (item.NotificationId > 0)
+        CancelAutoDismiss(item);
+
+        if (!item.IsChatToast && item.NotificationId > 0)
+        {
             await NotificationsApi.MarkAsReadAsync(item.NotificationId);
+            if (UnreadState.Count > 0)
+                UnreadState.SetIfDifferent(UnreadState.Count - 1);
+        }
+
         _items.Remove(item);
-        StateHasChanged();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void CancelAutoDismiss(ToastVm item)
+    {
+        if (!_autoDismiss.TryGetValue(item, out var cts))
+            return;
+
+        cts.Cancel();
+        cts.Dispose();
+        _autoDismiss.Remove(item);
     }
 
     public void Dispose()
     {
         PopupService.Raised -= OnRaised;
+        foreach (var cts in _autoDismiss.Values)
+        {
+            cts.Cancel();
+            cts.Dispose();
+        }
+        _autoDismiss.Clear();
     }
 
     private sealed class ToastVm
@@ -70,6 +147,6 @@
         public string Message { get; set; } = string.Empty;
         public string TargetUrl { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
+        public bool IsChatToast { get; set; }
     }
 }
-

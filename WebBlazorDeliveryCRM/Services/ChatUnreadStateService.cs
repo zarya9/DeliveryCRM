@@ -1,4 +1,4 @@
-﻿namespace WebBlazorDeliveryCRM.Services;
+namespace WebBlazorDeliveryCRM.Services;
 
 public sealed class ChatUnreadStateService
 {
@@ -25,7 +25,7 @@ public sealed class ChatUnreadStateService
 
         try
         {
-            var rooms = await _chatApi.GetRoomsListAsync();
+            var (rooms, _) = await _chatApi.GetRoomsListAsync();
             var total = rooms.Sum(r => r.UnreadCount);
             var direct = rooms
                 .Where(r => string.Equals(r.RoomKind, "direct", StringComparison.OrdinalIgnoreCase))

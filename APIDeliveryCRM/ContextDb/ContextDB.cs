@@ -77,6 +77,7 @@ namespace APIDeliveryCRM.ContextDb
             Map<ChatMessage>(modelBuilder, "ChatMessages", schemaComm);
             Map<ChatParticipant>(modelBuilder, "ChatParticipants", schemaComm);
             Map<ChatQuickReplyTemplate>(modelBuilder, "ChatQuickReplyTemplates", schemaComm);
+            Map<MessageReaction>(modelBuilder, "MessageReactions", schemaComm);
             Map<NotificationType>(modelBuilder, "NotificationTypes", schemaComm);
             Map<Notification>(modelBuilder, "Notifications", schemaComm);
             Map<CommunicationTemplate>(modelBuilder, "CommunicationTemplates", schemaComm);
@@ -645,6 +646,30 @@ namespace APIDeliveryCRM.ContextDb
                 .HasForeignKey(cm => cm.Sender_id)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            modelBuilder.Entity<ChatMessage>()
+                .HasOne(cm => cm.ReplyToMessage)
+                .WithMany()
+                .HasForeignKey(cm => cm.ReplyToMessage_id)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<MessageReaction>()
+                .HasOne(r => r.ChatMessage)
+                .WithMany(m => m.Reactions)
+                .HasForeignKey(r => r.ChatMessage_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<MessageReaction>()
+                .HasOne(r => r.User)
+                .WithMany()
+                .HasForeignKey(r => r.User_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Уникальный индекс: один пользователь — одна реакция с одним emoji на сообщение
+            modelBuilder.Entity<MessageReaction>()
+                .HasIndex(r => new { r.ChatMessage_id, r.User_id, r.Emoji })
+                .IsUnique()
+                .HasDatabaseName("UX_MessageReactions_Message_User_Emoji");
+
             modelBuilder.Entity<ChatQuickReplyTemplate>()
                 .HasOne(t => t.Company)
                 .WithMany()
@@ -824,6 +849,7 @@ namespace APIDeliveryCRM.ContextDb
         public DbSet<ChatMessage> ChatMessages { get; set; }
         public DbSet<ChatParticipant> ChatParticipants { get; set; }
         public DbSet<ChatQuickReplyTemplate> ChatQuickReplyTemplates { get; set; }
+        public DbSet<MessageReaction> MessageReactions { get; set; }
         public DbSet<Vehicle> Vehicles { get; set; }
         public DbSet<VehicleCategory> VehicleCategories { get; set; }
         public DbSet<VehicleModel> VehicleModels { get; set; }

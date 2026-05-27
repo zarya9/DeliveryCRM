@@ -1,11 +1,8 @@
-/**
- * Leaflet + OSM тайлы + OSRM через Leaflet Routing Machine (панель шагов, язык — см. routeLanguage).
- * Как в https://ru.stackoverflow.com/questions/1597647/ — language + Formatter для локализации инструкций.
- */
+
 window.leafletMap = {
     map: null,
     markers: [],
-    /** @type {Record<string, L.Marker>} живые маркеры курьеров (ключ — id профиля) */
+    /** @type {Record<string, L.Marker>} */
     courierMarkersById: {},
     routingControl: null,
     baseLayers: {},
@@ -13,7 +10,7 @@ window.leafletMap = {
     routeStart: null,
     routeEnd: null,
     routeMarkers: [],
-    /** @type {L.Polyline[]} несколько отрезков маршрута (межгород / лимит времени) */
+    /** @type {L.Polyline[]} */
     routeLayers: [],
     heatLayer: null,
     circleLayers: [],
@@ -22,9 +19,8 @@ window.leafletMap = {
     enableRouting: false,
     routeAbortController: null,
     routeRequestId: 0,
-    /** Редактирование своей позиции курьером: клик по карте + перетаскивание маркера */
     editableCourier: null,
-    /** Сегмент «до следующей точки» для навигатора курьера */
+    _keyboardDriveHandler: null, 
     navigationLayer: null,
     navigationRequestId: 0,
 
@@ -37,11 +33,8 @@ window.leafletMap = {
         centerLat = centerLat || 55.8024;
         centerLon = centerLon || 49.1167;
         zoom = zoom || 10;
-        if (!theme) {
-            var t = document.documentElement.getAttribute("data-theme");
-            theme = t || "light";
-        }
-        this.currentTheme = theme || "light";
+        // Светлые тайлы OSM в любой теме интерфейса (тёмные тайлы плохо читаются на дашбордах).
+        this.currentTheme = "light";
         this.osrmBaseUrl = (osrmBaseUrl && String(osrmBaseUrl).trim()) || "";
         this.enableRouting = enableRouting !== false;
         this.routeLanguage = (routeLanguage && String(routeLanguage).trim()) || "ru";
@@ -63,8 +56,7 @@ window.leafletMap = {
             })
         };
 
-        var layer = this.baseLayers[this.currentTheme] || this.baseLayers.light;
-        layer.addTo(this.map);
+        this.baseLayers.light.addTo(this.map);
 
         var attr = L.control.attribution({ position: "bottomright" }).addTo(this.map);
         attr.setPrefix("");
@@ -117,23 +109,20 @@ window.leafletMap = {
         }
     },
 
-    setTheme: function (theme) {
-        if (!this.map || !this.baseLayers) return;
-        if (!theme) {
-            var t = document.documentElement.getAttribute("data-theme");
-            theme = t || "light";
+    setTheme: function () {
+        if (!this.map || !this.baseLayers || !this.baseLayers.light) return;
+        if (this.baseLayers.dark && this.map.hasLayer(this.baseLayers.dark)) {
+            this.map.removeLayer(this.baseLayers.dark);
         }
-        if (this.baseLayers[this.currentTheme]) {
-            this.map.removeLayer(this.baseLayers[this.currentTheme]);
+        if (!this.map.hasLayer(this.baseLayers.light)) {
+            this.baseLayers.light.addTo(this.map);
         }
-        this.currentTheme = theme || "light";
-        var layer = this.baseLayers.light;
-        layer.addTo(this.map);
+        this.currentTheme = "light";
     },
 
     setMarkers: function (items) {
         if (!this.map || !items || !items.length) return;
-        this.clearMarkers();
+        this.clearStaticMarkers();
         var allLayers = [];
         for (var i = 0; i < items.length; i++) {
             var lat = parseFloat(items[i].lat);
@@ -247,7 +236,6 @@ window.leafletMap = {
         });
     },
 
-    /** Не дублировать маркер маршрута поверх склада/курьера (те же координаты). */
     _isNearExistingMarker: function (lat, lon, meters) {
         meters = meters || 14;
         var limDeg = meters / 111320.0;
@@ -336,9 +324,7 @@ window.leafletMap = {
         this._notifyCourierPositionMoved(lat, lon);
     },
 
-    /**
-     * Включить перемещение позиции курьера (как courierManualMap): drag + click по карте.
-     */
+
     enableCourierPositionEdit: function (dotnetHelper, courierId, lat, lon) {
         this.disableCourierPositionEdit();
         if (!this.map) return;
@@ -366,7 +352,52 @@ window.leafletMap = {
         this.editableCourier = null;
     },
 
-    /** Обновление одного курьера без полной перерисовки карты (SignalR). */
+    _offsetLatLngMeters: function (lat, lng, bearingDeg, meters) {
+        var R = 6378137;
+        var brng = bearingDeg * Math.PI / 180;
+        var lat1 = lat * Math.PI / 180;
+        var lon1 = lng * Math.PI / 180;
+        var lat2 = Math.asin(
+            Math.sin(lat1) * Math.cos(meters / R) +
+            Math.cos(lat1) * Math.sin(meters / R) * Math.cos(brng)
+        );
+        var lon2 = lon1 + Math.atan2(
+            Math.sin(brng) * Math.sin(meters / R) * Math.cos(lat1),
+            Math.cos(meters / R) - Math.sin(lat1) * Math.sin(lat2)
+        );
+        return { lat: lat2 * 180 / Math.PI, lng: lon2 * 180 / Math.PI };
+    },
+
+    /** Режим навигатора: W A S D — небольшие шаги (~12 м). */
+    enableKeyboardCourierDrive: function () {
+        this.disableKeyboardCourierDrive();
+        var self = this;
+        var stepM = 12;
+        this._keyboardDriveHandler = function (e) {
+            if (!self.editableCourier || !self.map) return;
+            var tag = (e.target && e.target.tagName) ? String(e.target.tagName).toUpperCase() : "";
+            if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.isComposing) return;
+            var key = (e.key || "").toLowerCase();
+            if (key !== "w" && key !== "a" && key !== "s" && key !== "d") return;
+            e.preventDefault();
+            var id = self.editableCourier.id;
+            var m = self.courierMarkersById[id];
+            if (!m) return;
+            var ll = m.getLatLng();
+            var bearing = key === "w" ? 0 : key === "s" ? 180 : key === "a" ? 270 : 90;
+            var dest = self._offsetLatLngMeters(ll.lat, ll.lng, bearing, stepM);
+            self._moveEditableCourierTo(dest.lat, dest.lng, false);
+        };
+        document.addEventListener("keydown", this._keyboardDriveHandler);
+    },
+
+    disableKeyboardCourierDrive: function () {
+        if (this._keyboardDriveHandler) {
+            document.removeEventListener("keydown", this._keyboardDriveHandler);
+            this._keyboardDriveHandler = null;
+        }
+    },
+
     upsertCourierMarker: function (id, lat, lon, title, online) {
         if (!this.map) return;
         var latN = parseFloat(lat);
@@ -396,16 +427,50 @@ window.leafletMap = {
     },
 
     clearMarkers: function () {
-        for (var i = 0; i < this.markers.length; i++) {
-            this.map.removeLayer(this.markers[i]);
-        }
-        this.markers = [];
+        this.clearStaticMarkers();
         for (var cid in this.courierMarkersById) {
             if (Object.prototype.hasOwnProperty.call(this.courierMarkersById, cid)) {
                 try { this.map.removeLayer(this.courierMarkersById[cid]); } catch (_) { }
             }
         }
         this.courierMarkersById = {};
+    },
+
+    /** Статические маркеры (заказы, склады) — не трогает редактируемую позицию курьера. */
+    clearStaticMarkers: function () {
+        if (!this.map) return;
+        for (var i = 0; i < this.markers.length; i++) {
+            try { this.map.removeLayer(this.markers[i]); } catch (_) { }
+        }
+        this.markers = [];
+    },
+
+    addStaticMarkers: function (items, fitBounds) {
+        if (!this.map || !items || !items.length) return;
+        var allLayers = [];
+        for (var i = 0; i < items.length; i++) {
+            var lat = parseFloat(items[i].lat);
+            var lon = parseFloat(items[i].lon);
+            if (isNaN(lat) || isNaN(lon)) continue;
+            var title = items[i].title || "Точка " + (i + 1);
+            var kind = items[i].kind || "";
+            var markerOpts = {};
+            if (kind === "hub" || kind === "pickup" || kind === "delivery") {
+                markerOpts.icon = this._buildPinnedIcon(kind, false);
+            }
+            var marker = L.marker([lat, lon], markerOpts).addTo(this.map).bindPopup(title);
+            this.markers.push(marker);
+            allLayers.push(marker);
+        }
+        if (fitBounds !== false && allLayers.length > 1) {
+            var group = new L.featureGroup(allLayers);
+            this.map.fitBounds(group.getBounds().pad(0.12), { maxZoom: 14 });
+        }
+    },
+
+    setEditableCourierPosition: function (lat, lon) {
+        if (!this.editableCourier) return;
+        this._upsertEditableCourierMarker(lat, lon);
     },
 
     setHeatPoints: function (items) {
@@ -548,10 +613,11 @@ window.leafletMap = {
      * @param points [{ lat, lon, title? }, ...]
      * @param drawWaypointMarkers по умолчанию true; false — только линия маршрута (маркеры уже заданы через setMarkers).
      */
-    setRouteWaypoints: function (points, drawWaypointMarkers) {
+    setRouteWaypoints: function (points, drawWaypointMarkers, fitBounds) {
         if (!this.map || !points || points.length < 2) return;
 
         var drawM = drawWaypointMarkers !== false;
+        var shouldFit = fitBounds !== false;
 
         this.clearRouteInternal();
 
@@ -576,7 +642,7 @@ window.leafletMap = {
         if (this.routingControl) {
             this.routingControl.setWaypoints(latlngs);
         }
-        this.drawRouteOsrmMulti(latlngs);
+        this.drawRouteOsrmMulti(latlngs, shouldFit);
     },
 
     clearRouteInternal: function () {
@@ -594,8 +660,10 @@ window.leafletMap = {
             this.heatLayer = null;
         }
         this.clearCircles();
-        for (var i = 0; i < this.routeMarkers.length; i++) {
-            this.map.removeLayer(this.routeMarkers[i]);
+        if (this.routeMarkers && this.map) {
+            for (var i = 0; i < this.routeMarkers.length; i++) {
+                try { this.map.removeLayer(this.routeMarkers[i]); } catch (_) {}
+            }
         }
         this.routeMarkers = [];
         this.routeStart = null;
@@ -609,9 +677,10 @@ window.leafletMap = {
         ]);
     },
 
-    drawRouteOsrmMulti: function (latlngs) {
+    drawRouteOsrmMulti: function (latlngs, fitBounds) {
         if (!this.map) return;
         if (!latlngs || latlngs.length < 2) return;
+        var shouldFit = fitBounds !== false;
         if (this.routeAbortController) {
             try { this.routeAbortController.abort(); } catch (_) {}
         }
@@ -658,7 +727,7 @@ window.leafletMap = {
                     }).addTo(self.map);
                     self.routeLayers.push(pl);
                 }
-                if (self.routeLayers.length > 0) {
+                if (shouldFit && self.routeLayers.length > 0) {
                     var fg = new L.featureGroup(self.routeLayers);
                     self.map.fitBounds(fg.getBounds().pad(0.15), { maxZoom: 14 });
                 }
@@ -766,7 +835,7 @@ window.leafletMap = {
     /**
      * Маршрут от текущей позиции курьера до следующей точки + шаги для панели навигатора.
      */
-    fetchNavigationToStop: async function (fromLat, fromLon, toLat, toLon) {
+    fetchNavigationToStop: async function (fromLat, fromLon, toLat, toLon, panToRoute) {
         if (!this.map) return null;
         var fl = parseFloat(fromLat);
         var fn = parseFloat(fromLon);
@@ -812,12 +881,14 @@ window.leafletMap = {
                     opacity: 0.92,
                     dashArray: null,
                 }).addTo(self.map);
-                var fg = L.featureGroup([
-                    self.navigationLayer,
-                    L.marker([fl, fn]),
-                    L.marker([tl, tn]),
-                ]);
-                self.map.fitBounds(fg.getBounds().pad(0.18), { maxZoom: 15 });
+                if (panToRoute !== false) {
+                    var fg = L.featureGroup([
+                        self.navigationLayer,
+                        L.marker([fl, fn]),
+                        L.marker([tl, tn]),
+                    ]);
+                    self.map.fitBounds(fg.getBounds().pad(0.18), { maxZoom: 15 });
+                }
             }
 
             var steps = [];
@@ -849,14 +920,16 @@ window.leafletMap = {
     dispose: function () {
         this.clearNavigationRoute();
         this.disableCourierPositionEdit();
-        this.clearMarkers(); /* очищает и courierMarkersById */
+        this.clearMarkers(); 
         if (this.routingControl && this.map) {
             this.map.removeControl(this.routingControl);
             this.routingControl = null;
         }
         this._clearRouteLayers();
-        for (var i = 0; i < this.routeMarkers.length; i++) {
-            this.map.removeLayer(this.routeMarkers[i]);
+        if (this.routeMarkers && this.map) {
+            for (var i = 0; i < this.routeMarkers.length; i++) {
+                try { this.map.removeLayer(this.routeMarkers[i]); } catch (_) {}
+            }
         }
         this.routeMarkers = [];
         this.routeStart = null;

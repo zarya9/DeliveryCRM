@@ -162,7 +162,7 @@ namespace APIDeliveryCRM.Controllers
             var order = await _orderService.GetByIdAsync(id);
             if (order == null) return NotFound();
             if (order.Company_id != companyId.Value) return Forbid();
-            var result = await _orderService.ChangeStatusAsync(id, statusId);
+            var result = await _orderService.ChangeStatusAsync(id, statusId, GetCurrentUserId());
             if (!result)
             {
                 return new NotFoundResult();
@@ -281,6 +281,21 @@ namespace APIDeliveryCRM.Controllers
                 return BadRequest(new { message = err });
 
             return Ok(new { paid = true });
+        }
+
+        [HttpDelete("{id:int}/mine")]
+        [Authorize(Roles = "Клиент")]
+        public async Task<IActionResult> DeleteMine(int id)
+        {
+            var userId = GetCurrentUserId();
+            if (!userId.HasValue)
+                return Unauthorized();
+
+            var (ok, err) = await _orderService.DeleteMineAsync(id, userId.Value);
+            if (!ok)
+                return BadRequest(new { message = err ?? "Не удалось удалить заказ." });
+
+            return Ok(new { deleted = true });
         }
 
         [HttpGet("{id:int}/eta")]

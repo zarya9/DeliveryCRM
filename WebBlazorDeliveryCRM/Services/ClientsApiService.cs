@@ -25,9 +25,12 @@ public class ClientsApiService
         return await _http.GetFromJsonAsync<ClientProfileDto>($"/api/Clients/{id}");
     }
 
-    public async Task<List<OrderDto>?> GetOrdersAsync(int clientId)
+    public async Task<List<OrderDto>?> GetOrdersAsync(int clientId, bool activeOnly = false)
     {
-        return await _http.GetFromJsonAsync<List<OrderDto>>($"/api/Clients/{clientId}/orders");
+        var url = activeOnly
+            ? $"/api/Clients/{clientId}/orders?scope=active"
+            : $"/api/Clients/{clientId}/orders";
+        return await _http.GetFromJsonAsync<List<OrderDto>>(url);
     }
 
     public async Task<bool> UpdateProfileAsync(int profileId, UpdateClientProfileDto request)
@@ -87,6 +90,27 @@ public class ClientsApiService
         var stream = await _http.GetStreamAsync($"/api/Clients/{profileId}/bound-cards");
         var list = await JsonSerializer.DeserializeAsync<List<BoundCardListItemDto>>(stream, JsonOpts);
         return list ?? new List<BoundCardListItemDto>();
+    }
+
+    public async Task<(bool ok, string? error)> DeleteBoundCardAsync(int profileId, int cardId)
+    {
+        var response = await _http.DeleteAsync($"/api/Clients/{profileId}/bound-cards/{cardId}");
+        if (response.IsSuccessStatusCode)
+            return (true, null);
+        var body = await response.Content.ReadAsStringAsync();
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty("message", out var msg))
+                    return (false, msg.GetString());
+            }
+            catch
+            {
+            }
+        }
+        return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)response.StatusCode}" : body);
     }
 
     public async Task<(bool ok, string? error)> UploadAvatarAsync(int userId, IBrowserFile file)

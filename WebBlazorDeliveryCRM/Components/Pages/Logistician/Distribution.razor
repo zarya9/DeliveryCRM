@@ -237,7 +237,7 @@
 @if (_showOrderAssignModal && ModalOrder is not null)
 {
     var mo = ModalOrder;
-    <div class="employee-modal-backdrop" @onclick="CloseOrderModal">
+    <div class="employee-modal-backdrop">
         <div class="employee-modal employee-modal--fleet-form" @onclick:stopPropagation="true">
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <h2 class="h5 mb-0">Заказ №@mo.Order_Number</h2>
@@ -283,7 +283,7 @@
 @if (_showCourierPreviewModal && _previewCourier is not null)
 {
     var pc = _previewCourier;
-    <div class="employee-modal-backdrop" @onclick="CloseCourierPreviewModal">
+    <div class="employee-modal-backdrop">
         <div class="employee-modal employee-modal--fleet-form" @onclick:stopPropagation="true">
             <div class="d-flex align-items-start gap-3 mb-3">
                 <UserAvatarThumb UserId="pc.User_id"

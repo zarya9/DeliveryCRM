@@ -21,7 +21,7 @@ namespace APIDeliveryCRM.Services
             _hubContext = hubContext;
         }
 
-        public async Task SendAsync(int userId, int typeId, string title, string message, int? orderId = null, int? shiftId = null, byte priority = 0, bool isCritical = false, bool requiresAck = false)
+        public async Task SendAsync(int userId, int typeId, string title, string message, int? orderId = null, int? shiftId = null, byte priority = 0, bool isCritical = false, bool requiresAck = false, int? chatRoomId = null)
         {
             var user = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.ID_User == userId);
             if (user == null)
@@ -57,8 +57,68 @@ namespace APIDeliveryCRM.Services
                 priority = notification.Priority,
                 isCritical = notification.Is_critical,
                 requiresAck = notification.Requires_ack,
-                sentAt = notification.Sent_at.ToString("yyyy-MM-dd")
+                sentAt = notification.Sent_at.ToString("yyyy-MM-dd"),
+                chatRoomId = chatRoomId > 0 ? chatRoomId : null
             });
+        }
+
+        public async Task SendManyAsync(IEnumerable<int> userIds, int typeId, string title, string message, int? orderId = null, int? shiftId = null, int? skipUserId = null, byte priority = 0, bool isCritical = false, bool requiresAck = false)
+        {
+            var targetIds = userIds
+                .Where(id => id > 0 && (!skipUserId.HasValue || id != skipUserId.Value))
+                .Distinct()
+                .ToList();
+            if (targetIds.Count == 0)
+                return;
+
+            var users = await _context.Users.AsNoTracking()
+                .Where(u => targetIds.Contains(u.ID_User))
+                .Select(u => new { u.ID_User, u.Company_id })
+                .ToListAsync();
+            if (users.Count == 0)
+                return;
+
+            var sentAt = System.DateOnly.FromDateTime(System.DateTime.UtcNow);
+            var created = new List<Notification>(users.Count);
+            foreach (var user in users)
+            {
+                var notification = new Notification
+                {
+                    Company_id = user.Company_id,
+                    User_id = user.ID_User,
+                    Type_id = typeId,
+                    Title = title,
+                    Message = message,
+                    Order_id = orderId,
+                    Shift_id = shiftId,
+                    Is_read = false,
+                    Priority = priority,
+                    Is_critical = isCritical,
+                    Requires_ack = requiresAck,
+                    Sent_at = sentAt
+                };
+                _context.Notifications.Add(notification);
+                created.Add(notification);
+            }
+
+            await _context.SaveChangesAsync();
+
+            foreach (var notification in created)
+            {
+                await _hubContext.Clients.Group($"User_{notification.User_id}").SendAsync("NotificationReceived", new
+                {
+                    id = notification.ID_Notification,
+                    title = notification.Title,
+                    message = notification.Message,
+                    typeId = notification.Type_id,
+                    orderId = notification.Order_id,
+                    shiftId = notification.Shift_id,
+                    priority = notification.Priority,
+                    isCritical = notification.Is_critical,
+                    requiresAck = notification.Requires_ack,
+                    sentAt = notification.Sent_at.ToString("yyyy-MM-dd")
+                });
+            }
         }
 
         public async Task<IReadOnlyList<Notification>> GetForUserAsync(int userId, bool onlyCritical = false, bool onlyUnread = false, byte? minPriority = null, bool onlyRequiresAck = false)
@@ -77,6 +137,8 @@ namespace APIDeliveryCRM.Services
                 query = query.Where(n => n.Priority >= minPriority.Value);
             if (onlyRequiresAck)
                 query = query.Where(n => n.Requires_ack && n.Acknowledged_at == null);
+
+            query = query.Where(n => n.NotificationType == null || n.NotificationType.Name != "chat_message");
 
             return await query
                 .OrderByDescending(n => n.Priority)
@@ -111,6 +173,20 @@ namespace APIDeliveryCRM.Services
             notification.Is_read = true;
             await _context.SaveChangesAsync();
             return true;
+        }
+
+        public async Task MarkChatMessageNotificationsAsReadAsync(int userId)
+        {
+            var chatTypeId = await _context.NotificationTypes.AsNoTracking()
+                .Where(t => t.Name == "chat_message")
+                .Select(t => (int?)t.ID_NotificationType)
+                .FirstOrDefaultAsync();
+            if (!chatTypeId.HasValue)
+                return;
+
+            await _context.Notifications
+                .Where(n => n.User_id == userId && n.Type_id == chatTypeId.Value && !n.Is_read)
+                .ExecuteUpdateAsync(s => s.SetProperty(n => n.Is_read, true));
         }
     }
 }

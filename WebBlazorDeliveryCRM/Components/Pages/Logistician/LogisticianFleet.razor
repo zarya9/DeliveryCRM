@@ -77,7 +77,7 @@
 
 @if (_showAddVehicleModal)
 {
-    <div class="employee-modal-backdrop" @onclick="CloseAddVehicleModal">
+    <div class="employee-modal-backdrop">
         <div class="employee-modal employee-modal--fleet-form" @onclick:stopPropagation="true">
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <h2 class="h5 mb-0">Добавить транспорт</h2>
@@ -264,7 +264,7 @@
 
 @if (_showDetailsModal && _detailsVehicleId.HasValue)
 {
-    <div class="employee-modal-backdrop" @onclick="CloseVehicleDetailsModal">
+    <div class="employee-modal-backdrop">
         <div class="employee-modal employee-modal--fleet-form" @onclick:stopPropagation="true">
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <h2 class="h5 mb-0">@(_vehicleEditMode ? "Редактирование ТС" : "Карточка ТС")</h2>

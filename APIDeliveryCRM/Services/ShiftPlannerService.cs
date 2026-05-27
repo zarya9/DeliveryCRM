@@ -262,13 +262,35 @@ public class ShiftPlannerService : IShiftPlannerService
     public async Task<ShiftPlanSummaryDto?> GetCourierPlanAsync(int courierProfileId, CancellationToken cancellationToken = default)
     {
         var active = await GetActivePlanForCourierAsync(courierProfileId, cancellationToken);
-        if (active != null && active.Stops.Count > 0)
-            return active;
+        if (active != null)
+        {
+            var pending = active.Stops.Where(IsCourierPendingStop).ToList();
+            if (pending.Count > 0)
+            {
+                active.Stops = pending;
+                return active;
+            }
+        }
 
         return await EnsureCourierPlanFromAssignedOrdersAsync(courierProfileId, cancellationToken);
     }
 
-    public async Task<ShiftPlanSummaryDto?> ApplyCourierRouteAsync(
+    private static bool IsCourierPendingStop(ShiftPlanStopDto stop) =>
+        stop.Status is ShiftAssignmentStatus.Pending or ShiftAssignmentStatus.InProgress;
+
+    private static bool IsOrderPickupCompleted(Order order)
+    {
+        var name = order.OrderStatus?.Name ?? "";
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+        return name.Contains("В пути", StringComparison.OrdinalIgnoreCase)
+               || name.Contains("На выдаче", StringComparison.OrdinalIgnoreCase)
+               || name.Contains("Доставлен", StringComparison.OrdinalIgnoreCase)
+               || name.Equals("InTransit", StringComparison.OrdinalIgnoreCase)
+               || name.Equals("Delivered", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public async Task<(ShiftPlanSummaryDto? Plan, string? Error)> ApplyCourierRouteAsync(
         int companyId,
         int courierProfileId,
         IReadOnlyList<ApplyCourierRouteStopRequest> stops,
@@ -276,20 +298,20 @@ public class ShiftPlannerService : IShiftPlannerService
         CancellationToken cancellationToken = default)
     {
         if (stops.Count == 0)
-            return null;
+            return (null, "Список точек маршрута пуст.");
 
         var courier = await _context.CourierProfiles
             .Include(c => c.User)
             .FirstOrDefaultAsync(c => c.ID_CourierProfile == courierProfileId && c.Company_id == companyId, cancellationToken);
         if (courier == null)
-            return null;
+            return (null, "Курьер не найден или не относится к вашей компании.");
 
         var orderedStops = stops
             .Where(s => s.Latitude.HasValue && s.Longitude.HasValue)
             .OrderBy(s => s.Sequence)
             .ToList();
         if (orderedStops.Count == 0)
-            return null;
+            return (null, "У точек нет координат (широта/долгота). Постройте маршрут на карте или укажите адреса с координатами.");
 
         var orderIds = orderedStops
             .Where(s => s.OrderId is > 0)
@@ -311,7 +333,7 @@ public class ShiftPlannerService : IShiftPlannerService
 
         var shift = await EnsureActiveShiftForCourierAsync(courierProfileId, companyId, cancellationToken);
         if (shift == null)
-            return BuildSyntheticPlanFromOrderedStops(courier, orderedStops, orders);
+            return (BuildSyntheticPlanFromOrderedStops(courier, orderedStops, orders), null);
 
         await using var tx = await _context.Database.BeginTransactionAsync(cancellationToken);
         var now = DateTime.UtcNow;
@@ -405,7 +427,14 @@ public class ShiftPlannerService : IShiftPlannerService
         await _context.SaveChangesAsync(cancellationToken);
         await tx.CommitAsync(cancellationToken);
 
-        return await GetActivePlanForCourierAsync(courierProfileId, cancellationToken);
+        var summary = await GetActivePlanForCourierAsync(courierProfileId, cancellationToken);
+        if (summary == null)
+            return (null, "Маршрут сохранён, но не удалось загрузить план курьера. Обновите страницу.");
+
+        if (orderIds.Count > 0 && summary.Stops.Count == 0)
+            return (null, "Заказы из маршрута не найдены в компании или у точек не указан OrderId.");
+
+        return (summary, null);
     }
 
     public async Task<IReadOnlyList<CourierRouteMapWaypointDto>> GetCourierRouteWaypointsAsync(
@@ -584,6 +613,7 @@ public class ShiftPlannerService : IShiftPlannerService
             return null;
 
         var orders = await _context.Orders
+            .Include(o => o.OrderStatus)
             .Include(o => o.RouteStops).ThenInclude(s => s.Address)
             .Include(o => o.RouteStops).ThenInclude(s => s.LogisticsHub)
             .Include(o => o.PickupAddress)
@@ -649,7 +679,7 @@ public class ShiftPlannerService : IShiftPlannerService
 
             if (routeStops.Count == 0)
             {
-                if (order.PickupAddress != null)
+                if (order.PickupAddress != null && !IsOrderPickupCompleted(order))
                 {
                     _context.ShiftAssignments.Add(CreateAssignment(
                         plan, shift, order, sequence++, ShiftAssignmentStage.LocalUrban,
@@ -668,6 +698,9 @@ public class ShiftPlannerService : IShiftPlannerService
 
             foreach (var stop in routeStops)
             {
+                if (stop.Kind == OrderRouteStopKind.SenderPickup && IsOrderPickupCompleted(order))
+                    continue;
+
                 var stage = ResolveStageForStop(order, stop);
                 _context.ShiftAssignments.Add(CreateAssignment(
                     plan, shift, order, sequence++, stage, stop.ID_OrderRouteStop, stop.Title));
@@ -1025,9 +1058,9 @@ public class ShiftPlannerService : IShiftPlannerService
                     PlannedStartUtc = a.Planned_start_utc,
                     PlannedEndUtc = a.Planned_end_utc,
                     SegmentDistanceKm = a.Planned_distance_km,
-                    Latitude = a.OrderRouteStop?.Address?.Latitude is { } lat ? (double?)lat : null,
-                    Longitude = a.OrderRouteStop?.Address?.Longitude is { } lon ? (double?)lon : null,
-                    AddressLine = BuildAddressLine(a.OrderRouteStop?.Address),
+                    Latitude = ResolveAssignmentLatitude(a),
+                    Longitude = ResolveAssignmentLongitude(a),
+                    AddressLine = ResolveAssignmentAddressLine(a),
                     HubId = a.OrderRouteStop?.LogisticsHub_id,
                     HubName = a.OrderRouteStop?.LogisticsHub?.Name,
                     Priority = a.Order?.Priority ?? 0,
@@ -1043,6 +1076,33 @@ public class ShiftPlannerService : IShiftPlannerService
         if (a == null) return null;
         var city = string.IsNullOrWhiteSpace(a.City) ? string.Empty : $"{a.City}, ";
         return $"{city}{a.Street} {a.House}".Trim().Trim(',');
+    }
+
+    private static double? ResolveAssignmentLatitude(ShiftAssignment a)
+    {
+        var point = ResolveAssignmentCoordinates(a);
+        return point?.lat;
+    }
+
+    private static double? ResolveAssignmentLongitude(ShiftAssignment a)
+    {
+        var point = ResolveAssignmentCoordinates(a);
+        return point?.lon;
+    }
+
+    private static string? ResolveAssignmentAddressLine(ShiftAssignment a)
+    {
+        if (!string.IsNullOrWhiteSpace(a.OrderRouteStop?.Address?.Street))
+            return BuildAddressLine(a.OrderRouteStop.Address);
+        var order = a.Order;
+        if (order == null)
+            return a.Notes;
+        var notes = a.Notes ?? string.Empty;
+        if (notes.Contains("забор", StringComparison.OrdinalIgnoreCase))
+            return BuildAddressLine(order.PickupAddress) ?? notes;
+        if (notes.Contains("доставк", StringComparison.OrdinalIgnoreCase))
+            return BuildAddressLine(order.DeliveryAddress) ?? notes;
+        return BuildAddressLine(order.DeliveryAddress) ?? BuildAddressLine(order.PickupAddress) ?? notes;
     }
 
     private static decimal ComputeVolumetricWeight(decimal lengthCm, decimal widthCm, decimal heightCm)
@@ -1681,11 +1741,36 @@ public class ShiftPlannerService : IShiftPlannerService
             return ((double)rLat, (double)rLon);
 
         var order = assignment.Order;
-        if (order?.PickupAddress?.Latitude is { } pLat && order.PickupAddress.Longitude is { } pLon && (pLat != 0 || pLon != 0))
+        if (order == null)
+            return null;
+
+        var kind = assignment.OrderRouteStop?.Kind;
+        if (kind == OrderRouteStopKind.SenderPickup &&
+            order.PickupAddress?.Latitude is { } pkLat && order.PickupAddress.Longitude is { } pkLon &&
+            (pkLat != 0 || pkLon != 0))
+            return ((double)pkLat, (double)pkLon);
+
+        if (kind == OrderRouteStopKind.RecipientDelivery &&
+            order.DeliveryAddress?.Latitude is { } dvLat && order.DeliveryAddress.Longitude is { } dvLon &&
+            (dvLat != 0 || dvLon != 0))
+            return ((double)dvLat, (double)dvLon);
+
+        var notes = assignment.Notes ?? string.Empty;
+        if (notes.Contains("забор", StringComparison.OrdinalIgnoreCase) &&
+            order.PickupAddress?.Latitude is { } plat && order.PickupAddress.Longitude is { } plon &&
+            (plat != 0 || plon != 0))
+            return ((double)plat, (double)plon);
+
+        if (notes.Contains("доставк", StringComparison.OrdinalIgnoreCase) &&
+            order.DeliveryAddress?.Latitude is { } dlat && order.DeliveryAddress.Longitude is { } dlon &&
+            (dlat != 0 || dlon != 0))
+            return ((double)dlat, (double)dlon);
+
+        if (order.PickupAddress?.Latitude is { } pLat && order.PickupAddress.Longitude is { } pLon && (pLat != 0 || pLon != 0))
             return ((double)pLat, (double)pLon);
 
-        if (order?.DeliveryAddress?.Latitude is { } dLat && order.DeliveryAddress.Longitude is { } dLon && (dLat != 0 || dLon != 0))
-            return ((double)dLat, (double)dLon);
+        if (order.DeliveryAddress?.Latitude is { } dLat2 && order.DeliveryAddress.Longitude is { } dLon2 && (dLat2 != 0 || dLon2 != 0))
+            return ((double)dLat2, (double)dLon2);
 
         return null;
     }

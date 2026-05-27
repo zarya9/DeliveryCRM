@@ -22,6 +22,10 @@ public class OrderDto
     public string? Delay_reason { get; set; }
     public byte Priority { get; set; }
     public bool Is_paid { get; set; }
+    public bool WasPaymentRefunded { get; set; }
+    public bool DeliveryWindowMismatch { get; set; }
+    public string? DeliveryWindowMismatchKind { get; set; }
+    public bool CanDeleteByClient { get; set; }
 
     public string? DeliveryRouteKind { get; set; }
 

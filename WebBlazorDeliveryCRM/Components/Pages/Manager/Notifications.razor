@@ -9,14 +9,14 @@
 <PageTitle>Уведомления</PageTitle>
 
 <div class="dms-page-header">
-    <h1>Уведомления</h1>
-    <p class="subtitle">
-        
-    </p>
-  
+    <h1 class="dms-page-title-with-icon">
+        <HugeIcon Name="notification-01" CssClass="dms-page-title-icon" />
+        Уведомления
+    </h1>
+    <p class="subtitle">События по заказам, сменам и SLA</p>
 </div>
 
-<NotificationsInbox />
+<NotificationsInbox ToolbarTitleIconName="notification-01" />
 
 @code {
     private bool _hubConnected;

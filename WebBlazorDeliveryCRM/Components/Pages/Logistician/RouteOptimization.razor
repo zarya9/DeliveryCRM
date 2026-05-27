@@ -1075,10 +1075,10 @@
                 return;
             }
 
-            var plan = await PlannerApi.ApplyCourierRouteAsync(_routeAssignCourierId, stops);
+            var (plan, applyError) = await PlannerApi.ApplyCourierRouteAsync(_routeAssignCourierId, stops);
             if (plan == null)
             {
-                Notify.ShowError("Не удалось передать маршрут курьеру. Проверьте координаты и заказы.");
+                Notify.ShowError(applyError ?? "Не удалось передать маршрут курьеру. Проверьте координаты и заказы.");
                 return;
             }
 

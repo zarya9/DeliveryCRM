@@ -1,5 +1,10 @@
 namespace WebBlazorDeliveryCRM.Models;
 
+public class ApplyCourierRouteRequestDto
+{
+    public List<ApplyCourierRouteStopDto> Stops { get; set; } = new();
+}
+
 public class ApplyCourierRouteStopDto
 {
     public int Sequence { get; set; }

@@ -28,6 +28,20 @@ namespace APIDeliveryCRM.Model
         public DateTime Sent_at { get; set; }
         public DateTime? Edited_at { get; set; }
         public bool Is_deleted { get; set; }
+
+        // Reply/Quote
+        [ForeignKey(nameof(ReplyToMessage))]
+        public int? ReplyToMessage_id { get; set; }
+        public ChatMessage? ReplyToMessage { get; set; }
+
+        // @mentions — хранится как JSON-массив int (user ids)
+        [MaxLength(1000)]
+        public string? MentionedUserIds { get; set; }
+
+        // Delivery status: 0=Sent, 1=Delivered, 2=Read
+        public byte DeliveryStatus { get; set; } = 0;
+
+        public ICollection<MessageReaction> Reactions { get; set; } = new List<MessageReaction>();
     }
 }
 

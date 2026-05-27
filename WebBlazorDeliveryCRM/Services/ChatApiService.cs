@@ -1,7 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Components.Forms;
-using System.IO;
 
 namespace WebBlazorDeliveryCRM.Services;
 
@@ -27,10 +26,30 @@ public class ChatApiService
         return list;
     }
 
-    public async Task<List<ChatRoomListItemDto>> GetRoomsListAsync()
+    public async Task<(List<ChatRoomListItemDto> rooms, string? error)> GetRoomsListAsync()
     {
-        var list = await GetSafeAsync<List<ChatRoomListItemDto>>("/api/Chat/rooms/list");
-        return list ?? new List<ChatRoomListItemDto>();
+        try
+        {
+            var resp = await _http.GetAsync("/api/Chat/rooms/list");
+            if (resp.StatusCode is System.Net.HttpStatusCode.Unauthorized)
+                return (new List<ChatRoomListItemDto>(), "Сессия истекла. Войдите снова.");
+            if (resp.StatusCode is System.Net.HttpStatusCode.Forbidden)
+                return (new List<ChatRoomListItemDto>(), "Нет доступа к чатам.");
+            if (!resp.IsSuccessStatusCode)
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                return (new List<ChatRoomListItemDto>(),
+                    string.IsNullOrWhiteSpace(body) ? $"Ошибка загрузки чатов ({(int)resp.StatusCode})" : body);
+            }
+
+            await using var stream = await resp.Content.ReadAsStreamAsync();
+            var list = await JsonSerializer.DeserializeAsync<List<ChatRoomListItemDto>>(stream, JsonOptions);
+            return (list ?? new List<ChatRoomListItemDto>(), null);
+        }
+        catch (Exception ex)
+        {
+            return (new List<ChatRoomListItemDto>(), ex.Message);
+        }
     }
 
     public async Task<(bool ok, int roomId, string? roomName)> EnsureCompanyRoomAsync()
@@ -46,56 +65,23 @@ public class ChatApiService
     {
         var res = await _http.PostAsync($"/api/Chat/rooms/direct?peerUserId={peerUserId}", null);
         if (!res.IsSuccessStatusCode)
-        {
-            // #region agent log
-            try
-            {
-                var body = await res.Content.ReadAsStringAsync();
-                var line = JsonSerializer.Serialize(new
-                {
-                    sessionId = "7b40bb",
-                    runId = "run2",
-                    hypothesisId = "H6",
-                    location = "ChatApiService.cs:CreateOrGetDirectRoomAsync:nonSuccess",
-                    message = "Direct room endpoint failed",
-                    data = new
-                    {
-                        peerUserId,
-                        statusCode = (int)res.StatusCode,
-                        body
-                    },
-                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                });
-                File.AppendAllText(@"c:\Users\zarip\source\repos\DeliveryCRM\debug-7b40bb.log", line + Environment.NewLine);
-            }
-            catch { }
-            // #endregion
             return (false, 0, null);
-        }
+
         using var stream = await res.Content.ReadAsStreamAsync();
         var payload = await JsonSerializer.DeserializeAsync<EnsureRoomResponse>(stream, JsonOptions);
-        // #region agent log
-        try
-        {
-            var line = JsonSerializer.Serialize(new
-            {
-                sessionId = "7b40bb",
-                runId = "run2",
-                hypothesisId = "H6",
-                location = "ChatApiService.cs:CreateOrGetDirectRoomAsync:success",
-                message = "Direct room endpoint success",
-                data = new
-                {
-                    peerUserId,
-                    roomId = payload?.RoomId ?? 0,
-                    roomName = payload?.RoomName
-                },
-                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
-            File.AppendAllText(@"c:\Users\zarip\source\repos\DeliveryCRM\debug-7b40bb.log", line + Environment.NewLine);
-        }
-        catch { }
-        // #endregion
+        return (payload != null, payload?.RoomId ?? 0, payload?.RoomName);
+    }
+
+    public async Task<(bool ok, int roomId, string? roomName)> CreateOrGetOrderRoomAsync(int orderId, int? peerUserId = null)
+    {
+        var url = $"/api/Chat/rooms/order?orderId={orderId}";
+        if (peerUserId.HasValue && peerUserId.Value > 0)
+            url += $"&peerUserId={peerUserId.Value}";
+        var res = await _http.PostAsync(url, null);
+        if (!res.IsSuccessStatusCode)
+            return (false, 0, null);
+        using var stream = await res.Content.ReadAsStreamAsync();
+        var payload = await JsonSerializer.DeserializeAsync<EnsureRoomResponse>(stream, JsonOptions);
         return (payload != null, payload?.RoomId ?? 0, payload?.RoomName);
     }
 
@@ -301,12 +287,25 @@ public sealed class QuickReplyUpsertRequest
 
 public sealed class ChatRoomListItemDto
 {
+    [System.Text.Json.Serialization.JsonPropertyName("chatRoomId")]
     public int ChatRoomId { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
+
+    [System.Text.Json.Serialization.JsonPropertyName("roomKind")]
     public string RoomKind { get; set; } = "company";
+
+    [System.Text.Json.Serialization.JsonPropertyName("peerUserId")]
     public int? PeerUserId { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("lastMessageText")]
     public string? LastMessageText { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("lastMessageAt")]
     public DateTime? LastMessageAt { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("unreadCount")]
     public int UnreadCount { get; set; }
 }
 

@@ -1,6 +1,7 @@
 @page "/courier/manual-location"
 @layout CourierLayout
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Курьер")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CourierAccessRoles.AuthorizeList)]
+@using WebBlazorDeliveryCRM.Services
 @using System.Globalization
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Components.Web

@@ -1,6 +1,7 @@
 @using WebBlazorDeliveryCRM.Components.Shared
 @inject CustomAuthenticationStateProvider AuthState
 @inject ChatHubClientService ChatHub
+@inject ChatUnreadStateService ChatUnreadState
 @inject NavigationManager Navigation
 
 <div class="sidebar-header">
@@ -28,8 +29,15 @@
     <NavLink href="/customer/shifts" class="sidebar-link">
         <HugeIcon Name="calendar-03" CssClass="icon" /> <span class="sidebar-label">Смены</span>
     </NavLink>
-    <NavLink href="/customer/chat" class="sidebar-link">
-        <HugeIcon Name="message-01" CssClass="icon" /> <span class="sidebar-label">Чат</span>
+    <NavLink href="/customer/chat" class="@(ChatUnreadState.HasAnyChatUnread ? "sidebar-link sidebar-nav-chat-unread" : "sidebar-link")">
+        <span class="sidebar-chat-icon-slot sidebar-chat-icon-slot--with-badge">
+            <HugeIcon Name="message-01" CssClass="icon" />
+            @if (ChatUnreadState.TotalChatUnreadCount > 0)
+            {
+                <span class="sidebar-chat-badge" aria-label="Непрочитанные сообщения">@((ChatUnreadState.TotalChatUnreadCount > 99) ? "99+" : ChatUnreadState.TotalChatUnreadCount.ToString())</span>
+            }
+        </span>
+        <span class="sidebar-label">Чат</span>
     </NavLink>
 </nav>
 <div class="sidebar-footer">

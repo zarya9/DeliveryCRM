@@ -27,7 +27,7 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<CircuitAuthPrincipalHolder>();
-builder.Services.AddSingleton<AuthTokenCache>();
+builder.Services.AddScoped<AuthTokenCache>();
 builder.Services.AddScoped<CircuitHandler, AuthCircuitHandler>();
 builder.Services.AddBlazoredToast();
 builder.Services.AddMudServices();
@@ -41,6 +41,7 @@ builder.Services.AddScoped<ChatHubClientService>();
 builder.Services.AddScoped<TrackingHubClientService>();
 builder.Services.AddScoped<ChatApiService>();
 builder.Services.AddScoped<ChatUnreadStateService>();
+builder.Services.AddScoped<ChatNotificationContextService>();
 builder.Services.AddScoped<OrdersApiService>();
 builder.Services.AddScoped<LogisticianRoutePlanningSession>();
 builder.Services.AddScoped<LogisticsHubsApiService>();
@@ -68,6 +69,7 @@ builder.Services.AddHttpClient<ForwardGeocodeService>(client =>
 builder.Services.AddScoped<AccountApiService>();
 builder.Services.AddScoped<UserPresenceApiService>();
 builder.Services.AddScoped<NotificationsApiService>();
+builder.Services.AddScoped<NotificationsUnreadStateService>();
 builder.Services.AddScoped<NotificationPopupService>();
 builder.Services.AddScoped<SupportTicketsApiService>();
 builder.Services.AddScoped<ServiceAreaZonesApiService>();
@@ -85,14 +87,13 @@ builder.Services.AddHttpClient("UnauthorizedClient", client =>
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
+builder.Services.AddScoped<AuthorizationMessageHandler>();
 builder.Services.AddHttpClient("AuthorizedClient", client =>
 {
     client.BaseAddress = new Uri(apiBase);
     // Создание заказа, отчёты и т.п. могут занимать >5 с (гео, маршрут, БД) — иначе TaskCanceledException на клиенте.
     client.Timeout = TimeSpan.FromSeconds(120);
 }).AddHttpMessageHandler<AuthorizationMessageHandler>();
-
-builder.Services.AddTransient<AuthorizationMessageHandler>();
 
 builder.Services.AddCors(options =>
 {

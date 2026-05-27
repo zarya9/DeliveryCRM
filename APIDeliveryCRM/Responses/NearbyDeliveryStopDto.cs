@@ -8,4 +8,6 @@ public class NearbyDeliveryStopDto
     public string Title { get; set; } = string.Empty;
     public string AddressLine { get; set; } = string.Empty;
     public double DistanceMeters { get; set; }
+    /// <summary>Pickup — у точки забора; Delivery — у точки доставки.</summary>
+    public string StopKind { get; set; } = "Delivery";
 }

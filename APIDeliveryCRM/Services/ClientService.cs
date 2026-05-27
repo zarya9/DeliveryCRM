@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using System.Linq;
 using System.Threading.Tasks;
 using APIDeliveryCRM.ContextDb;
@@ -8,17 +9,19 @@ using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Text.RegularExpressions;
+using APIDeliveryCRM.Utilities;
 
 namespace APIDeliveryCRM.Services
 {
     public class ClientService : IClientService
     {
         private readonly ContextDB _context;
+        private readonly IOrderService _orderService;
 
-        public ClientService(ContextDB context)
+        public ClientService(ContextDB context, IOrderService orderService)
         {
             _context = context;
+            _orderService = orderService;
         }
 
         public async Task<ClientProfile> GetProfileAsync(int clientProfileId)
@@ -41,17 +44,14 @@ namespace APIDeliveryCRM.Services
                 .FirstOrDefaultAsync(c => c.User_id == userId);
         }
 
-        public async Task<IReadOnlyList<Order>> GetClientOrdersAsync(int clientProfileId)
+        public async Task<IReadOnlyList<Order>> GetClientOrdersAsync(int clientProfileId, bool activeOnly = false)
         {
-            return await _context.Orders
-                .Where(o => o.Client_id == clientProfileId)
-                .Include(o => o.OrderStatus)
-                .Include(o => o.OrderType)
-                .Include(o => o.PickupAddress)
-                .Include(o => o.DeliveryAddress)
-                .Include(o => o.CourierProfile)
-                    .ThenInclude(c => c!.User)
-                .ToListAsync();
+            var orders = await _orderService.GetByClientAsync(clientProfileId);
+            if (!activeOnly)
+                return orders;
+            return orders
+                .Where(o => OrderStatusRules.IsActiveForClient(o.OrderStatus?.Name, o.Delivered_at))
+                .ToList();
         }
 
         public async Task<IActionResult> UpdateProfileAsync(int clientProfileId, UpdateClientProfileRequest request)
@@ -124,8 +124,8 @@ namespace APIDeliveryCRM.Services
                 return new BadRequestObjectResult(new { message = "Не найден пользователь клиента." });
 
             var digits = new string((request.CardNumber ?? string.Empty).Where(char.IsDigit).ToArray());
-            if (digits.Length is < 15 or > 19)
-                return new BadRequestObjectResult(new { message = "Номер карты должен содержать от 15 до 19 цифр." });
+            if (digits.Length != 16)
+                return new BadRequestObjectResult(new { message = "Номер карты должен содержать 16 цифр." });
 
             var masked = $"**** **** **** {digits[^4..]}";
             var expiry = (request.Expiry ?? string.Empty).Trim();
@@ -135,6 +135,8 @@ namespace APIDeliveryCRM.Services
                 return new BadRequestObjectResult(new { message = "Укажите срок действия, имя владельца и CVV." });
             if (!Regex.IsMatch(expiry, "^(0[1-9]|1[0-2])\\/\\d{2}$"))
                 return new BadRequestObjectResult(new { message = "Срок действия укажите в формате MM/YY." });
+            if (!IsCardExpiryValidFromTomorrow(expiry))
+                return new BadRequestObjectResult(new { message = "Срок действия карты не может быть раньше завтрашней даты." });
             var paymentSystem = DetectPaymentSystem(digits);
             var securityLabel = GetSecurityCodeLabel(paymentSystem);
             if (!Regex.IsMatch(cvv, "^\\d{3,4}$"))
@@ -242,6 +244,42 @@ namespace APIDeliveryCRM.Services
                 .ToList();
 
             return new OkObjectResult(rows);
+        }
+
+        public async Task<IActionResult> DeleteBoundCardAsync(int clientProfileId, int cardNoteId, int? actorUserId = null)
+        {
+            var profile = await _context.ClientProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.ID_ClientProfile == clientProfileId);
+            if (profile == null)
+                return new NotFoundObjectResult(new { message = "Профиль клиента не найден." });
+
+            if (actorUserId.HasValue && actorUserId.Value > 0 && profile.User_id != actorUserId.Value)
+                return new ForbidResult();
+
+            var noteType = await _context.ClientNoteTypes
+                .AsNoTracking()
+                .FirstOrDefaultAsync(t => t.Code == "CARD_BINDING");
+            if (noteType == null)
+                return new NotFoundObjectResult(new { message = "Карта не найдена." });
+
+            var note = await _context.ClientNotes
+                .FirstOrDefaultAsync(n =>
+                    n.ID_ClientNote == cardNoteId &&
+                    n.ClientProfile_id == clientProfileId &&
+                    n.ClientNoteType_id == noteType.ID_ClientNoteType);
+            if (note == null || string.IsNullOrWhiteSpace(note.Text))
+                return new NotFoundObjectResult(new { message = "Карта не найдена." });
+
+            var prefix = note.Text.Split('|')[0];
+            if (!string.Equals(prefix, "CARD", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(prefix, "CARDV2", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(prefix, "CARDV3", StringComparison.OrdinalIgnoreCase))
+                return new BadRequestObjectResult(new { message = "Запись не является привязанной картой." });
+
+            _context.ClientNotes.Remove(note);
+            await _context.SaveChangesAsync();
+            return new OkObjectResult(new { message = "Карта удалена." });
         }
 
         public async Task<IActionResult> GetClientDetailsAsync(int clientProfileId)
@@ -369,6 +407,32 @@ namespace APIDeliveryCRM.Services
             _context.ClientNoteTypes.Add(noteType);
             await _context.SaveChangesAsync();
             return noteType;
+        }
+
+        private static bool IsCardExpiryValidFromTomorrow(string expiryMmYy)
+        {
+            if (!TryParseCardExpiryMmYy(expiryMmYy, out var month, out var year))
+                return false;
+
+            var lastDay = DateTime.DaysInMonth(year, month);
+            var expiryEnd = new DateOnly(year, month, lastDay);
+            var minValid = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+            return expiryEnd >= minValid;
+        }
+
+        private static bool TryParseCardExpiryMmYy(string expiryMmYy, out int month, out int year)
+        {
+            month = 0;
+            year = 0;
+            var parts = expiryMmYy.Split('/');
+            if (parts.Length != 2)
+                return false;
+            if (!int.TryParse(parts[0], out month) || month is < 1 or > 12)
+                return false;
+            if (!int.TryParse(parts[1], out var yy))
+                return false;
+            year = yy < 100 ? 2000 + yy : yy;
+            return true;
         }
 
         private static string DetectPaymentSystem(string digits)

@@ -2,9 +2,11 @@
 @using System.Security.Claims
 @using Microsoft.AspNetCore.SignalR.Client
 @using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
 @using System.Globalization
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Utilities
 @inject ChatHubClientService ChatHubClient
 @inject ChatApiService ChatApi
 @inject EmployeesApiService EmployeesApi
@@ -12,10 +14,11 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject AppNotificationService Notify
 @inject ChatUnreadStateService ChatUnreadState
+@inject ChatNotificationContextService ChatNotifyContext
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 
-<div class="dms-card chat-shell @(_mobileChatOpen ? "mobile-chat-open" : "mobile-list-open")">
+<div class="dms-card chat-shell @ChatShellCssClass">
     <aside class="chat-list">
         <div class="p-2 border-bottom">
             <input class="form-control form-control-sm" placeholder="Поиск сотрудника..." @bind="_chatSearch" @bind:event="oninput" />
@@ -36,6 +39,14 @@
             }
         </div>
         <div class="chat-list-items">
+            @if (!string.IsNullOrWhiteSpace(_roomsLoadError))
+            {
+                <div class="p-2 small text-warning">@_roomsLoadError</div>
+            }
+            else if (_rooms.Count == 0 && _initialized)
+            {
+                <div class="p-2 small text-muted">Чатов пока нет. Найдите сотрудника в поиске или обновите страницу.</div>
+            }
             @foreach (var room in RoomsForList)
             {
                 <button type="button" class="chat-item @(room.ChatRoomId == _activeRoomId ? "active" : "")"
@@ -69,24 +80,33 @@
         </div>
     </aside>
 
-    <section class="chat-main">
-        <div class="chat-mobile-header">
-            <button type="button" class="btn btn-sm btn-outline-secondary chat-back-btn" @onclick="BackToRoomList">
-                Назад
-            </button>
-            <div class="chat-mobile-title">@ActiveRoomTitle</div>
-        </div>
-        <div class="chat-peer-header @(IsDirectActiveRoom ? "chat-peer-header-clickable" : "")"
-             @onclick="OpenPeerProfile">
-            <div class="chat-peer-header-main">
-                <div class="chat-peer-title">@ActiveRoomTitle</div>
-                @if (IsDirectActiveRoom)
-                {
-                    <div class="chat-peer-status">@ActivePeerStatusText</div>
-                }
+    <section class="chat-main @(!IsChatPaneOpen ? "chat-main-pick" : "")">
+        @if (!IsChatPaneOpen)
+        {
+            <div class="chat-pick-placeholder">Выберите чат</div>
+        }
+        else
+        {
+        <div class="chat-peer-header @(IsDirectActiveRoom ? "chat-peer-header-clickable" : "")">
+            <div class="chat-peer-header-top">
+                <button type="button" class="btn btn-sm btn-outline-secondary chat-back-btn" @onclick="BackToRoomList" @onclick:stopPropagation="true">
+                    Назад
+                </button>
+                <div class="chat-peer-identity" @onclick="OpenPeerProfile">
+                    <span class="chat-peer-title">@ActiveRoomTitle</span>
+                    @if (IsDirectActiveRoom)
+                    {
+                        <span class="chat-peer-status">@ActivePeerStatusText</span>
+                    }
+                </div>
             </div>
             <div class="chat-peer-search" @onclick:stopPropagation="true">
-                <span class="chat-peer-search-icon" aria-hidden="true">🔎</span>
+                <span class="chat-peer-search-icon" aria-hidden="true">
+                    <svg class="chat-peer-search-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M17 17L21 21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M3 11C3 15.866 7.13401 20 12 20C16.866 20 21 15.866 21 11C21 6.13401 16.866 2 12 2C7.13401 2 3 6.13401 3 11Z" stroke="currentColor" stroke-width="1.5" />
+                    </svg>
+                </span>
                 <input class="chat-peer-search-input"
                        placeholder="Поиск по сообщениям"
                        @bind="_messageSearch"
@@ -105,7 +125,12 @@
                 @foreach (var m in FilteredMessages)
                 {
                     <div class="chat-bubble-wrap @(m.IsMine ? "mine" : "other")">
-                        <div class="chat-bubble">
+                        <div class="chat-bubble @(m.IsMine ? "chat-bubble-mine-actions" : "")"
+                             @oncontextmenu="e => OnMessageContextMenu(e, m)"
+                             @oncontextmenu:preventDefault="@m.IsMine"
+                             @ontouchstart="e => OnMessageTouchStart(e, m)"
+                             @ontouchend="OnMessageTouchEnd"
+                             @ontouchcancel="OnMessageTouchEnd">
                             @if (ShouldShowSenderName(m))
                             {
                                 <div class="chat-sender-name">@GetSenderDisplayName(m)</div>
@@ -120,7 +145,7 @@
                             }
                             else
                             {
-                                <div>@m.Text</div>
+                                <div class="chat-message-text">@RenderMessageText(m)</div>
                             }
                             @if (!string.IsNullOrWhiteSpace(m.AttachmentUrl))
                             {
@@ -134,25 +159,29 @@
                                     }
                                 </div>
                             }
-                            <div class="small text-muted mt-1 d-flex justify-content-between">
+                            <div class="small text-muted mt-1">
                                 <span>@m.SentAt.ToLocalTime().ToString("HH:mm") @if (m.EditedAt.HasValue) { <span>(изм.)</span> }</span>
-                                @if (m.IsMine)
-                                {
-                                    <span class="d-flex gap-1">
-                                        <button type="button" class="btn btn-sm btn-link p-0" @onclick="() => StartEdit(m.Id)">
-                                            <HugeIcon Name="pencil-edit-01" CssClass="chat-action-icon" />
-                                        </button>
-                                        <button type="button" class="btn btn-sm btn-link p-0 text-danger" @onclick="() => DeleteForEveryone(m.Id)">
-                                            <HugeIcon Name="delete-02" CssClass="chat-action-icon" />
-                                        </button>
-                                    </span>
-                                }
                             </div>
                         </div>
                     </div>
                 }
             }
         </div>
+
+        @if (_messageActionMenuId.HasValue)
+        {
+            <div class="chat-message-actions-backdrop" @onclick="CloseMessageActionMenu"></div>
+            <div class="chat-message-actions-menu" style="@GetMessageActionMenuStyle()">
+                <button type="button" class="chat-message-action-item" @onclick="EditFromMessageMenu">
+                    <HugeIcon Name="pencil-edit-01" CssClass="chat-action-icon" />
+                    <span>Редактировать</span>
+                </button>
+                <button type="button" class="chat-message-action-item chat-message-action-danger" @onclick="DeleteFromMessageMenu">
+                    <HugeIcon Name="delete-02" CssClass="chat-action-icon" />
+                    <span>Удалить</span>
+                </button>
+            </div>
+        }
 
         <div class="d-flex flex-wrap gap-1 mb-2">
             @foreach (var quick in CurrentQuickReplies)
@@ -193,12 +222,13 @@
         {
             <img src="@_attachmentUrl" alt="preview" class="rounded border mt-2 chat-image-preview" />
         }
+        }
     </section>
 </div>
 
 @if (_showPeerProfile && ActivePeer is not null)
 {
-    <div class="employee-modal-backdrop" @onclick="ClosePeerProfile">
+    <div class="employee-modal-backdrop">
         <div class="employee-modal employee-modal--employee-detail" @onclick:stopPropagation="true">
             <div class="employee-detail-header d-flex justify-content-between align-items-start">
                 <h2 class="h5 mb-0">Профиль собеседника</h2>
@@ -247,6 +277,11 @@
     </div>
 }
 
+@if (_staffPreviewOrderId is > 0)
+{
+    <StaffOrderDetailModal OrderId="_staffPreviewOrderId.Value" OnClose="CloseStaffOrderPreviewAsync" />
+}
+
 @code {
     [Parameter]
     public int? TargetUserId { get; set; }
@@ -254,9 +289,11 @@
     [Parameter]
     public int? TargetRoomId { get; set; }
 
-    /// <summary>
-    /// Если задано вместе с личным чатом и история пуста, один раз отправляется приветствие по заказу.
-    /// </summary>
+    /// <summary>ID заказа для авто-сообщения в личном чате с менеджером.</summary>
+    [Parameter]
+    public int? AutoIntroOrderId { get; set; }
+
+    /// <summary>Название заказа для текста авто-сообщения.</summary>
     [Parameter]
     public string? AutoIntroOrderName { get; set; }
 
@@ -273,13 +310,22 @@
     private int _companyId;
     private bool _viewerIsClient;
     private bool _initialized;
+    private string? _roomsLoadError;
     private int _activeRoomId;
     private string _activeRoomKind = "company";
     private bool _mobileChatOpen;
+    private DotNetObjectReference<CompanyChatPanel>? _dotnetRef;
+    private bool _escapeHandlerAttached;
+    private int? _messageActionMenuId;
+    private double _messageMenuX;
+    private double _messageMenuY;
+    private CancellationTokenSource? _longPressCts;
     private int? _lastHandledTargetUserId;
     private int? _lastHandledTargetRoomId;
-    /// <summary>Совпадение userId+orderName для повторного открытия чата с тем же менеджером по другому заказу.</summary>
+    /// <summary>Совпадение userId+orderId — повторное авто-сообщение только для нового заказа.</summary>
     private string? _lastHandledDirectOpenSignature;
+    private int? _lastIntroSentOrderId;
+    private int? _staffPreviewOrderId;
     private int? _pendingDirectPeerUserId;
     private bool _showPeerProfile;
     private HashSet<int> _onlineUserIds = new();
@@ -300,10 +346,22 @@
         { "closing", new[] { "Вопрос закрыт, спасибо!", "Если что-то потребуется, пишите." } }
     };
 
-    private bool CanSendMessage => _activeRoomId > 0 && (!string.IsNullOrWhiteSpace(_newMessage) || !string.IsNullOrWhiteSpace(_attachmentUrl));
+    private bool IsChatPaneOpen => _activeRoomId > 0 || _pendingDirectPeerUserId is > 0;
+
+    private string ChatShellCssClass =>
+        !IsChatPaneOpen
+            ? "mobile-list-open chat-shell-no-room"
+            : (_mobileChatOpen ? "mobile-chat-open" : "mobile-list-open");
+
+    private bool CanSendMessage =>
+        IsChatPaneOpen &&
+        (!string.IsNullOrWhiteSpace(_newMessage) || !string.IsNullOrWhiteSpace(_attachmentUrl));
+
     private ChatRoomListItemDto? ActiveRoom => _rooms.FirstOrDefault(r => r.ChatRoomId == _activeRoomId);
-    private bool IsDirectActiveRoom => string.Equals(_activeRoomKind, "direct", StringComparison.OrdinalIgnoreCase);
-    private int? ActivePeerUserId => IsDirectActiveRoom ? ActiveRoom?.PeerUserId : null;
+    private bool IsDirectActiveRoom =>
+        string.Equals(_activeRoomKind, "direct", StringComparison.OrdinalIgnoreCase)
+        || _pendingDirectPeerUserId is > 0;
+    private int? ActivePeerUserId => IsDirectActiveRoom ? ActiveRoom?.PeerUserId ?? _pendingDirectPeerUserId : null;
     private EmployeesApiService.EmployeeDto? ActivePeer
         => ActivePeerUserId.HasValue ? _employees.FirstOrDefault(e => e.Id == ActivePeerUserId.Value) : null;
     private string ActivePeerStatusText
@@ -323,13 +381,45 @@
     {
         get
         {
+            if (_pendingDirectPeerUserId is > 0)
+            {
+                var peerId = _pendingDirectPeerUserId.Value;
+                if (_employeeNames.TryGetValue(peerId, out var name) && !string.IsNullOrWhiteSpace(name))
+                    return name;
+                var employee = _employees.FirstOrDefault(e => e.Id == peerId);
+                if (employee != null)
+                    return FormatChatEmployeeDisplay(employee);
+            }
+
             var room = _rooms.FirstOrDefault(r => r.ChatRoomId == _activeRoomId);
             return room is null ? "Чат" : GetRoomDisplayName(room);
         }
     }
-    private List<ChatRoomListItemDto> RoomsForList => _rooms
-        .OrderByDescending(r => r.LastMessageAt ?? DateTime.MinValue)
-        .ToList();
+    private List<ChatRoomListItemDto> RoomsForList
+    {
+        get
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var list = new List<ChatRoomListItemDto>();
+            foreach (var room in _rooms.OrderByDescending(r => r.LastMessageAt ?? DateTime.MinValue))
+            {
+                var key = GetRoomListDedupKey(room);
+                if (!seen.Add(key))
+                    continue;
+                list.Add(room);
+            }
+            return list;
+        }
+    }
+
+    private static string GetRoomListDedupKey(ChatRoomListItemDto room)
+    {
+        if (string.Equals(room.RoomKind, "direct", StringComparison.OrdinalIgnoreCase) && room.PeerUserId is > 0)
+            return $"direct:{room.PeerUserId.Value}";
+        if (string.Equals(room.RoomKind, "company", StringComparison.OrdinalIgnoreCase))
+            return "company";
+        return $"room:{room.ChatRoomId}";
+    }
     private List<EmployeesApiService.EmployeeDto> SearchedEmployees =>
         string.IsNullOrWhiteSpace(_chatSearch)
             ? new List<EmployeesApiService.EmployeeDto>()
@@ -371,61 +461,97 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Загрузка в OnAfterRenderAsync — к этому моменту cookie/JWT уже в circuit.
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await EnsureEscapeHandlerAsync();
+
+        if (!firstRender || _initialized)
+            return;
+
+        ChatNotifyContext.SetOnChatPage(true);
+        SyncChatNotifyRoom();
+
         try
         {
             var state = await AuthStateProvider.GetAuthenticationStateAsync();
             var user = state.User;
-            if (!int.TryParse(user.FindFirst(ClaimTypes.NameIdentifier)?.Value, out _currentUserId))
+            if (user.Identity?.IsAuthenticated != true)
                 return;
+
+            if (!int.TryParse(user.FindFirst(ClaimTypes.NameIdentifier)?.Value, out _currentUserId))
+            {
+                _roomsLoadError = "Не удалось определить пользователя. Войдите снова.";
+                _initialized = true;
+                StateHasChanged();
+                return;
+            }
+
             _ = int.TryParse(user.FindFirst("companyId")?.Value, out _companyId);
             _viewerIsClient = user.IsInRole("Клиент");
 
-            _employees.AddRange(await EmployeesApi.GetByCompanyAsync(_companyId));
-            _onlineUserIds = await PresenceApi.GetOnlineUserIdsAsync(_companyId);
-            foreach (var employee in _employees)
+            if (_companyId > 0)
             {
-                _employeeNames[employee.Id] = employee.FullName;
+                _employees.AddRange(await EmployeesApi.GetByCompanyAsync(_companyId));
+                _onlineUserIds = await PresenceApi.GetOnlineUserIdsAsync(_companyId);
             }
 
-            var ensure = await ChatApi.EnsureCompanyRoomAsync();
-            if (ensure.ok)
-                _activeRoomId = ensure.roomId;
+            foreach (var employee in _employees)
+                _employeeNames[employee.Id] = employee.FullName;
+
+            if (!_viewerIsClient)
+                await ChatApi.EnsureCompanyRoomAsync();
 
             await ReloadRoomsAsync();
-            await LoadTemplatesAsync();
+            if (_rooms.Count == 0 && !_viewerIsClient && string.IsNullOrWhiteSpace(_roomsLoadError))
+            {
+                await ChatApi.EnsureCompanyRoomAsync();
+                await ReloadRoomsAsync();
+            }
 
+            await LoadTemplatesAsync();
             SubscribeHubEvents();
-            await ChatHubClient.StartAsync();
+
+            try
+            {
+                await ChatHubClient.StartAsync();
+            }
+            catch
+            {
+                // SignalR не обязателен для списка комнат.
+            }
+
             if (_activeRoomId > 0)
             {
-                await ChatHubClient.JoinRoomAsync(_activeRoomId);
-                await LoadHistoryAsync(_activeRoomId);
-                await MarkActiveRoomAsReadAsync();
+                try
+                {
+                    await ChatHubClient.JoinRoomAsync(_activeRoomId);
+                    await LoadHistoryAsync(_activeRoomId);
+                    await MarkActiveRoomAsReadAsync();
+                }
+                catch
+                {
+                    // история подгрузится при выборе комнаты
+                }
             }
 
             if (TargetRoomId.HasValue && TargetRoomId.Value > 0)
             {
-                // #region agent log
-                AppendDebugLog("run1", "H2", "CompanyChatPanel.razor:OnInitializedAsync:targetRoom", "TargetRoomId detected on init", new
-                {
-                    targetRoomId = TargetRoomId,
-                    targetUserId = TargetUserId,
-                    activeRoomIdBefore = _activeRoomId
-                });
-                // #endregion
                 await OpenRoomAsync(TargetRoomId.Value);
                 _lastHandledTargetRoomId = TargetRoomId.Value;
             }
             else if (TargetUserId.HasValue && TargetUserId.Value > 0)
             {
-                _lastHandledDirectOpenSignature = $"{TargetUserId.Value}|{AutoIntroOrderName ?? ""}";
-                _pendingDirectPeerUserId = TargetUserId.Value;
-                await TryOpenDirectChatWithUserAsync(TargetUserId.Value, showError: false);
+                _lastHandledDirectOpenSignature = $"{TargetUserId.Value}|{AutoIntroOrderId ?? 0}";
+                await OpenDirectChatWithUserAsync(TargetUserId.Value, showError: false);
                 _lastHandledTargetUserId = TargetUserId.Value;
                 await TrySendOrderIntroFromQueryAsync();
             }
 
             _initialized = true;
+            StateHasChanged();
         }
         catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
         {
@@ -434,24 +560,18 @@
                 await customAuth.MarkUserAsLoggedOutAsync();
             Navigation.NavigateTo("/login", forceLoad: true, replace: true);
         }
+        catch (Exception ex)
+        {
+            _roomsLoadError = "Ошибка загрузки чата: " + ex.Message;
+            _initialized = true;
+            StateHasChanged();
+        }
     }
 
     protected override async Task OnParametersSetAsync()
     {
         if (!_initialized)
             return;
-
-        // #region agent log
-        AppendDebugLog("run1", "H2", "CompanyChatPanel.razor:OnParametersSetAsync", "Parameters set", new
-        {
-            targetRoomId = TargetRoomId,
-            targetUserId = TargetUserId,
-            lastHandledTargetRoomId = _lastHandledTargetRoomId,
-            lastHandledTargetUserId = _lastHandledTargetUserId,
-            activeRoomId = _activeRoomId,
-            activeRoomKind = _activeRoomKind
-        });
-        // #endregion
 
         if (TargetRoomId.HasValue && TargetRoomId.Value > 0)
         {
@@ -466,13 +586,12 @@
         if (!TargetUserId.HasValue || TargetUserId.Value <= 0)
             return;
 
-        var sig = $"{TargetUserId.Value}|{AutoIntroOrderName ?? ""}";
+        var sig = $"{TargetUserId.Value}|{AutoIntroOrderId ?? 0}";
         if (string.Equals(_lastHandledDirectOpenSignature, sig, StringComparison.Ordinal))
             return;
 
         _lastHandledDirectOpenSignature = sig;
-        _pendingDirectPeerUserId = TargetUserId.Value;
-        await TryOpenDirectChatWithUserAsync(TargetUserId.Value, showError: false);
+        await OpenDirectChatWithUserAsync(TargetUserId.Value, showError: false);
         _lastHandledTargetUserId = TargetUserId.Value;
         await TrySendOrderIntroFromQueryAsync();
     }
@@ -480,7 +599,13 @@
     private async Task ReloadRoomsAsync()
     {
         _rooms.Clear();
-        var rooms = await ChatApi.GetRoomsListAsync();
+        var (rooms, error) = await ChatApi.GetRoomsListAsync();
+        _roomsLoadError = error;
+        if (_viewerIsClient)
+            rooms = rooms
+                .Where(r => !string.Equals(r.RoomKind, "company", StringComparison.OrdinalIgnoreCase))
+                .Where(r => !string.Equals(r.RoomKind, "order", StringComparison.OrdinalIgnoreCase))
+                .ToList();
         _rooms.AddRange(rooms);
         _roomKinds.Clear();
         foreach (var room in rooms)
@@ -493,22 +618,13 @@
                 _employeeNames[room.PeerUserId.Value] = FormatDirectTitleForViewer(room.Name.Trim());
             }
         }
-        if (_activeRoomId == 0 && _rooms.Count > 0)
-            _activeRoomId = _rooms[0].ChatRoomId;
-        _activeRoomKind = _roomKinds.GetValueOrDefault(_activeRoomId, "company");
+        if (_activeRoomId > 0)
+            _activeRoomKind = _roomKinds.GetValueOrDefault(_activeRoomId, "company");
     }
 
     private async Task OpenRoomAsync(int roomId)
     {
         if (roomId <= 0) return;
-        // #region agent log
-        AppendDebugLog("run1", "H5", "CompanyChatPanel.razor:OpenRoomAsync:start", "OpenRoomAsync called", new
-        {
-            roomId,
-            activeRoomIdBefore = _activeRoomId,
-            activeRoomKindBefore = _activeRoomKind
-        });
-        // #endregion
 
         if (roomId == _activeRoomId)
         {
@@ -522,6 +638,7 @@
         if (_activeRoomId > 0)
             await ChatHubClient.LeaveRoomAsync(_activeRoomId);
         _activeRoomId = roomId;
+        SyncChatNotifyRoom();
         _activeRoomKind = _roomKinds.GetValueOrDefault(roomId, "company");
         _showPeerProfile = false;
         _messages.Clear();
@@ -531,14 +648,6 @@
         await ReloadRoomsAsync();
         await ChatUnreadState.RefreshAsync();
         _mobileChatOpen = true;
-        // #region agent log
-        AppendDebugLog("run1", "H5", "CompanyChatPanel.razor:OpenRoomAsync:done", "OpenRoomAsync completed", new
-        {
-            roomIdOpened = roomId,
-            activeRoomIdAfter = _activeRoomId,
-            activeRoomKindAfter = _activeRoomKind
-        });
-        // #endregion
     }
 
     private async Task LoadHistoryAsync(int roomId)
@@ -554,22 +663,27 @@
     }
 
     private async Task OpenDirectChatWithUserAsync(int userId)
-        => await TryOpenDirectChatWithUserAsync(userId, showError: true);
+        => await OpenDirectChatWithUserAsync(userId, showError: true);
 
     private async Task TrySendOrderIntroFromQueryAsync()
     {
-        if (string.IsNullOrWhiteSpace(AutoIntroOrderName))
+        if (!AutoIntroOrderId.HasValue || AutoIntroOrderId.Value <= 0)
             return;
-        if (!IsDirectActiveRoom || _activeRoomId <= 0)
+        if (!IsDirectActiveRoom)
             return;
-        if (_messages.Count > 0)
+        if (_lastIntroSentOrderId == AutoIntroOrderId.Value)
             return;
 
-        var title = AutoIntroOrderName.Trim();
-        if (title.Length > 500)
-            title = title[..500];
-        var safe = title.Replace("\"", "'");
-        var body = $"Здравствуйте! Пишу вам касаемо заказа \"{safe}\"";
+        var title = string.IsNullOrWhiteSpace(AutoIntroOrderName)
+            ? $"Заказ №{AutoIntroOrderId.Value}"
+            : AutoIntroOrderName.Trim();
+        var body = OrderChatLinks.BuildCustomerIntroMessage(title, AutoIntroOrderId.Value);
+
+        if (!await EnsureDirectRoomCreatedAsync())
+        {
+            Notify.ShowWarning("Не удалось открыть чат — напишите менеджеру вручную.");
+            return;
+        }
 
         var (introOk, introMsg) = await ChatApi.SendMessageAsync(_activeRoomId, body, null);
         if (!introOk)
@@ -581,50 +695,147 @@
         if (introMsg != null)
             AppendMessageIfNew(ChatMessageVm.FromDto(introMsg, _currentUserId));
 
+        _lastIntroSentOrderId = AutoIntroOrderId.Value;
         await ReloadRoomsAsync();
         await MarkActiveRoomAsReadAsync();
         await ChatUnreadState.RefreshAsync();
         await ScrollMessagesToBottomAsync();
     }
 
-    private async Task<bool> TryOpenDirectChatWithUserAsync(int userId, bool showError)
+    private int FindDirectRoomIdForPeer(int peerUserId)
+        => _rooms.FirstOrDefault(r =>
+            string.Equals(r.RoomKind, "direct", StringComparison.OrdinalIgnoreCase)
+            && r.PeerUserId == peerUserId)?.ChatRoomId ?? 0;
+
+    private async Task OpenDirectChatWithUserAsync(int userId, bool showError)
     {
         if (userId <= 0)
-            return false;
-        // #region agent log
-        AppendDebugLog("run1", "H3", "CompanyChatPanel.razor:TryOpenDirectChatWithUserAsync:start", "Trying open direct chat", new
+            return;
+
+        var existingRoomId = FindDirectRoomIdForPeer(userId);
+        if (existingRoomId > 0)
         {
-            userId,
-            showError,
-            activeRoomIdBefore = _activeRoomId,
-            activeRoomKindBefore = _activeRoomKind
-        });
-        // #endregion
-        var created = await ChatApi.CreateOrGetDirectRoomAsync(userId);
-        // #region agent log
-        AppendDebugLog("run1", "H3", "CompanyChatPanel.razor:TryOpenDirectChatWithUserAsync:result", "CreateOrGetDirectRoomAsync returned", new
-        {
-            userId,
-            ok = created.ok,
-            roomId = created.roomId
-        });
-        // #endregion
-        if (!created.ok || created.roomId <= 0)
-        {
-            if (showError)
-                Notify.ShowError("Не удалось открыть личный чат.");
-            return false;
+            _chatSearch = string.Empty;
+            await OpenRoomAsync(existingRoomId);
+            return;
         }
+
+        _pendingDirectPeerUserId = userId;
+        _activeRoomId = 0;
+        _activeRoomKind = "direct";
+        _messages.Clear();
+        _mobileChatOpen = true;
+        SyncChatNotifyRoom();
+        StateHasChanged();
+    }
+
+    private async Task<bool> EnsureDirectRoomCreatedAsync()
+    {
+        if (_activeRoomId > 0)
+            return true;
+
+        var peerId = _pendingDirectPeerUserId ?? TargetUserId;
+        if (!peerId.HasValue || peerId.Value <= 0)
+            return false;
+
+        var existingRoomId = FindDirectRoomIdForPeer(peerId.Value);
+        if (existingRoomId > 0)
+        {
+            await OpenRoomAsync(existingRoomId);
+            return true;
+        }
+
+        var created = await ChatApi.CreateOrGetDirectRoomAsync(peerId.Value);
+        if (!created.ok || created.roomId <= 0)
+            return false;
+
+        _pendingDirectPeerUserId = null;
         await ReloadRoomsAsync();
         _chatSearch = string.Empty;
         await OpenRoomAsync(created.roomId);
-        _pendingDirectPeerUserId = null;
         return true;
     }
 
     private void BackToRoomList()
     {
         _mobileChatOpen = false;
+    }
+
+    private async Task EnsureEscapeHandlerAsync()
+    {
+        if (_escapeHandlerAttached)
+            return;
+        try
+        {
+            _dotnetRef ??= DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("dmsChatPanel.attach", _dotnetRef);
+            _escapeHandlerAttached = true;
+        }
+        catch (JSException)
+        {
+            // chatPanel.js ещё не загружен — повторим на следующем рендере
+        }
+    }
+
+    [JSInvokable]
+    public Task HandleEscapeKey()
+        => InvokeAsync(async () =>
+        {
+            if (_messageActionMenuId.HasValue)
+            {
+                CloseMessageActionMenu();
+                StateHasChanged();
+                return;
+            }
+            await CloseActiveRoomAsync();
+            StateHasChanged();
+        });
+
+    private async Task CloseActiveRoomAsync()
+    {
+        if (_showPeerProfile)
+        {
+            _showPeerProfile = false;
+            return;
+        }
+
+        if (_pendingDirectPeerUserId.HasValue)
+        {
+            _pendingDirectPeerUserId = null;
+            _activeRoomKind = "company";
+            _messages.Clear();
+            _messageSearch = string.Empty;
+            _newMessage = string.Empty;
+            _mobileChatOpen = false;
+            SyncChatNotifyRoom();
+            await ChatUnreadState.RefreshAsync();
+            return;
+        }
+
+        if (_activeRoomId <= 0)
+            return;
+
+        try
+        {
+            await ChatHubClient.LeaveRoomAsync(_activeRoomId);
+        }
+        catch
+        {
+            // комната могла быть не подключена
+        }
+
+        _activeRoomId = 0;
+        SyncChatNotifyRoom();
+        _activeRoomKind = "company";
+        _messages.Clear();
+        _messageSearch = string.Empty;
+        _newMessage = string.Empty;
+        _editingMessageId = null;
+        _editingText = string.Empty;
+        _attachmentUrl = null;
+        _attachmentName = null;
+        _mobileChatOpen = false;
+        await ChatUnreadState.RefreshAsync();
     }
 
     private void OpenPeerProfile()
@@ -642,24 +853,11 @@
     private async Task SendMessageAsync()
     {
         if (!_initialized) return;
-        // #region agent log
-        AppendDebugLog("run1", "H4", "CompanyChatPanel.razor:SendMessageAsync:start", "SendMessageAsync called", new
+
+        if (_pendingDirectPeerUserId.HasValue && !await EnsureDirectRoomCreatedAsync())
         {
-            activeRoomId = _activeRoomId,
-            activeRoomKind = _activeRoomKind,
-            pendingDirectPeerUserId = _pendingDirectPeerUserId,
-            hasText = !string.IsNullOrWhiteSpace(_newMessage),
-            hasAttachment = !string.IsNullOrWhiteSpace(_attachmentUrl)
-        });
-        // #endregion
-        if (_pendingDirectPeerUserId.HasValue)
-        {
-            var opened = await TryOpenDirectChatWithUserAsync(_pendingDirectPeerUserId.Value, showError: false);
-            if (!opened)
-            {
-                Notify.ShowError("Не удалось открыть личный чат.");
-                return;
-            }
+            Notify.ShowError("Не удалось открыть личный чат.");
+            return;
         }
         if (_activeRoomId <= 0) return;
         var text = _newMessage.Trim();
@@ -667,14 +865,6 @@
             return;
 
         var (ok, sent) = await ChatApi.SendMessageAsync(_activeRoomId, text, _attachmentUrl);
-        // #region agent log
-        AppendDebugLog("run1", "H4", "CompanyChatPanel.razor:SendMessageAsync:sendResult", "SendMessageAsync result", new
-        {
-            activeRoomId = _activeRoomId,
-            activeRoomKind = _activeRoomKind,
-            ok
-        });
-        // #endregion
         if (!ok)
         {
             Notify.ShowError("Сообщение не отправлено.");
@@ -699,6 +889,87 @@
     {
         if (e.Key == "Enter" && !e.ShiftKey)
             await SendMessageAsync();
+    }
+
+    private void OnMessageContextMenu(MouseEventArgs e, ChatMessageVm m)
+    {
+        if (!m.IsMine || _editingMessageId == m.Id)
+            return;
+        _ = OpenMessageActionMenuAsync(m.Id, e.ClientX, e.ClientY);
+    }
+
+    private async Task OnMessageTouchStart(TouchEventArgs e, ChatMessageVm m)
+    {
+        if (!m.IsMine || _editingMessageId == m.Id)
+            return;
+
+        _longPressCts?.Cancel();
+        _longPressCts = new CancellationTokenSource();
+        var token = _longPressCts.Token;
+        try
+        {
+            await Task.Delay(500, token);
+            var touch = e.ChangedTouches?.FirstOrDefault();
+            var x = touch?.ClientX ?? 0;
+            var y = touch?.ClientY ?? 0;
+            await InvokeAsync(() => OpenMessageActionMenuAsync(m.Id, x, y));
+        }
+        catch (TaskCanceledException)
+        {
+            // отпустили палец раньше 500 мс
+        }
+    }
+
+    private void OnMessageTouchEnd()
+        => _longPressCts?.Cancel();
+
+    private const double MessageMenuWidth = 210;
+    private const double MessageMenuHeight = 92;
+
+    private async Task OpenMessageActionMenuAsync(int messageId, double clientX, double clientY)
+    {
+        _messageActionMenuId = messageId;
+        try
+        {
+            var pos = await JS.InvokeAsync<MenuClampDto>("dmsChatPanel.clampMenuPosition",
+                clientX, clientY, MessageMenuWidth, MessageMenuHeight);
+            _messageMenuX = pos.Left;
+            _messageMenuY = pos.Top;
+        }
+        catch
+        {
+            _messageMenuX = clientX;
+            _messageMenuY = clientY;
+        }
+
+        StateHasChanged();
+    }
+
+    private void CloseMessageActionMenu()
+    {
+        _messageActionMenuId = null;
+        _longPressCts?.Cancel();
+    }
+
+    private string GetMessageActionMenuStyle()
+        => $"top:{_messageMenuY.ToString(CultureInfo.InvariantCulture)}px;left:{_messageMenuX.ToString(CultureInfo.InvariantCulture)}px;";
+
+    private void EditFromMessageMenu()
+    {
+        if (!_messageActionMenuId.HasValue)
+            return;
+        var id = _messageActionMenuId.Value;
+        CloseMessageActionMenu();
+        StartEdit(id);
+    }
+
+    private async Task DeleteFromMessageMenu()
+    {
+        if (!_messageActionMenuId.HasValue)
+            return;
+        var id = _messageActionMenuId.Value;
+        CloseMessageActionMenu();
+        await DeleteForEveryone(id);
     }
 
     private void StartEdit(int messageId)
@@ -840,7 +1111,10 @@
     {
         if (string.IsNullOrWhiteSpace(text))
             return "Пока нет сообщений";
-        return text.Length > 34 ? $"{text[..34]}…" : text;
+        var preview = OrderChatLinks.FormatMessagePreview(text);
+        if (string.IsNullOrWhiteSpace(preview))
+            return "Пока нет сообщений";
+        return preview.Length > 48 ? $"{preview[..48]}…" : preview;
     }
 
     private static string FormatRoomTime(DateTime? dt)
@@ -1024,13 +1298,10 @@
         {
             if (msg.ChatRoomId != _activeRoomId)
             {
+                UpdateRoomPreview(msg.ChatRoomId, msg.MessageText, msg.SentAt, msg.SenderId);
                 await ReloadRoomsAsync();
                 await ChatUnreadState.RefreshAsync();
-                if (msg.SenderId != _currentUserId && IsDirectRoom(msg.ChatRoomId))
-                {
-                    var senderName = string.IsNullOrWhiteSpace(msg.SenderName) ? "Сотрудник" : msg.SenderName!;
-                    Notify.ShowInfo($"Новое личное сообщение от {senderName}.", pushWhenHidden: true);
-                }
+                StateHasChanged();
                 return;
             }
 
@@ -1078,11 +1349,94 @@
         _messages.Add(vm);
     }
 
+    private void SyncChatNotifyRoom() => ChatNotifyContext.SetActiveRoomId(_activeRoomId > 0 ? _activeRoomId : null);
+
+    private void UpdateRoomPreview(int roomId, string? text, DateTime sentAt, int senderId)
+    {
+        if (roomId <= 0)
+            return;
+
+        var preview = string.IsNullOrWhiteSpace(text) ? "(вложение)" : text.Trim();
+        var at = sentAt == default ? DateTime.UtcNow : sentAt;
+
+        foreach (var room in _rooms.Where(r => r.ChatRoomId == roomId))
+        {
+            room.LastMessageText = preview;
+            room.LastMessageAt = at;
+            if (senderId != _currentUserId)
+                room.UnreadCount++;
+        }
+    }
+
+    private RenderFragment RenderMessageText(ChatMessageVm message) => builder =>
+    {
+        var segments = OrderChatLinks.SplitMessage(message.Text);
+        var seq = 0;
+        foreach (var segment in segments)
+        {
+            if (segment.Kind == ChatMessageSegmentKind.OrderLink && segment.OrderId > 0)
+            {
+                if (!_viewerIsClient)
+                {
+                    builder.OpenElement(seq++, "button");
+                    builder.AddAttribute(seq++, "type", "button");
+                    builder.AddAttribute(seq++, "class", "btn btn-link btn-sm p-0 align-baseline chat-order-link");
+                    builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => OpenStaffOrderPreviewAsync(segment.OrderId)));
+                    builder.AddContent(seq++, OrderChatLinks.FormatOrderLinkLabel(segment.OrderId, forStaff: true));
+                    builder.CloseElement();
+                }
+                else
+                {
+                    builder.OpenElement(seq++, "span");
+                    builder.AddAttribute(seq++, "class", "chat-order-ref");
+                    builder.AddContent(seq++, OrderChatLinks.FormatOrderLinkLabel(segment.OrderId, forStaff: false));
+                    builder.CloseElement();
+                }
+            }
+            else
+            {
+                builder.AddContent(seq++, segment.Text);
+            }
+        }
+    };
+
+    private Task OpenStaffOrderPreviewAsync(int orderId)
+    {
+        if (_viewerIsClient || orderId <= 0)
+            return Task.CompletedTask;
+        _staffPreviewOrderId = orderId;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task CloseStaffOrderPreviewAsync()
+    {
+        _staffPreviewOrderId = null;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
     public async ValueTask DisposeAsync()
     {
+        ChatNotifyContext.SetOnChatPage(false);
+        ChatNotifyContext.SetActiveRoomId(null);
         UnsubscribeHubEvents();
+        if (_escapeHandlerAttached)
+        {
+            try { await JS.InvokeVoidAsync("dmsChatPanel.detach"); }
+            catch { /* ignore */ }
+            _escapeHandlerAttached = false;
+        }
+        _dotnetRef?.Dispose();
+        _dotnetRef = null;
         if (_activeRoomId > 0)
             await ChatHubClient.LeaveRoomAsync(_activeRoomId);
+    }
+
+    private sealed class MenuClampDto
+    {
+        public double Left { get; set; }
+        public double Top { get; set; }
     }
 
     private sealed class ChatMessageVm
@@ -1126,24 +1480,6 @@
         };
     }
 
-    // #region agent log
-    private static void AppendDebugLog(string runId, string hypothesisId, string location, string message, object data)
-    {
-        try
-        {
-            var line = System.Text.Json.JsonSerializer.Serialize(new
-            {
-                sessionId = "7b40bb",
-                runId,
-                hypothesisId,
-                location,
-                message,
-                data,
-                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
-            System.IO.File.AppendAllText(@"c:\Users\zarip\source\repos\DeliveryCRM\debug-7b40bb.log", line + Environment.NewLine);
-        }
-        catch { }
-    }
+    // #region agent log — REMOVED (debug code)
     // #endregion
 }

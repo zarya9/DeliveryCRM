@@ -98,6 +98,27 @@ builder.Services.AddAuthentication(options =>
             }
 
             return Task.CompletedTask;
+        },
+        OnAuthenticationFailed = context =>
+        {
+            var logger = context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                .CreateLogger("JwtBearer");
+            logger.LogWarning(context.Exception, "JWT authentication failed for {Path}: {Message}", context.Request.Path, context.Exception.Message);
+            return Task.CompletedTask;
+        },
+        OnChallenge = context =>
+        {
+            var hasAuthHeader = context.Request.Headers.ContainsKey("Authorization");
+            var hasAuthCookie = context.Request.Cookies.ContainsKey("auth_token");
+            var logger = context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                .CreateLogger("JwtBearer");
+            logger.LogWarning("JWT challenge for {Path}. Has Authorization header: {HasAuthHeader}. Has auth_token cookie: {HasAuthCookie}. Error: {Error}. Description: {Description}",
+                context.Request.Path,
+                hasAuthHeader,
+                hasAuthCookie,
+                context.Error,
+                context.ErrorDescription);
+            return Task.CompletedTask;
         }
     };
 });

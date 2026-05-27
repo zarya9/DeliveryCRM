@@ -5,6 +5,7 @@
 @using Microsoft.AspNetCore.Authorization
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Components.Shared
 @inject ReportsApiService ReportsApi
 @inject CompanySettingsApiService CompanySettingsApi
 @inject AppNotificationService Notify
@@ -30,8 +31,10 @@
             <input class="form-control" type="date" @bind="_periodTo" @bind:format="yyyy-MM-dd" />
         </div>
         <div class="col-md-3">
-            <button type="button" class="btn btn-primary" @onclick="ApplyPeriodAsync">Отчёт</button>
-            <button type="button" class="btn btn-outline-secondary ms-1" @onclick="ResetPeriodAsync">Текущий месяц</button>
+            <button type="button" class="btn btn-primary" disabled="@_loading" @onclick="ApplyPeriodAsync">
+                @(_loading ? "Загрузка…" : "Обновить")
+            </button>
+            <button type="button" class="btn btn-outline-secondary ms-1" disabled="@_loading" @onclick="ResetPeriodAsync">Текущий месяц</button>
         </div>
         <div class="col-md-3">
             <button type="button" class="btn btn-outline-success" disabled="@_exporting" @onclick="ExportExcelAsync">
@@ -43,8 +46,13 @@
         </div>
     </div>
     <div class="small text-muted mt-2">
+        Кнопка «Обновить» пересчитывает KPI и график за выбранные даты. Скачать файл — «Excel» или «PDF» справа.<br />
         Фактический период в данных: <strong>@_data.PeriodFromUtc.ToString("dd.MM.yyyy HH:mm")</strong> —
         <strong>@_data.PeriodToUtc.ToString("dd.MM.yyyy HH:mm")</strong> (UTC).
+        @if (_lastLoadedUtc.HasValue)
+        {
+            <span> · обновлено @_lastLoadedUtc.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+        }
     </div>
 </div>
 
@@ -122,12 +130,22 @@ else if (_data.LatePercent >= 10)
     </div>
 }
 
-<div class="dms-card">
-    <h2 class="dms-card-title">Финансы</h2>
-    @if (_dailyChartItems.Any())
+<div class="dms-card dms-finance-card mb-3">
+    <div class="dms-report-card-header">
+        <HugeIcon Name="wallet-01" CssClass="dms-report-card-icon" />
+        <div>
+            <h2 class="dms-card-title mb-0">Финансы</h2>
+            <p class="small text-muted mb-0">Выручка и заказы по дням за выбранный период</p>
+        </div>
+    </div>
+    @if (_loading && !_dailyChartItems.Any())
     {
-        <div class="mb-3">
-            <ApexChart TItem="DailyChartItem" Title="Динамика по дням (период)" Height="320">
+        <p class="text-muted mb-0">Загрузка данных…</p>
+    }
+    else if (_dailyChartItems.Any(x => x.Count > 0 || x.Revenue > 0))
+    {
+        <div class="dms-finance-chart-wrap">
+            <ApexChart @key="_chartRevision" TItem="DailyChartItem" Title="Динамика по дням (период)" Height="320">
                 <ApexPointSeries TItem="DailyChartItem"
                                  Name="Выручка (₽)"
                                  Items="_dailyChartItems"
@@ -143,37 +161,47 @@ else if (_data.LatePercent >= 10)
             </ApexChart>
         </div>
     }
-    <div class="row">
+    else
+    {
+        <p class="text-muted mb-3">За выбранный период нет заказов для графика.</p>
+    }
+    <div class="row g-3 align-items-stretch">
         <div class="col-md-4">
-            <div class="mb-2">
-                <strong>Средний чек (доставлено):</strong>
-                @_data.AvgCheckDeliveredInPeriod.ToString("N0") ₽
+            <div class="dms-finance-highlight h-100">
+                <HugeIcon Name="wallet-01" CssClass="dms-finance-highlight-icon" />
+                <div>
+                    <div class="dms-finance-highlight-label">Средний чек (доставлено)</div>
+                    <div class="dms-finance-highlight-value">@_data.AvgCheckDeliveredInPeriod.ToString("N0") ₽</div>
+                </div>
             </div>
         </div>
         <div class="col-md-8">
-            <h3 class="h6">Таблица по дням</h3>
+            <h3 class="h6 dms-report-subtitle mb-2">
+                <HugeIcon Name="calendar-03" CssClass="hub-form-label-icon" />
+                Таблица по дням
+            </h3>
             @if (_data.OrdersByDay.Any())
             {
-                <div class="dms-table-scroll">
-                <table class="table table-sm mb-0">
-                    <thead>
-                        <tr>
-                            <th>Дата</th>
-                            <th>Заказов</th>
-                            <th>Выручка</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var row in _data.OrdersByDay.OrderBy(r => r.Date))
-                        {
+                <div class="dms-report-table-scroll">
+                    <table class="table table-sm table-hover dms-report-table mb-0">
+                        <thead>
                             <tr>
-                                <td>@row.Date.ToString("dd.MM")</td>
-                                <td>@row.Count</td>
-                                <td>@row.Revenue.ToString("N0") ₽</td>
+                                <th><span class="dms-report-th"><HugeIcon Name="calendar-03" CssClass="dms-report-th-icon" />Дата</span></th>
+                                <th class="text-end"><span class="dms-report-th"><HugeIcon Name="package-moving" CssClass="dms-report-th-icon" />Заказов</span></th>
+                                <th class="text-end"><span class="dms-report-th"><HugeIcon Name="wallet-01" CssClass="dms-report-th-icon" />Выручка</span></th>
                             </tr>
-                        }
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in _data.OrdersByDay.OrderBy(r => r.Date))
+                            {
+                                <tr>
+                                    <td>@row.Date.ToString("dd.MM")</td>
+                                    <td class="text-end">@row.Count</td>
+                                    <td class="text-end">@row.Revenue.ToString("N0") ₽</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
                 </div>
             }
             else
@@ -184,131 +212,155 @@ else if (_data.LatePercent >= 10)
     </div>
 </div>
 
-<div class="dms-card">
-    <h2 class="dms-card-title">Статусы заказов</h2>
-    @if (_data.StatusRows.Any())
-    {
-        <table class="table table-sm">
-            <thead>
-                <tr>
-                    <th>Статус</th>
-                    <th>Количество</th>
-                    <th>Доля</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var row in _data.StatusRows)
-                {
-                    <tr>
-                        <td>@row.Status</td>
-                        <td>@row.Count</td>
-                        <td>@row.Share.ToString("0")@("%")</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
-    else
-    {
-        <p class="text-muted mb-0">Нет данных по статусам.</p>
-    }
-</div>
-
-<div class="dms-card">
-    <h2 class="dms-card-title">Топ курьеров по доставкам</h2>
-    @if (_data.CourierRows.Any())
-    {
-        <table class="table table-sm">
-            <thead>
-                <tr>
-                    <th>Курьер</th>
-                    <th>Доставок</th>
-                    <th>Выручка</th>
-                    <th>Рейтинг</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var c in _data.CourierRows)
-                {
-                    <tr>
-                        <td>@c.Name</td>
-                        <td>@c.Delivered</td>
-                        <td>@c.Revenue.ToString("N0") ₽</td>
-                        <td>@c.Rating.ToString("0.0")</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
-    else
-    {
-        <p class="text-muted mb-0">Нет данных по курьерам.</p>
-    }
-</div>
-
-<div class="dms-card">
-    <h2 class="dms-card-title">Топ клиентов по выручке</h2>
-    @if (_data.ClientRows.Any())
-    {
-        <table class="table table-sm">
-            <thead>
-                <tr>
-                    <th>Клиент</th>
-                    <th>Заказов</th>
-                    <th>Выручка</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var c in _data.ClientRows)
-                {
-                    <tr>
-                        <td>@c.Name</td>
-                        <td>@c.Orders</td>
-                        <td>@c.Revenue.ToString("N0") ₽</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
-    else
-    {
-        <p class="text-muted mb-0">Нет данных по клиентам.</p>
-    }
-</div>
-
-<div class="dms-card">
-    <h2 class="dms-card-title">Эффективность менеджеров по лидам</h2>
-    @if (_data.ManagerRows.Any())
-    {
-        <table class="table table-sm">
-            <thead>
-                <tr>
-                    <th>Менеджер</th>
-                    <th>Лидов</th>
-                    <th>Конверсий</th>
-                    <th>Конверсия</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var row in _data.ManagerRows)
-                {
-                    <tr>
-                        <td>@row.Manager</td>
-                        <td>@row.Leads</td>
-                        <td>@row.Conversions</td>
-                        <td>@row.ConversionPercent.ToString("0.0")%</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-        <div class="small text-muted">
-            Конверсия считается по стадиям, содержащим ключевые слова: «договор», «сделк», «клиент», «заказ», «успеш».
+<div class="row g-3">
+    <div class="col-12 col-xl-6">
+        <div class="dms-card dms-report-card h-100">
+            <div class="dms-report-card-header">
+                <HugeIcon Name="invoice-01" CssClass="dms-report-card-icon" />
+                <h2 class="dms-card-title mb-0">Статусы заказов</h2>
+            </div>
+            @if (_data.StatusRows.Any())
+            {
+                <div class="dms-report-table-scroll">
+                    <table class="table table-sm table-hover dms-report-table mb-0">
+                        <thead>
+                            <tr>
+                                <th><span class="dms-report-th"><HugeIcon Name="activity-01" CssClass="dms-report-th-icon" />Статус</span></th>
+                                <th class="text-end"><span class="dms-report-th"><HugeIcon Name="package-moving" CssClass="dms-report-th-icon" />Количество</span></th>
+                                <th class="text-end"><span class="dms-report-th"><HugeIcon Name="analytics-up" CssClass="dms-report-th-icon" />Доля</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in _data.StatusRows)
+                            {
+                                <tr>
+                                    <td>@row.Status</td>
+                                    <td class="text-end">@row.Count</td>
+                                    <td class="text-end">@row.Share.ToString("0")%</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else
+            {
+                <p class="text-muted mb-0">Нет данных по статусам.</p>
+            }
         </div>
-    }
-    else
-    {
-        <p class="text-muted mb-0">Нет данных по лидам менеджеров.</p>
-    }
+    </div>
+    <div class="col-12 col-xl-6">
+        <div class="dms-card dms-report-card h-100">
+            <div class="dms-report-card-header">
+                <HugeIcon Name="delivery-truck-01" CssClass="dms-report-card-icon" />
+                <h2 class="dms-card-title mb-0">Топ курьеров по доставкам</h2>
+            </div>
+            @if (_data.CourierRows.Any())
+            {
+                <div class="dms-report-table-scroll">
+                    <table class="table table-sm table-hover dms-report-table mb-0">
+                        <thead>
+                            <tr>
+                                <th><span class="dms-report-th"><HugeIcon Name="user-03" CssClass="dms-report-th-icon" />Курьер</span></th>
+                                <th class="text-end"><span class="dms-report-th"><HugeIcon Name="package-moving" CssClass="dms-report-th-icon" />Доставок</span></th>
+                                <th class="text-end"><span class="dms-report-th"><HugeIcon Name="wallet-01" CssClass="dms-report-th-icon" />Выручка</span></th>
+                                <th class="text-end"><span class="dms-report-th"><HugeIcon Name="activity-01" CssClass="dms-report-th-icon" />Рейтинг</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var c in _data.CourierRows)
+                            {
+                                <tr>
+                                    <td>@c.Name</td>
+                                    <td class="text-end">@c.Delivered</td>
+                                    <td class="text-end">@c.Revenue.ToString("N0") ₽</td>
+                                    <td class="text-end">@c.Rating.ToString("0.0")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else
+            {
+                <p class="text-muted mb-0">Нет данных по курьерам.</p>
+            }
+        </div>
+    </div>
+    <div class="col-12 col-xl-6">
+        <div class="dms-card dms-report-card h-100">
+            <div class="dms-report-card-header">
+                <HugeIcon Name="user-group" CssClass="dms-report-card-icon" />
+                <h2 class="dms-card-title mb-0">Топ клиентов по выручке</h2>
+            </div>
+            @if (_data.ClientRows.Any())
+            {
+                <div class="dms-report-table-scroll">
+                    <table class="table table-sm table-hover dms-report-table mb-0">
+                        <thead>
+                            <tr>
+                                <th><span class="dms-report-th"><HugeIcon Name="user-03" CssClass="dms-report-th-icon" />Клиент</span></th>
+                                <th class="text-end"><span class="dms-report-th"><HugeIcon Name="invoice-01" CssClass="dms-report-th-icon" />Заказов</span></th>
+                                <th class="text-end"><span class="dms-report-th"><HugeIcon Name="wallet-01" CssClass="dms-report-th-icon" />Выручка</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var c in _data.ClientRows)
+                            {
+                                <tr>
+                                    <td>@c.Name</td>
+                                    <td class="text-end">@c.Orders</td>
+                                    <td class="text-end">@c.Revenue.ToString("N0") ₽</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else
+            {
+                <p class="text-muted mb-0">Нет данных по клиентам.</p>
+            }
+        </div>
+    </div>
+    <div class="col-12 col-xl-6">
+        <div class="dms-card dms-report-card h-100">
+            <div class="dms-report-card-header">
+                <HugeIcon Name="manager" CssClass="dms-report-card-icon" />
+                <h2 class="dms-card-title mb-0">Эффективность менеджеров по лидам</h2>
+            </div>
+            @if (_data.ManagerRows.Any())
+            {
+                <div class="dms-report-table-scroll">
+                    <table class="table table-sm table-hover dms-report-table mb-0">
+                        <thead>
+                            <tr>
+                                <th><span class="dms-report-th"><HugeIcon Name="manager" CssClass="dms-report-th-icon" />Менеджер</span></th>
+                                <th class="text-end"><span class="dms-report-th"><HugeIcon Name="package-moving" CssClass="dms-report-th-icon" />Лидов</span></th>
+                                <th class="text-end"><span class="dms-report-th"><HugeIcon Name="activity-01" CssClass="dms-report-th-icon" />Конверсий</span></th>
+                                <th class="text-end"><span class="dms-report-th"><HugeIcon Name="analytics-up" CssClass="dms-report-th-icon" />Конверсия</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in _data.ManagerRows)
+                            {
+                                <tr>
+                                    <td>@row.Manager</td>
+                                    <td class="text-end">@row.Leads</td>
+                                    <td class="text-end">@row.Conversions</td>
+                                    <td class="text-end">@row.ConversionPercent.ToString("0.0")%</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else
+            {
+                <p class="text-muted mb-0">Нет данных по лидам менеджеров.</p>
+            }
+        </div>
+    </div>
 </div>
 
 @code {
@@ -318,8 +370,11 @@ else if (_data.LatePercent >= 10)
     private int _slaLateHours = 24;
     private DateTime _periodFrom;
     private DateTime _periodTo;
+    private bool _loading;
     private bool _exporting;
     private bool _exportingPdf;
+    private int _chartRevision;
+    private DateTime? _lastLoadedUtc;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -327,8 +382,22 @@ else if (_data.LatePercent >= 10)
         var now = DateTime.UtcNow.Date;
         _periodFrom = new DateTime(now.Year, now.Month, 1);
         _periodTo = now;
-        await ReloadAsync();
+        _loading = true;
         StateHasChanged();
+        try
+        {
+            await ReloadAsync();
+            _chartRevision++;
+        }
+        catch (Exception ex)
+        {
+            Notify.ShowError($"Не удалось загрузить аналитику: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
     }
 
     private async Task ApplyPeriodAsync()
@@ -387,7 +456,11 @@ else if (_data.LatePercent >= 10)
 
         var from = DateTime.SpecifyKind(_periodFrom.Date, DateTimeKind.Utc);
         var to = DateTime.SpecifyKind(_periodTo.Date, DateTimeKind.Utc);
-        _data = await ReportsApi.GetFinanceDashboardAsync(from, to) ?? new FinanceDashboardDto();
+        var loaded = await ReportsApi.GetFinanceDashboardAsync(from, to);
+        if (loaded == null)
+            throw new InvalidOperationException("API не вернул данные. Проверьте вход и что API запущен.");
+
+        _data = loaded;
         _dailyChartItems = _data.OrdersByDay
             .OrderBy(x => x.Date)
             .Select(x => new DailyChartItem
@@ -397,6 +470,7 @@ else if (_data.LatePercent >= 10)
                 Count = x.Count
             })
             .ToList();
+        _lastLoadedUtc = DateTime.UtcNow;
     }
 
     private async Task ExportPdfAsync()

@@ -7,7 +7,10 @@
 @using WebBlazorDeliveryCRM.Utilities
 @using System.Security.Claims
 @inject ClientsApiService ClientsApi
+@inject OrdersApiService OrdersApi
+@inject AppNotificationService Notify
 @inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
 
 <PageTitle>Главная — Клиент</PageTitle>
 
@@ -42,8 +45,20 @@
             {
                 <div class="customer-home-order-row" @onclick="() => OpenOrderDetail(o)" role="button" tabindex="0"
                      @onkeydown="e => OnHomeOrderKeyAsync(e, o)">
-                    <span>№@o.Order_Number — @o.Name</span>
-                    <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@OrderStatusUi.ToneForStatusName(o.OrderStatus?.Name)" />
+                    <span class="customer-home-order-title">№@o.Order_Number — @o.Name</span>
+                    <span class="customer-home-order-actions">
+                        <StatusBadge Text="@(o.OrderStatus?.Name ?? "—")" Tone="@OrderStatusUi.ToneForStatusName(o.OrderStatus?.Name)" />
+                        @if (CanDeleteOrder(o))
+                        {
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-danger customer-home-delete-btn"
+                                    disabled="@_deletingOrderIds.Contains(o.ID_Order)"
+                                    @onclick="() => DeleteOrderAsync(o, true)"
+                                    @onclick:stopPropagation="true">
+                                @(_deletingOrderIds.Contains(o.ID_Order) ? "Отмена..." : "Отменить")
+                            </button>
+                        }
+                    </span>
                 </div>
             }
         </div>
@@ -69,13 +84,14 @@
 
 @if (_detailOrder is not null)
 {
-    <CustomerOrderDetailModal Order="_detailOrder" OnClose="CloseOrderDetailAsync" />
+    <CustomerOrderDetailModal Order="_detailOrder" OnClose="CloseOrderDetailAsync" OnDelete="DeleteOrderFromModalAsync" />
 }
 
 @code {
     private List<OrderDto>? _orders;
     private OrderDto? _detailOrder;
     private int _deliveredCount;
+    private readonly HashSet<int> _deletingOrderIds = new();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -85,13 +101,56 @@
         if (!int.TryParse(userIdStr, out var userId)) { StateHasChanged(); return; }
         var client = await ClientsApi.GetByUserIdAsync(userId);
         if (client == null) { StateHasChanged(); return; }
-        _orders = await ClientsApi.GetOrdersAsync(client.ID_ClientProfile) ?? new List<OrderDto>();
+        _orders = await ClientsApi.GetOrdersAsync(client.ID_ClientProfile, activeOnly: true) ?? new List<OrderDto>();
         var monthStart = new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1);
         _deliveredCount = _orders.Count(o => o.Delivered_at >= monthStart);
         StateHasChanged();
     }
 
     private void OpenOrderDetail(OrderDto o) => _detailOrder = o;
+
+    private async Task<bool> DeleteOrderAsync(OrderDto order, bool askConfirmation)
+    {
+        if (!_deletingOrderIds.Add(order.ID_Order))
+            return false;
+
+        try
+        {
+            if (askConfirmation)
+            {
+                var confirmed = await JS.InvokeAsync<bool>("confirm",
+                    $"Отменить заказ №{order.Order_Number}? Если оплата уже прошла, средства будут возвращены.");
+                if (!confirmed)
+                    return false;
+            }
+
+            var (ok, error) = await OrdersApi.DeleteMineAsync(order.ID_Order);
+            if (!ok)
+            {
+                Notify.ShowError(error ?? "Не удалось удалить заказ.");
+                return false;
+            }
+
+            _orders?.RemoveAll(o => o.ID_Order == order.ID_Order);
+            if (_detailOrder?.ID_Order == order.ID_Order)
+                _detailOrder = null;
+            Notify.ShowSuccess(order.Is_paid
+                ? $"Заказ №{order.Order_Number} отменён. Оплата будет возвращена."
+                : $"Заказ №{order.Order_Number} отменён.");
+            return true;
+        }
+        finally
+        {
+            _deletingOrderIds.Remove(order.ID_Order);
+        }
+    }
+
+    private async Task DeleteOrderFromModalAsync(OrderDto order)
+    {
+        var deleted = await DeleteOrderAsync(order, true);
+        if (deleted)
+            _detailOrder = null;
+    }
 
     private Task CloseOrderDetailAsync()
     {
@@ -106,5 +165,10 @@
             OpenOrderDetail(o);
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    private static bool CanDeleteOrder(OrderDto order)
+    {
+        return order.CanDeleteByClient;
     }
 }

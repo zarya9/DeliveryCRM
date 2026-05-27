@@ -41,9 +41,10 @@ namespace APIDeliveryCRM.Controllers
         }
 
         [HttpGet("{id:int}/orders")]
-        public async Task<IActionResult> GetOrders(int id)
+        public async Task<IActionResult> GetOrders(int id, [FromQuery] string? scope = null)
         {
-            var orders = await _clientService.GetClientOrdersAsync(id);
+            var activeOnly = string.Equals(scope, "active", StringComparison.OrdinalIgnoreCase);
+            var orders = await _clientService.GetClientOrdersAsync(id, activeOnly);
             return new OkObjectResult(orders);
         }
 
@@ -81,6 +82,12 @@ namespace APIDeliveryCRM.Controllers
         public async Task<IActionResult> GetBoundCards(int id)
         {
             return await _clientService.GetBoundCardsAsync(id);
+        }
+
+        [HttpDelete("{id:int}/bound-cards/{cardId:int}")]
+        public async Task<IActionResult> DeleteBoundCard(int id, int cardId)
+        {
+            return await _clientService.DeleteBoundCardAsync(id, cardId, GetCurrentUserId());
         }
 
         [HttpPost("notes")]

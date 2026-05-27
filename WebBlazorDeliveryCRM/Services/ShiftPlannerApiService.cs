@@ -35,13 +35,40 @@ public class ShiftPlannerApiService
     public async Task<ShiftPlanSummaryDto?> GetCourierPlanAsync(int courierProfileId)
         => await GetSafeAsync<ShiftPlanSummaryDto>($"/api/ShiftPlanner/courier/{courierProfileId}");
 
-    public async Task<ShiftPlanSummaryDto?> ApplyCourierRouteAsync(int courierProfileId, IReadOnlyList<ApplyCourierRouteStopDto> stops)
+    public async Task<(ShiftPlanSummaryDto? plan, string? error)> ApplyCourierRouteAsync(
+        int courierProfileId,
+        IReadOnlyList<ApplyCourierRouteStopDto> stops)
     {
-        var resp = await _http.PostAsJsonAsync($"/api/ShiftPlanner/courier/{courierProfileId}/apply-route", new { stops });
+        var resp = await _http.PostAsJsonAsync(
+            $"/api/ShiftPlanner/courier/{courierProfileId}/apply-route",
+            new ApplyCourierRouteRequestDto { Stops = stops.ToList() });
+
         if (!resp.IsSuccessStatusCode)
-            return null;
+        {
+            var error = await TryReadErrorMessageAsync(resp);
+            return (null, error ?? $"Ошибка API ({(int)resp.StatusCode}).");
+        }
+
         await using var stream = await resp.Content.ReadAsStreamAsync();
-        return await JsonSerializer.DeserializeAsync<ShiftPlanSummaryDto>(stream, JsonOpts);
+        var plan = await JsonSerializer.DeserializeAsync<ShiftPlanSummaryDto>(stream, JsonOpts);
+        return (plan, plan == null ? "Пустой ответ сервера." : null);
+    }
+
+    private static async Task<string?> TryReadErrorMessageAsync(HttpResponseMessage resp)
+    {
+        try
+        {
+            await using var stream = await resp.Content.ReadAsStreamAsync();
+            using var doc = await JsonDocument.ParseAsync(stream);
+            if (doc.RootElement.TryGetProperty("message", out var msg))
+                return msg.GetString();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return null;
     }
 
     private async Task<T?> GetSafeAsync<T>(string url)

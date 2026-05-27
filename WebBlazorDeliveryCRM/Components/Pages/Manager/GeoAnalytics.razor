@@ -58,8 +58,14 @@
 </div>
 
 <div class="dms-card mb-3">
-    <h2 class="dms-card-title">Карта геоаналитики</h2>
-    <div id="geo-analytics-map" style="height: 520px; width: 100%; border-radius: 8px;"></div>
+    <div class="dms-report-card-header mb-2">
+        <HugeIcon Name="maps-location-01" CssClass="dms-report-card-icon" />
+        <div>
+            <h2 class="dms-card-title mb-0">Карта геоаналитики</h2>
+            <p class="small text-muted mb-0">Тепловая карта и зоны обслуживания за период</p>
+        </div>
+    </div>
+    <div id="geo-analytics-map" class="geo-analytics-map-canvas"></div>
     @if (_data.HeatPoints.Count >= 2)
     {
         <p class="small text-muted mt-2 mb-2">
@@ -236,7 +242,7 @@
         if (!_mapInitialized)
         {
             var osrmUrl = Configuration["Osrm:RouterBaseUrl"];
-            await JS.InvokeVoidAsync("leafletMap.init", "geo-analytics-map", 55.7558, 37.6173, 10, null, osrmUrl, false, "ru");
+            await JS.InvokeVoidAsync("leafletMap.init", "geo-analytics-map", 55.8024, 49.1167, 11, "light", osrmUrl, false, "ru");
             _mapInitialized = true;
         }
 

@@ -3,6 +3,7 @@
 @using System.Linq
 @using System.Security.Claims
 @using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
 @using WebBlazorDeliveryCRM.Components.Shared
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ClientsApiService ClientsApi
@@ -10,6 +11,7 @@
 @inject AddressSuggestApiService AddressSuggestApi
 @inject AppNotificationService Notify
 @inject IConfiguration Configuration
+@inject IJSRuntime JS
 
 <PageTitle>Профиль — Клиент</PageTitle>
 
@@ -140,21 +142,27 @@
         }
         else
         {
-            <div class="row g-3">
+            <div class="row g-2">
                 @foreach (var c in _cards)
                 {
-                    <div class="col-md-6 col-lg-4">
-                        <div class="border rounded p-3 h-100">
-                            <div class="d-flex justify-content-between align-items-start gap-2">
-                                <div class="d-flex align-items-center gap-2 flex-wrap">
-                                    <PaymentBrandMark System="@c.PaymentSystem" />
-                                    <strong>@(c.PaymentSystem ?? "Карта")</strong>
-                                </div>
+                    <div class="col-auto">
+                        <div class="bound-card-tile border rounded p-2 h-100">
+                            <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
                                 <span class="small text-muted">@c.Expiry</span>
                             </div>
-                            <div class="mt-3 fs-5">@c.MaskedCard</div>
-                            <div class="small text-muted mt-2">@c.CardHolder</div>
-                            <div class="small text-muted">@c.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
+                            <div class="d-flex align-items-center gap-2 min-w-0">
+                                <PaymentBrandMark System="@c.PaymentSystem" CssClass="payment-brand-mark--inline" />
+                                <span class="bound-card-pan text-truncate">@c.MaskedCard</span>
+                            </div>
+                            <div class="small text-muted text-truncate mt-1">@c.CardHolder</div>
+                            <div class="small text-muted mt-1">@c.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy")</div>
+                            <button type="button"
+                                    class="btn btn-outline-danger btn-sm d-inline-flex align-items-center gap-1 mt-2"
+                                    disabled="@(_deletingCardId == c.Id)"
+                                    @onclick="() => DeleteCardAsync(c)">
+                                <HugeIcon Name="delete-02" CssClass="dms-icon-sm" />
+                                @(_deletingCardId == c.Id ? "Удаление..." : "Удалить")
+                            </button>
                         </div>
                     </div>
                 }
@@ -165,8 +173,8 @@
 
 @if (_showCardModal)
 {
-    <div class="employee-modal-backdrop" @onclick="CloseCardModal">
-        <div class="employee-modal" @onclick:stopPropagation="true">
+    <div class="employee-modal-backdrop">
+        <div class="employee-modal employee-modal--card-bind" @onclick:stopPropagation="true">
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <h2 class="h5 mb-0 d-inline-flex align-items-center gap-2">
                     <HugeIcon Name="plus-sign" CssClass="dms-icon-sm" />
@@ -176,50 +184,56 @@
             </div>
 
             <div class="row g-3">
-                <div class="col-md-6">
+                <div class="col-12">
                     <label class="form-label">Номер карты</label>
-                    <input class="form-control"
-                           placeholder="0000 0000 0000 0000"
-                           autocomplete="cc-number"
-                           @bind="_cardNumber"
-                           @bind:event="oninput"
-                           @bind:after="AfterCardNumberBound"
-                           @onchange="OnCardNumberInput" />
-                    <div class="small text-muted mt-1 d-inline-flex align-items-center flex-wrap gap-2">
-                        <span>Платёжная система:</span>
-                        <PaymentBrandMark System="@_cardPaymentSystem" />
+                    <div class="input-group">
+                        <span class="input-group-text py-0 px-2" title="@_cardPaymentSystem">
+                            <PaymentBrandMark System="@_cardPaymentSystem" CssClass="payment-brand-mark--inline" />
+                        </span>
+                        <input class="form-control"
+                               @ref="_cardNumberEl"
+                               placeholder="0000 0000 0000 0000"
+                               autocomplete="cc-number"
+                               maxlength="19"
+                               inputmode="numeric"
+                               value="@_cardNumber"
+                               @oninput="OnCardNumberInput"
+                               @onchange="OnCardNumberInput" />
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-6">
                     <label class="form-label">Срок</label>
                     <input class="form-control"
+                           @ref="_cardExpiryEl"
                            placeholder="MM/YY"
                            autocomplete="cc-exp"
-                           @bind="_cardExpiryMonth"
-                           @bind:event="oninput"
-                           @bind:after="AfterCardExpiryBound"
+                           maxlength="5"
+                           inputmode="numeric"
+                           value="@_cardExpiryMonth"
+                           @oninput="OnCardExpiryInput"
                            @onchange="OnCardExpiryInput" />
                 </div>
-                <div class="col-md-3">
+                <div class="col-6">
                     <label class="form-label">@_cardSecurityCodeLabel</label>
-                    <input type="text"
+                    <input type="password"
+                           @ref="_cardCvvEl"
                            inputmode="numeric"
                            maxlength="4"
                            autocomplete="cc-csc"
                            class="form-control"
-                           @bind="_cardCvv"
-                           @bind:event="oninput"
-                           @bind:after="AfterCardCvvBound"
+                           value="@_cardCvv"
+                           @oninput="OnCardCvvInput"
                            @onchange="OnCardCvvInput" />
                 </div>
                 <div class="col-md-12">
                     <label class="form-label">Владелец</label>
                     <input class="form-control"
+                           @ref="_cardHolderEl"
                            placeholder="IVAN IVANOV"
                            autocomplete="cc-name"
-                           @bind="_cardHolder"
-                           @bind:event="onchange"
-                           @oninput="OnCardHolderInput" />
+                           value="@_cardHolder"
+                           @oninput="OnCardHolderInput"
+                           @onchange="OnCardHolderInput" />
                 </div>
             </div>
 
@@ -268,6 +282,11 @@
     private string _cardPaymentSystem = "Не определена";
     private string _cardSecurityCodeLabel = "CVV";
     private bool _bindingCard;
+    private int? _deletingCardId;
+    private ElementReference _cardNumberEl;
+    private ElementReference _cardExpiryEl;
+    private ElementReference _cardCvvEl;
+    private ElementReference _cardHolderEl;
     private string _loginEmail = "";
     private int _currentUserId;
     private bool _isEditProfile;
@@ -406,7 +425,7 @@
 
     private void OnCardNumberInput(ChangeEventArgs e)
     {
-        var raw = new string((e.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(19).ToArray());
+        var raw = new string((e.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(16).ToArray());
         _cardNumber = string.Join(" ", Enumerable.Range(0, (raw.Length + 3) / 4).Select(i => raw.Substring(i * 4, Math.Min(4, raw.Length - i * 4))));
         _cardPaymentSystem = DetectPaymentSystem(raw);
         _cardSecurityCodeLabel = GetSecurityCodeLabel(_cardPaymentSystem);
@@ -454,35 +473,78 @@
         _cardExpiryMonth = $"{raw[..2]}/{raw[2..]}";
     }
 
-    private void AfterCardNumberBound() =>
-        OnCardNumberInput(new ChangeEventArgs { Value = _cardNumber });
-
-    private void AfterCardExpiryBound() =>
-        OnCardExpiryInput(new ChangeEventArgs { Value = _cardExpiryMonth });
-
-    private void AfterCardCvvBound() =>
-        OnCardCvvInput(new ChangeEventArgs { Value = _cardCvv });
+    private async Task SyncCardFieldsFromDomAsync()
+    {
+        try
+        {
+            var dom = await JS.InvokeAsync<CardDomValues>("dmsCardForm.read", _cardNumberEl, _cardExpiryEl, _cardCvvEl, _cardHolderEl);
+            if (!string.IsNullOrWhiteSpace(dom.Number))
+                OnCardNumberInput(new ChangeEventArgs { Value = dom.Number });
+            if (!string.IsNullOrWhiteSpace(dom.Expiry))
+                OnCardExpiryInput(new ChangeEventArgs { Value = dom.Expiry });
+            if (!string.IsNullOrWhiteSpace(dom.Cvv))
+                OnCardCvvInput(new ChangeEventArgs { Value = dom.Cvv });
+            if (!string.IsNullOrWhiteSpace(dom.Holder))
+                OnCardHolderInput(new ChangeEventArgs { Value = dom.Holder });
+        }
+        catch (JSDisconnectedException)
+        {
+            // circuit gone
+        }
+        catch (JSException)
+        {
+            // fallback: normalize already bound state
+            OnCardNumberInput(new ChangeEventArgs { Value = _cardNumber });
+            OnCardExpiryInput(new ChangeEventArgs { Value = _cardExpiryMonth });
+            OnCardCvvInput(new ChangeEventArgs { Value = _cardCvv });
+            OnCardHolderInput(new ChangeEventArgs { Value = _cardHolder });
+        }
+    }
 
     private async Task BindCardAsync()
     {
         if (_profile is null)
             return;
 
+        await SyncCardFieldsFromDomAsync();
+
         var cardDigits = new string(_cardNumber.Where(char.IsDigit).ToArray());
         var cvvDigits = new string(_cardCvv.Where(char.IsDigit).ToArray());
-        if (cardDigits.Length is < 15 or > 19
-            || string.IsNullOrWhiteSpace(_cardExpiryMonth)
-            || string.IsNullOrWhiteSpace(_cardHolder?.Trim())
-            || cvvDigits.Length is < 3 or > 4)
+        var holder = _cardHolder?.Trim() ?? string.Empty;
+        if (cardDigits.Length != 16)
         {
-            Notify.ShowWarning("Заполните номер карты (15–19 цифр), срок, владельца и код безопасности (3–4 цифры).");
+            Notify.ShowWarning("Номер карты должен содержать ровно 16 цифр.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_cardExpiryMonth))
+        {
+            Notify.ShowWarning("Укажите срок действия карты (MM/YY).");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(holder))
+        {
+            Notify.ShowWarning("Укажите имя владельца карты латиницей.");
+            return;
+        }
+
+        if (cvvDigits.Length is < 3 or > 4)
+        {
+            Notify.ShowWarning($"Укажите {_cardSecurityCodeLabel}: 3 или 4 цифры.");
             return;
         }
 
         var expiry = ConvertMonthToCardExpiry(_cardExpiryMonth);
         if (string.IsNullOrWhiteSpace(expiry))
         {
-            Notify.ShowWarning("Некорректный формат срока карты.");
+            Notify.ShowWarning("Некорректный формат срока карты (MM/YY).");
+            return;
+        }
+
+        if (!IsCardExpiryValidFromTomorrow(expiry))
+        {
+            Notify.ShowWarning("Срок действия карты не может быть раньше завтрашней даты.");
             return;
         }
 
@@ -494,7 +556,7 @@
             {
                 CardNumber = cardDigits,
                 Expiry = expiry,
-                CardHolder = _cardHolder.Trim().ToUpperInvariant(),
+                CardHolder = holder.ToUpperInvariant(),
                 Cvv = cvvDigits
             });
             if (!ok)
@@ -517,6 +579,35 @@
         }
     }
 
+    private async Task DeleteCardAsync(BoundCardListItemDto card)
+    {
+        if (_profile is null || _deletingCardId.HasValue)
+            return;
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            $"Удалить карту {card.MaskedCard}?");
+        if (!confirmed)
+            return;
+
+        _deletingCardId = card.Id;
+        try
+        {
+            var (ok, err) = await ClientsApi.DeleteBoundCardAsync(_profile.ID_ClientProfile, card.Id);
+            if (!ok)
+            {
+                Notify.ShowError(err ?? "Не удалось удалить карту.");
+                return;
+            }
+
+            _cards.RemoveAll(c => c.Id == card.Id);
+            Notify.ShowSuccess("Карта удалена.");
+        }
+        finally
+        {
+            _deletingCardId = null;
+        }
+    }
+
     private static string? ConvertMonthToCardExpiry(string monthValue)
     {
         if (string.IsNullOrWhiteSpace(monthValue))
@@ -530,7 +621,41 @@
             return null;
         if (yearTwoDigits.Length != 2)
             return null;
-        return $"{month}/{yearTwoDigits}";
+        return $"{m:00}/{yearTwoDigits}";
+    }
+
+    private static bool IsCardExpiryValidFromTomorrow(string expiryMmYy)
+    {
+        if (!TryParseCardExpiryMmYy(expiryMmYy, out var month, out var year))
+            return false;
+
+        var lastDay = DateTime.DaysInMonth(year, month);
+        var expiryEnd = new DateOnly(year, month, lastDay);
+        var minValid = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+        return expiryEnd >= minValid;
+    }
+
+    private static bool TryParseCardExpiryMmYy(string expiryMmYy, out int month, out int year)
+    {
+        month = 0;
+        year = 0;
+        var parts = expiryMmYy.Split('/');
+        if (parts.Length != 2)
+            return false;
+        if (!int.TryParse(parts[0], out month) || month is < 1 or > 12)
+            return false;
+        if (!int.TryParse(parts[1], out var yy))
+            return false;
+        year = yy < 100 ? 2000 + yy : yy;
+        return true;
+    }
+
+    private sealed class CardDomValues
+    {
+        public string Number { get; set; } = string.Empty;
+        public string Expiry { get; set; } = string.Empty;
+        public string Cvv { get; set; } = string.Empty;
+        public string Holder { get; set; } = string.Empty;
     }
 
     private void OnAvatarError()

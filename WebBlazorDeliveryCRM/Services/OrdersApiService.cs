@@ -161,6 +161,25 @@ public class OrdersApiService
         return (false, $"Ошибка {(int)resp.StatusCode}");
     }
 
+    public async Task<(bool ok, string? error)> DeleteMineAsync(int orderId)
+    {
+        var resp = await _http.DeleteAsync($"/api/Orders/{orderId}/mine");
+        if (resp.IsSuccessStatusCode)
+            return (true, null);
+        try
+        {
+            await using var stream = await resp.Content.ReadAsStreamAsync();
+            using var doc = await JsonDocument.ParseAsync(stream);
+            if (doc.RootElement.TryGetProperty("message", out var m))
+                return (false, m.GetString());
+        }
+        catch
+        {
+        }
+
+        return (false, $"Ошибка {(int)resp.StatusCode}");
+    }
+
     private async Task<T?> GetSafeAsync<T>(string url)
     {
         var resp = await _http.GetAsync(url);

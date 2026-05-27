@@ -1,5 +1,6 @@
 @page "/courier/profile"
 @layout CourierLayout
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Курьер")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CourierAccessRoles.AuthorizeList)]
+@using WebBlazorDeliveryCRM.Services
 
 <UserProfileEditor Title="Профиль курьера" TitleIconName="user-03" />

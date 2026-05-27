@@ -337,7 +337,8 @@
     {
         try
         {
-            Navigation.NavigateTo(url, replace: true);
+            // forceLoad: новый HTTP-запрос с auth_token cookie и свежий circuit после входа.
+            Navigation.NavigateTo(url, forceLoad: true, replace: true);
         }
         catch (Microsoft.AspNetCore.Components.NavigationException)
         {

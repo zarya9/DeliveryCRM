@@ -86,7 +86,7 @@
                                 }
                             </td>
                             <td>@PriorityLabel(o.Priority)</td>
-                            <td>@FormatDeliveryWindow(o)</td>
+                            <td>@DeliveryWindowFormatter.Format(o)</td>
                             <td>@FormatRouteKind(o.DeliveryRouteKind)</td>
                             <td class="text-nowrap">@(o.Delivered_at.HasValue ? o.Delivered_at.Value.ToString("dd.MM.yyyy HH:mm") : "—")</td>
                         </tr>
@@ -196,18 +196,4 @@
         _ => k
     };
 
-    private static string FormatDeliveryWindow(OrderDto o)
-    {
-        var from = o.Eta_at;
-        var to = o.Sla_due_at;
-        if (!from.HasValue && !to.HasValue)
-            return "—";
-        if (!from.HasValue)
-            return $"до {to:dd.MM.yyyy}";
-        if (!to.HasValue)
-            return $"с {from:dd.MM.yyyy}";
-        if (from.Value.Date == to.Value.Date)
-            return from.Value.ToString("dd.MM.yyyy");
-        return $"с {from:dd.MM} по {to:dd.MM}";
-    }
 }

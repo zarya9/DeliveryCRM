@@ -1,4 +1,5 @@
 using APIDeliveryCRM.ContextDb;
+using APIDeliveryCRM.Helpers;
 using APIDeliveryCRM.Interfaces;
 using APIDeliveryCRM.Model;
 using APIDeliveryCRM.Request;
@@ -51,6 +52,10 @@ public class LogisticsHubService : ILogisticsHubService
 
     public async Task<LogisticsHub> CreateAsync(int companyId, int userId, CreateLogisticsHubRequest request)
     {
+        if (!HubAddressRules.TryValidate(request, out var validationError))
+            throw new ArgumentException(validationError);
+        HubAddressRules.ApplyFormatting(request);
+
         var normalizedStreet = NormalizeAddressPart(request.Street);
         var normalizedHouse = NormalizeAddressPart(request.House);
         var normalizedFlat = NormalizeAddressPart(request.Flat);
@@ -127,6 +132,10 @@ public class LogisticsHubService : ILogisticsHubService
 
     public async Task<LogisticsHub?> UpdateAsync(int companyId, int hubId, CreateLogisticsHubRequest request)
     {
+        if (!HubAddressRules.TryValidate(request, out var validationError))
+            throw new ArgumentException(validationError);
+        HubAddressRules.ApplyFormatting(request);
+
         var hub = await _context.LogisticsHubs
             .Include(h => h.Address)
             .FirstOrDefaultAsync(h => h.ID_LogisticsHub == hubId && h.Company_id == companyId);

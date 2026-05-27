@@ -1,4 +1,3 @@
-// Установка HttpOnly-cookie через same-origin POST (токен кратковременно в теле запроса, в хранилище не остаётся).
 window.deliveryCrmAuth = window.deliveryCrmAuth || {};
 
 window.deliveryCrmAuth.setSessionToken = async function (token) {

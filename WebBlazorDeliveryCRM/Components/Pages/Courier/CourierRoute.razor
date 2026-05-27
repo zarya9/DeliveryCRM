@@ -1,6 +1,7 @@
 @page "/courier/route"
 @layout CourierLayout
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Курьер")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = CourierAccessRoles.AuthorizeList)]
+@using WebBlazorDeliveryCRM.Services
 @using System.Globalization
 @using System.Security.Claims
 @using Microsoft.AspNetCore.Components.Authorization
@@ -21,14 +22,44 @@
 
 <PageTitle>Мой маршрут — Курьер</PageTitle>
 
+@if (_nearbyStop is not null)
+{
+    <div class="courier-action-toast" role="alertdialog" aria-live="assertive">
+        <div class="courier-action-toast__body">
+            <div class="courier-action-toast__text">
+                <span class="courier-action-toast__badge">Вы на месте</span>
+                <strong>Заказ №@_nearbyStop.OrderNumber</strong>
+                <span class="d-block small">@_nearbyStop.Title · ~@_nearbyStop.DistanceMeters.ToString("0") м</span>
+            </div>
+            <button type="button"
+                    class="btn btn-light btn-sm fw-semibold flex-shrink-0"
+                    disabled="@_nearbyBusy"
+                    @onclick="ConfirmNearbyAsync">
+                @(_nearbyBusy ? "…" : NearbyActionLabel)
+            </button>
+            <button type="button"
+                    class="courier-action-toast__close"
+                    aria-label="Закрыть"
+                    @onclick="DismissNearbyToastAsync">×</button>
+        </div>
+    </div>
+}
+
+@if (_wasdHintVisible && _nearbyStop is null)
+{
+    <div class="courier-wasd-toast" role="status" aria-live="polite">
+        <span>W A S D — перемещение по карте (~12 м за шаг)</span>
+        <button type="button" class="courier-wasd-toast__close" aria-label="Закрыть" @onclick="HideWasdHint">×</button>
+    </div>
+}
+
 <div class="dms-page-header">
     <h1 class="dms-page-title-with-icon">
         <HugeIcon Name="route-02" CssClass="dms-page-title-icon" />
         Мой маршрут
     </h1>
     <p class="subtitle">
-        Точки смены в порядке посещения. Можно изменить порядок оставшихся точек — маршрут пересчитается.
-        Отмечайте выполнение — статус заказа обновится автоматически.
+        
     </p>
 </div>
 
@@ -48,7 +79,6 @@ else
             Карта маршрута
         </h2>
         <p class="small text-muted mb-2">
-            Порядок точек — как в плане. <strong>Синяя точка</strong> — вы: перетащите её или <strong>кликните по карте</strong>, чтобы задать позицию (как на «Позиция на карте»).
             @if (!_shiftActive)
             {
                 <span class="text-warning"> Для сохранения на сервер начните смену.</span>
@@ -58,11 +88,17 @@ else
         {
             <p class="small mb-2 @(_positionError ? "text-warning" : "text-success")">@_positionStatus</p>
         }
-        <div class="courier-route-map-wrap">
+        @{
+            var mapNavStop = GetMapNavStop();
+            var mapNavCoordsOk = mapNavStop is { Latitude: { } mLat, Longitude: { } mLon } && (mLat != 0 || mLon != 0);
+            var mapNavMode = mapNavCoordsOk && _navigationActive;
+            var orderPointsOnMap = _mapData?.Waypoints.Count(w => w.OrderId > 0) ?? 0;
+        }
+        <div class="courier-route-map-wrap @(mapNavMode ? "courier-route-map-wrap--navigating" : null)">
             <div id="courier-route-map" class="courier-route-map-canvas"></div>
-            @if (_mapHint is not null)
+            @if (!_navigationActive && _mapHint is not null)
             {
-                <div class="courier-route-map-menu" role="complementary" aria-label="Следующая точка маршрута">
+                <div class="courier-route-map-menu courier-route-map-menu--hint" role="complementary" aria-label="Следующая точка маршрута">
                     <div class="courier-route-map-menu__title">Следующий заказ</div>
                     <div class="courier-route-map-menu__order">№@_mapHint.OrderNumber</div>
                     <div class="courier-route-map-menu__row">
@@ -88,113 +124,157 @@ else
                             </span>
                         </div>
                     }
-                    @if (GetNextStop() is { } hintStop && hintStop.Latitude is { } && hintStop.Longitude is { })
+                    @if (mapNavCoordsOk)
                     {
-                        <button type="button" class="btn btn-primary btn-sm w-100 mt-2"
+                        <button type="button"
+                                class="btn btn-primary btn-sm w-100 mt-2 d-inline-flex align-items-center justify-content-center gap-1"
                                 disabled="@_navLoading"
-                                @onclick="ShowNavigationOnMapAsync">
-                            @(_navLoading ? "…" : "Навигатор")
+                                @onclick="StartNavigationAsync">
+                            <HugeIcon Name="navigation-03" CssClass="dms-icon-sm" />
+                            <span>@(_navLoading ? "…" : "Приступить")</span>
                         </button>
                     }
                 </div>
             }
-            else if (_plan is not null && _plan.Stops.Count > 0)
+            else if (!_navigationActive && mapNavCoordsOk && mapNavStop is not null)
             {
-                <div class="courier-route-map-menu courier-route-map-menu--muted" role="status">
+                <div class="courier-route-map-menu courier-route-map-menu--hint" role="complementary">
+                    <div class="courier-route-map-menu__title">Следующая точка</div>
+                    <div class="courier-route-map-menu__order">№@mapNavStop.OrderNumber</div>
+                    <div class="small text-muted mb-2">@NavStopLabel(mapNavStop)</div>
+                    <button type="button"
+                            class="btn btn-primary btn-sm w-100 d-inline-flex align-items-center justify-content-center gap-1"
+                            disabled="@_navLoading"
+                            @onclick="StartNavigationAsync">
+                        <HugeIcon Name="navigation-03" CssClass="dms-icon-sm" />
+                        <span>@(_navLoading ? "…" : "Приступить")</span>
+                    </button>
+                </div>
+            }
+            else if (!mapNavCoordsOk && _plan is not null && _plan.Stops.Count > 0 && GetNextStop() is null && orderPointsOnMap == 0)
+            {
+                <div class="courier-route-map-menu courier-route-map-menu--muted courier-route-map-menu--compact" role="status">
                     <span class="small">Все точки маршрута выполнены.</span>
                 </div>
             }
-        </div>
-    </div>
-
-    <div class="dms-card mb-3 courier-navigator">
-        <div class="d-flex flex-wrap gap-2 justify-content-between align-items-start mb-2">
-            <h2 class="dms-card-title dms-card-title-with-icon mb-0">
-                <HugeIcon Name="navigation-03" CssClass="dms-card-title-icon" />
-                Навигатор
-            </h2>
-            <button type="button" class="btn btn-outline-secondary btn-sm"
-                    disabled="@(_navLoading || GetNextStop() is null)"
-                    @onclick="RefreshNavigationAsync">
-                @(_navLoading ? "…" : "Обновить маршрут")
-            </button>
-        </div>
-
-        @{
-            var navStop = GetNextStop();
-        }
-        @if (navStop is null)
-        {
-            <p class="text-muted small mb-0">Нет следующей точки — все остановки выполнены или маршрут пуст.</p>
-        }
-        else if (navStop.Latitude is not { } nLat || navStop.Longitude is not { } nLon || (nLat == 0 && nLon == 0))
-        {
-            <p class="text-warning small mb-0">У следующей точки нет координат — откройте внешнюю карту по адресу в списке ниже.</p>
-            <p class="small mb-0 mt-2"><strong>@NavStopLabel(navStop)</strong><br /><span class="text-muted">@(navStop.AddressLine ?? "—")</span></p>
-        }
-        else
-        {
-            <div class="courier-navigator__target mb-2">
-                <div class="courier-navigator__target-label">Следующая точка · заказ №@navStop.OrderNumber</div>
-                <div class="fw-semibold">@NavStopLabel(navStop)</div>
-                @if (!string.IsNullOrWhiteSpace(navStop.AddressLine))
-                {
-                    <div class="small text-muted">@navStop.AddressLine</div>
-                }
-            </div>
-
-            @if (_navLoading)
+            else if (!_navigationActive && !mapNavCoordsOk && !_loading && !HasActiveRoute)
             {
-                <p class="small text-muted mb-2">Строим маршрут по дорогам…</p>
+                <div class="courier-route-map-menu courier-route-map-menu--compact" role="complementary" aria-label="Текущие заказы">
+                    <div class="courier-route-map-menu__title">Текущие заказы</div>
+                    <p class="courier-route-map-menu__compact-text mb-0">План маршрута пока не построен.</p>
+                    <a class="btn btn-sm btn-outline-primary w-100 mt-1" href="/courier/orders">Мои заказы</a>
+                </div>
             }
-            else if (!string.IsNullOrEmpty(_navError))
+            else if (!_navigationActive && HasActiveRoute)
             {
-                <p class="small text-warning mb-2">@_navError</p>
-            }
-            else if (_navResult?.Ok == true)
-            {
-                <p class="courier-navigator__meta mb-2">
-                    <span><strong>@_navResult.DistanceKm.ToString("0.#", CultureInfo.InvariantCulture) км</strong></span>
-                    <span class="text-muted"> · ~@_navResult.DurationMinutes мин в пути</span>
-                </p>
-                @if (_navResult.Steps.Count > 0)
-                {
-                    <ol class="courier-navigator__steps mb-3">
-                        @foreach (var step in _navResult.Steps)
+                <div class="courier-route-map-menu courier-route-map-menu--compact" role="complementary" aria-label="Текущие заказы">
+                    <div class="courier-route-map-menu__title">Текущие заказы</div>
+                    @if (mapNavStop is not null)
+                    {
+                        <p class="courier-route-map-menu__compact-text mb-1">
+                            Следующая точка: №@mapNavStop.OrderNumber · @NavStopLabel(mapNavStop)
+                        </p>
+                        @if (mapNavCoordsOk)
                         {
-                            <li>
-                                <span>@step.Text</span>
-                                @if (step.DistanceM > 0)
-                                {
-                                    <span class="text-muted"> · @(step.DistanceM >= 1000 ? $"{step.DistanceM / 1000.0:0.#} км" : $"{step.DistanceM} м")</span>
-                                }
-                            </li>
+                            <button type="button"
+                                    class="btn btn-primary btn-sm w-100 mb-1"
+                                    disabled="@_navLoading"
+                                    @onclick="StartNavigationAsync">
+                                @(_navLoading ? "…" : "Навигатор (W A S D)")
+                            </button>
                         }
-                    </ol>
-                }
+                    }
+                    else if (orderPointsOnMap > 0)
+                    {
+                        <p class="courier-route-map-menu__compact-text mb-1">
+                            На карте @orderPointsOnMap @OrderPointsLabel(orderPointsOnMap). Перемещайте маркер курьера — маршрут обновится.
+                        </p>
+                    }
+                    else
+                    {
+                        <p class="courier-route-map-menu__compact-text mb-1">Все точки маршрута выполнены.</p>
+                    }
+                    <a class="btn btn-sm btn-outline-primary w-100" href="/courier/orders">Мои заказы</a>
+                </div>
             }
-
-            <div class="d-flex flex-wrap gap-2">
-                <button type="button" class="btn btn-primary btn-sm d-inline-flex align-items-center gap-1"
-                        disabled="@_navLoading"
-                        @onclick="ShowNavigationOnMapAsync">
-                    <HugeIcon Name="maps-location-01" CssClass="dms-icon-sm" />
-                    <span>На карте</span>
-                </button>
-                @if (_yandexNavUrl is not null)
-                {
-                    <a class="btn btn-outline-primary btn-sm" href="@_yandexNavUrl" target="_blank" rel="noopener">Яндекс</a>
-                }
-                @if (_googleNavUrl is not null)
-                {
-                    <a class="btn btn-outline-secondary btn-sm" href="@_googleNavUrl" target="_blank" rel="noopener">Google</a>
-                }
-                @if (_twoGisNavUrl is not null)
-                {
-                    <a class="btn btn-outline-secondary btn-sm" href="@_twoGisNavUrl" target="_blank" rel="noopener">2ГИС</a>
-                }
-            </div>
-        }
+            @if (mapNavMode && mapNavStop is not null)
+            {
+                <div class="courier-route-map-navigator" role="region" aria-label="Навигатор на карте">
+                    <div class="courier-route-map-navigator__head">
+                        <div class="courier-route-map-navigator__head-main">
+                            <HugeIcon Name="navigation-03" CssClass="courier-route-map-navigator__icon" />
+                            <div class="min-w-0">
+                                <div class="courier-route-map-navigator__label">Следующая точка · №@mapNavStop.OrderNumber</div>
+                                <div class="courier-route-map-navigator__title">@NavStopLabel(mapNavStop)</div>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-1 flex-shrink-0">
+                            <button type="button" class="btn btn-outline-secondary btn-sm"
+                                    disabled="@_navLoading"
+                                    title="Обновить маршрут"
+                                    aria-label="Обновить маршрут"
+                                    @onclick="RefreshNavigationAsync">
+                                @(_navLoading ? "…" : "↻")
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm"
+                                    title="Вернуться к карте маршрута"
+                                    aria-label="Вернуться к карте маршрута"
+                                    @onclick="StopNavigationAsync">
+                                Карта
+                            </button>
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(mapNavStop.AddressLine))
+                    {
+                        <div class="courier-route-map-navigator__address">@mapNavStop.AddressLine</div>
+                    }
+                    @if (_navLoading)
+                    {
+                        <p class="courier-route-map-navigator__status mb-0">Строим маршрут по дорогам…</p>
+                    }
+                    else if (!string.IsNullOrEmpty(_navError))
+                    {
+                        <p class="courier-route-map-navigator__status text-warning mb-0">@_navError</p>
+                    }
+                    else if (_navResult?.Ok == true)
+                    {
+                        <p class="courier-route-map-navigator__meta mb-0">
+                            <strong>@_navResult.DistanceKm.ToString("0.#", CultureInfo.InvariantCulture) км</strong>
+                            <span class="text-muted"> · ~@_navResult.DurationMinutes мин</span>
+                        </p>
+                        @if (_navResult.Steps.Count > 0)
+                        {
+                            <ol class="courier-route-map-navigator__steps mb-0">
+                                @foreach (var step in _navResult.Steps.Take(4))
+                                {
+                                    <li>
+                                        <span>@step.Text</span>
+                                        @if (step.DistanceM > 0)
+                                        {
+                                            <span class="text-muted"> · @(step.DistanceM >= 1000 ? $"{step.DistanceM / 1000.0:0.#} км" : $"{step.DistanceM} м")</span>
+                                        }
+                                    </li>
+                                }
+                            </ol>
+                        }
+                    }
+                    <div class="courier-route-map-navigator__actions">
+                        @if (_yandexNavUrl is not null)
+                        {
+                            <a class="btn btn-outline-primary btn-sm" href="@_yandexNavUrl" target="_blank" rel="noopener">Яндекс</a>
+                        }
+                        @if (_googleNavUrl is not null)
+                        {
+                            <a class="btn btn-outline-secondary btn-sm" href="@_googleNavUrl" target="_blank" rel="noopener">Google</a>
+                        }
+                        @if (_twoGisNavUrl is not null)
+                        {
+                            <a class="btn btn-outline-secondary btn-sm" href="@_twoGisNavUrl" target="_blank" rel="noopener">2ГИС</a>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
     </div>
 
     <div class="dms-card mb-3">
@@ -347,6 +427,38 @@ else
     private string? _googleNavUrl;
     private string? _twoGisNavUrl;
     private ShiftPlanStopDto? _navTargetStop;
+    private bool _navigationActive;
+    private bool _courierEditEnabled;
+    private bool _mapInitialFitDone;
+    private bool _navFirstDraw = true;
+    private bool _wasdHintVisible;
+    private CancellationTokenSource? _debounceRouteCts;
+    private CancellationTokenSource? _wasdHintCts;
+    private const double NearbyMaxMeters = 15;
+
+    private NearbyDeliveryStopDto? _nearbyStop;
+    private bool _nearbyBusy;
+
+    private bool NearbyIsPickup =>
+        string.Equals(_nearbyStop?.StopKind, "Pickup", StringComparison.OrdinalIgnoreCase);
+
+    private string NearbyActionLabel => NearbyIsPickup ? "Забрал" : "Доставлен";
+
+    private bool HasActiveRoute =>
+        _mapData?.Waypoints.Count >= 2
+        || (_plan?.Stops.Any(s => !IsStopDone(s)) == true);
+
+    protected override void OnInitialized()
+    {
+        Proximity.Changed += OnProximityChanged;
+        _nearbyStop = Proximity.PrimaryNearby;
+    }
+
+    private void OnProximityChanged()
+    {
+        _nearbyStop = Proximity.PrimaryNearby;
+        InvokeAsync(StateHasChanged);
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -410,11 +522,16 @@ else
     private async Task ReloadCoreAsync()
     {
         if (!_profileId.HasValue) return;
+        await StopNavigationAsync();
         _plan = await PlannerApi.GetCourierPlanAsync(_profileId.Value);
         _mapData = await CouriersApi.GetRouteMapAsync(_profileId.Value);
+        EnrichPlanStopsFromMap();
         _mapHint = BuildMapRouteHint(_plan);
+        _navTargetStop = GetNextStop();
+        await RefreshNearbyAsync();
         if (_mapReady)
             await RefreshMapAsync();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task InitMapAsync()
@@ -425,34 +542,101 @@ else
         _mapReady = true;
     }
 
-    private async Task RefreshMapAsync()
+    private async Task RefreshMapAsync(bool fitMap = true)
     {
-        if (!_mapReady) return;
-        await JS.InvokeVoidAsync("leafletMap.clearMarkers");
+        if (!_mapReady || _mapData is null) return;
+
+        await JS.InvokeVoidAsync("leafletMap.clearStaticMarkers");
         await JS.InvokeVoidAsync("leafletMap.clearRoute");
-        if (_mapData is null) return;
 
-        // Позиция курьера — только синяя точка (enableCourierPositionEdit), без дублирующей иконки машины.
-        var markers = _mapData.Markers
-            .Where(m => !string.Equals(m.Kind, "courier", StringComparison.OrdinalIgnoreCase))
-            .Select(m => new { lat = m.Lat, lon = m.Lon, title = m.Title, kind = m.Kind })
-            .ToList<object>();
-        var waypoints = _mapData.Waypoints
-            .Select(w => new { lat = w.Lat, lon = w.Lon, title = w.Title })
-            .ToList<object>();
+        var orderMarkers = BuildOrderMarkers();
+        var shouldFit = fitMap && !_mapInitialFitDone;
+        if (orderMarkers.Count > 0)
+            await JS.InvokeVoidAsync("leafletMap.addStaticMarkers", orderMarkers, shouldFit);
 
-        if (markers.Count > 0)
-            await JS.InvokeVoidAsync("leafletMap.setMarkers", markers);
-        if (waypoints.Count >= 2)
-            await JS.InvokeVoidAsync("leafletMap.setRouteWaypoints", waypoints);
+        var routePoints = BuildLiveRouteWaypoints();
+        if (routePoints.Count >= 2)
+            await JS.InvokeVoidAsync("leafletMap.setRouteWaypoints", routePoints, false, shouldFit);
 
-        await EnablePositionEditOnMapAsync();
-        if (_navTargetStop is not null)
-            await DrawNavigationForStopAsync(_navTargetStop);
+        if (shouldFit && (orderMarkers.Count > 0 || routePoints.Count >= 2))
+            _mapInitialFitDone = true;
+
+        if (_courierEditEnabled)
+        {
+            await JS.InvokeVoidAsync("leafletMap.setEditableCourierPosition", _positionLat, _positionLon);
+        }
+        else
+        {
+            await EnablePositionEditOnMapAsync();
+            _courierEditEnabled = true;
+        }
+
+        if (!_navigationActive)
+            await ClearNavigationOnMapAsync();
     }
 
-    private ShiftPlanStopDto? GetNextStop() =>
-        _plan?.Stops.OrderBy(s => s.Sequence).FirstOrDefault(s => !IsStopDone(s));
+    private Task RefreshMapRouteOnlyAsync() => RefreshMapAsync(fitMap: false);
+
+    private async Task ClearNavigationOnMapAsync()
+    {
+        if (!_mapReady) return;
+        try
+        {
+            await JS.InvokeVoidAsync("leafletMap.clearNavigationRoute");
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private async Task StartNavigationAsync()
+    {
+        var stop = GetMapNavStop();
+        if (stop is null
+            || stop.Latitude is not { } lat
+            || stop.Longitude is not { } lon
+            || (lat == 0 && lon == 0))
+        {
+            Notify.ShowWarning("Нет координат следующей точки. Обновите маршрут или обратитесь к логисту.");
+            return;
+        }
+
+        _navigationActive = true;
+        _navTargetStop = stop;
+        _navFirstDraw = true;
+        ShowWasdHint();
+        UpdateExternalNavUrls(stop);
+        await EnableKeyboardDriveAsync();
+        await RefreshMapRouteOnlyAsync();
+        await DrawNavigationForStopAsync(stop);
+        await RefreshNearbyAsync(silent: true);
+    }
+
+    private async Task StopNavigationAsync()
+    {
+        await DisableKeyboardDriveAsync();
+        _navigationActive = false;
+        _navFirstDraw = true;
+        _navResult = null;
+        _navError = null;
+        _yandexNavUrl = _googleNavUrl = _twoGisNavUrl = null;
+        await ClearNavigationOnMapAsync();
+        if (_mapReady)
+            await RefreshMapRouteOnlyAsync();
+    }
+
+    private ShiftPlanStopDto? GetMapNavStop() =>
+        _navTargetStop ?? GetNextStop() ?? BuildStopFromNextMapWaypoint();
+
+    private ShiftPlanStopDto? GetNextStop()
+    {
+        if (_plan?.Stops is not { Count: > 0 })
+            return null;
+
+        var pending = _plan.Stops.OrderBy(s => s.Sequence).Where(s => !IsStopDone(s)).ToList();
+        return pending.FirstOrDefault(IsPickupStop) ?? pending.FirstOrDefault();
+    }
 
     private static string NavStopLabel(ShiftPlanStopDto stop) =>
         string.IsNullOrWhiteSpace(stop.Title) ? StopKindLabel(stop.StopKind) : stop.Title!.Trim();
@@ -472,39 +656,34 @@ else
 
     private async Task RefreshNavigationAsync()
     {
-        var stop = _navTargetStop ?? GetNextStop();
+        if (!_navigationActive)
+            return;
+
+        var stop = GetMapNavStop();
         if (stop is null)
         {
-            _navResult = null;
-            _navError = null;
-            _navTargetStop = null;
-            _yandexNavUrl = _googleNavUrl = _twoGisNavUrl = null;
-            if (_mapReady)
-            {
-                try { await JS.InvokeVoidAsync("leafletMap.clearNavigationRoute"); }
-                catch { /* ignore */ }
-            }
+            await StopNavigationAsync();
             return;
         }
 
         _navTargetStop = stop;
         UpdateExternalNavUrls(stop);
+        await RefreshMapRouteOnlyAsync();
         await DrawNavigationForStopAsync(stop);
     }
 
     private async Task NavigateToStopAsync(ShiftPlanStopDto stop)
     {
         _navTargetStop = stop;
+        _navigationActive = true;
+        _navFirstDraw = true;
+        ShowWasdHint();
         UpdateExternalNavUrls(stop);
+        await EnableKeyboardDriveAsync();
+        await RefreshMapRouteOnlyAsync();
         await DrawNavigationForStopAsync(stop);
+        await RefreshNearbyAsync(silent: true);
         StateHasChanged();
-    }
-
-    private async Task ShowNavigationOnMapAsync()
-    {
-        var stop = _navTargetStop ?? GetNextStop();
-        if (stop is null) return;
-        await DrawNavigationForStopAsync(stop);
     }
 
     private async Task DrawNavigationForStopAsync(ShiftPlanStopDto stop)
@@ -517,12 +696,16 @@ else
         StateHasChanged();
         try
         {
+            var pan = _navFirstDraw;
             var result = await JS.InvokeAsync<CourierNavRouteResult?>(
                 "leafletMap.fetchNavigationToStop",
                 _positionLat,
                 _positionLon,
                 tLat,
-                tLon);
+                tLon,
+                pan);
+            if (pan)
+                _navFirstDraw = false;
             _navResult = result;
             if (result is null || !result.Ok)
                 _navError = result?.Message ?? "Не удалось построить маршрут.";
@@ -563,9 +746,38 @@ else
     {
         _positionLat = (double)ClampLat((decimal)lat);
         _positionLon = (double)ClampLon((decimal)lng);
+        HideWasdHint();
         _ = DebouncedPushPositionAsync();
-        _ = RefreshNavigationAsync();
+        _ = DebouncedRefreshMapRouteAsync();
+        _ = RefreshNearbyFromPositionAsync();
         return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task DebouncedRefreshMapRouteAsync()
+    {
+        _debounceRouteCts?.Cancel();
+        _debounceRouteCts?.Dispose();
+        _debounceRouteCts = new CancellationTokenSource();
+        var ct = _debounceRouteCts.Token;
+        try
+        {
+            await Task.Delay(320, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        await RefreshMapRouteOnlyAsync();
+        if (_navigationActive)
+        {
+            var stop = GetMapNavStop();
+            if (stop is not null)
+                await DrawNavigationForStopAsync(stop);
+        }
+
+        await RefreshNearbyAsync(silent: true);
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task DebouncedPushPositionAsync()
@@ -605,8 +817,9 @@ else
                 (decimal)_positionLon);
             if (ok)
             {
-                if (_isOnline)
-                    Proximity.SetNearby(nearby);
+                var merged = MergeNearbyWithLocal(nearby);
+                Proximity.SetNearby(merged);
+                _nearbyStop = Proximity.PrimaryNearby;
                 _positionStatus = _isOnline
                     ? "Позиция отправлена."
                     : "Сохранено. Включите «В сеть» на странице смены для мониторинга.";
@@ -632,10 +845,319 @@ else
 
     private static decimal ClampLon(decimal v) => v < -180 ? -180 : v > 180 ? 180 : v;
 
+    private Task RefreshNearbyFromPositionAsync() => RefreshNearbyAsync(silent: true);
+
+    private async Task RefreshNearbyAsync(bool silent = false)
+    {
+        if (!_profileId.HasValue) return;
+        try
+        {
+            var apiNearby = await CouriersApi.GetNearbyStopsAsync(
+                _profileId.Value,
+                (decimal)_positionLat,
+                (decimal)_positionLon);
+            var merged = MergeNearbyWithLocal(apiNearby);
+            Proximity.SetNearby(merged);
+            _nearbyStop = Proximity.PrimaryNearby;
+            if (!silent)
+                await InvokeAsync(StateHasChanged);
+        }
+        catch
+        {
+            ApplyLocalProximityOnly();
+            if (!silent)
+                await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void ApplyLocalProximityOnly()
+    {
+        var local = DetectLocalNearbyStop();
+        if (local is null)
+        {
+            if (_nearbyStop is not null)
+            {
+                Proximity.Clear();
+                _nearbyStop = null;
+            }
+            return;
+        }
+
+        Proximity.SetNearby(new[] { local });
+        _nearbyStop = local;
+    }
+
+    private IReadOnlyList<NearbyDeliveryStopDto> MergeNearbyWithLocal(IReadOnlyList<NearbyDeliveryStopDto> api)
+    {
+        var list = api?.ToList() ?? new List<NearbyDeliveryStopDto>();
+        var local = DetectLocalNearbyStop();
+        if (local is null)
+            return list;
+
+        var idx = list.FindIndex(x =>
+            x.OrderId == local.OrderId &&
+            string.Equals(x.StopKind, local.StopKind, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0)
+        {
+            if (local.DistanceMeters <= list[idx].DistanceMeters)
+                list[idx] = local;
+        }
+        else
+        {
+            list.Add(local);
+        }
+
+        return list
+            .OrderBy(s => s.DistanceMeters)
+            .ThenBy(s => s.OrderNumber)
+            .ToList();
+    }
+
+    private NearbyDeliveryStopDto? DetectLocalNearbyStop()
+    {
+        NearbyDeliveryStopDto? best = null;
+        foreach (var stop in GetPendingStopsWithCoords())
+            TryConsiderLocalNearby(stop, ref best);
+
+        foreach (var w in GetOrderWaypointsOrdered())
+        {
+            var distM = HaversineMeters(_positionLat, _positionLon, w.Lat, w.Lon);
+            if (distM > NearbyMaxMeters)
+                continue;
+
+            var pickup = IsPickupWaypoint(w);
+            var candidate = new NearbyDeliveryStopDto
+            {
+                AssignmentId = 0,
+                OrderId = w.OrderId,
+                OrderNumber = ExtractOrderNumberFromTitle(w.Title),
+                Title = w.Title,
+                DistanceMeters = Math.Round(distM, 0),
+                StopKind = pickup ? "Pickup" : "Delivery"
+            };
+
+            var planStop = _plan?.Stops.FirstOrDefault(s =>
+                s.OrderId == w.OrderId && !IsStopDone(s) && IsPickupStop(s) == pickup);
+            if (planStop is not null)
+            {
+                candidate.AssignmentId = planStop.AssignmentId;
+                candidate.OrderNumber = planStop.OrderNumber;
+                candidate.AddressLine = planStop.AddressLine;
+            }
+
+            if (best is null || candidate.DistanceMeters < best.DistanceMeters)
+                best = candidate;
+        }
+
+        return best;
+    }
+
+    private void TryConsiderLocalNearby(ShiftPlanStopDto stop, ref NearbyDeliveryStopDto? best)
+    {
+        if (stop.Latitude is not { } lat || stop.Longitude is not { } lon)
+            return;
+
+        var distM = HaversineMeters(_positionLat, _positionLon, lat, lon);
+        if (distM > NearbyMaxMeters)
+            return;
+
+        var pickup = IsPickupStop(stop);
+        var candidate = new NearbyDeliveryStopDto
+        {
+            AssignmentId = stop.AssignmentId,
+            OrderId = stop.OrderId,
+            OrderNumber = stop.OrderNumber,
+            Title = string.IsNullOrWhiteSpace(stop.Title) ? StopKindLabel(stop.StopKind) : stop.Title.Trim(),
+            AddressLine = stop.AddressLine,
+            DistanceMeters = Math.Round(distM, 0),
+            StopKind = pickup ? "Pickup" : "Delivery"
+        };
+
+        if (best is null || candidate.DistanceMeters < best.DistanceMeters)
+            best = candidate;
+    }
+
+    private IEnumerable<ShiftPlanStopDto> GetPendingStopsWithCoords()
+    {
+        if (_plan?.Stops is { Count: > 0 })
+        {
+            foreach (var stop in _plan.Stops.OrderBy(s => s.Sequence).Where(s => !IsStopDone(s)))
+            {
+                if (stop.Latitude is { } lat && stop.Longitude is { } lon && (lat != 0 || lon != 0))
+                    yield return stop;
+            }
+            yield break;
+        }
+
+        var fromMap = GetMapNavStop();
+        if (fromMap is not null)
+            yield return fromMap;
+    }
+
+    private static double HaversineMeters(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double r = 6371000;
+        var dLat = (lat2 - lat1) * Math.PI / 180;
+        var dLon = (lon2 - lon1) * Math.PI / 180;
+        var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                Math.Cos(lat1 * Math.PI / 180) * Math.Cos(lat2 * Math.PI / 180) *
+                Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+        return r * c;
+    }
+
+    private void ShowWasdHint()
+    {
+        _wasdHintVisible = true;
+        _wasdHintCts?.Cancel();
+        _wasdHintCts?.Dispose();
+        _wasdHintCts = new CancellationTokenSource();
+        _ = HideWasdHintAfterDelayAsync(_wasdHintCts.Token);
+    }
+
+    private async Task HideWasdHintAfterDelayAsync(CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(6000, ct);
+            _wasdHintVisible = false;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException)
+        {
+            // ignore
+        }
+    }
+
+    private void HideWasdHint()
+    {
+        if (!_wasdHintVisible)
+            return;
+        _wasdHintCts?.Cancel();
+        _wasdHintVisible = false;
+    }
+
+    private Task DismissNearbyToastAsync()
+    {
+        Proximity.Clear();
+        _nearbyStop = null;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ConfirmNearbyAsync()
+    {
+        if (_nearbyStop is null || !_profileId.HasValue)
+            return;
+
+        _nearbyBusy = true;
+        try
+        {
+            if (_nearbyStop.AssignmentId > 0)
+            {
+                var result = await OrdersApi.CompleteRouteStopAsync(_nearbyStop.AssignmentId, _profileId);
+                if (result == null)
+                {
+                    Notify.ShowError("Не удалось обновить статус.");
+                    return;
+                }
+
+                Notify.ShowSuccess(result.OrderDelivered
+                    ? $"Заказ №{result.OrderNumber} доставлен."
+                    : NearbyIsPickup
+                        ? $"Заказ №{result.OrderNumber} забран."
+                        : $"Точка выполнена.");
+                await AfterNearbyStopConfirmedAsync();
+            }
+            else
+            {
+                var statuses = await OrdersApi.GetOrderStatusesAsync();
+                if (NearbyIsPickup)
+                {
+                    var id = statuses.FirstOrDefault(s =>
+                        string.Equals(s.Name, "В пути", StringComparison.OrdinalIgnoreCase))?.Id;
+                    if (id is not > 0 || !await OrdersApi.ChangeStatusAsync(_nearbyStop.OrderId, id.Value))
+                    {
+                        Notify.ShowError("Не удалось отметить забор.");
+                        return;
+                    }
+                    Notify.ShowSuccess($"Заказ №{_nearbyStop.OrderNumber} забран.");
+                }
+                else
+                {
+                    var id = statuses.FirstOrDefault(s =>
+                        string.Equals(s.Name, "Доставлен", StringComparison.OrdinalIgnoreCase))?.Id;
+                    if (id is not > 0 || !await OrdersApi.ChangeStatusAsync(_nearbyStop.OrderId, id.Value))
+                    {
+                        Notify.ShowError("Не удалось отметить доставку.");
+                        return;
+                    }
+                    Notify.ShowSuccess($"Заказ №{_nearbyStop.OrderNumber} доставлен.");
+                }
+                await AfterNearbyStopConfirmedAsync();
+                return;
+            }
+        }
+        finally
+        {
+            _nearbyBusy = false;
+        }
+    }
+
+    private async Task AfterNearbyStopConfirmedAsync()
+    {
+        MarkNearbyStopCompletedLocally();
+        Proximity.Clear();
+        _nearbyStop = null;
+        _navigationActive = false;
+        _navTargetStop = null;
+        await ClearNavigationOnMapAsync();
+
+        if (_mapReady)
+            await RefreshMapAsync(fitMap: false);
+
+        await ReloadCoreAsync();
+    }
+
+    private void MarkNearbyStopCompletedLocally()
+    {
+        if (_plan?.Stops is not { Count: > 0 } || _nearbyStop is null)
+            return;
+
+        foreach (var stop in _plan.Stops)
+        {
+            if (_nearbyStop.AssignmentId > 0 && stop.AssignmentId == _nearbyStop.AssignmentId)
+            {
+                stop.Status = "Done";
+                continue;
+            }
+
+            if (_nearbyStop.AssignmentId <= 0
+                && stop.OrderId == _nearbyStop.OrderId
+                && IsPickupStop(stop) == NearbyIsPickup)
+            {
+                stop.Status = "Done";
+            }
+        }
+
+        if (_mapData?.Waypoints is { Count: > 0 } && _nearbyStop is not null)
+        {
+            _mapData.Waypoints = _mapData.Waypoints
+                .Where(w => IsCourierWaypoint(w)
+                            || !(_nearbyStop.OrderId > 0 && w.OrderId == _nearbyStop.OrderId
+                                 && IsPickupWaypoint(w) == NearbyIsPickup))
+                .ToList();
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
+        Proximity.Changed -= OnProximityChanged;
         _debouncePushCts?.Cancel();
         _debouncePushCts?.Dispose();
+        _debounceRouteCts?.Cancel();
+        _debounceRouteCts?.Dispose();
+        _wasdHintCts?.Cancel();
+        _wasdHintCts?.Dispose();
         if (_dotNetRef != null)
         {
             try { _dotNetRef.Dispose(); }
@@ -647,6 +1169,7 @@ else
         try
         {
             await JS.InvokeVoidAsync("leafletMap.clearNavigationRoute");
+            await JS.InvokeVoidAsync("leafletMap.disableKeyboardCourierDrive");
             await JS.InvokeVoidAsync("leafletMap.disableCourierPositionEdit");
             await JS.InvokeVoidAsync("leafletMap.dispose");
         }
@@ -681,16 +1204,18 @@ else
         _reorderBusy = true;
         try
         {
-            var updated = await PlannerApi.ApplyCourierRouteAsync(_profileId.Value, stops);
+            var (updated, applyError) = await PlannerApi.ApplyCourierRouteAsync(_profileId.Value, stops);
             if (updated is null)
             {
-                Notify.ShowError("Не удалось обновить маршрут. Проверьте смену и координаты точек.");
+                Notify.ShowError(applyError ?? "Не удалось обновить маршрут. Проверьте смену и координаты точек.");
                 return;
             }
 
             Notify.ShowSuccess("Маршрут перестроен.");
+            await StopNavigationAsync();
             _plan = updated;
             _mapData = await CouriersApi.GetRouteMapAsync(_profileId.Value);
+            EnrichPlanStopsFromMap();
             _mapHint = BuildMapRouteHint(_plan);
             if (_mapReady)
                 await RefreshMapAsync();
@@ -741,11 +1266,16 @@ else
             }
 
             var msg = result.OrderDelivered
-                ? $"Заказ №{result.OrderNumber} доставлен."
+                ? result.DeliveryWindowMismatch
+                    ? $"Заказ №{result.OrderNumber} доставлен. {result.DeliveryWindowWarning}"
+                    : $"Заказ №{result.OrderNumber} доставлен."
                 : result.HubHandoffTriggered
                     ? $"Точка выполнена. Заказ №{result.OrderNumber} передан на следующий этап."
                     : $"Точка выполнена. Статус: {result.NewStatusName ?? "обновлён"}.";
-            Notify.ShowSuccess(msg);
+            if (result.DeliveryWindowMismatch)
+                Notify.ShowWarning(msg);
+            else
+                Notify.ShowSuccess(msg);
             await ReloadCoreAsync();
         }
         finally
@@ -836,6 +1366,256 @@ else
             return true;
         var title = stop.Title ?? "";
         return title.Contains("Забор", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void EnrichPlanStopsFromMap()
+    {
+        if (_plan?.Stops is not { Count: > 0 } || _mapData?.Waypoints is not { Count: > 0 })
+            return;
+
+        var wps = _mapData.Waypoints
+            .Where(w => w.OrderId > 0 && (w.Lat != 0 || w.Lon != 0))
+            .ToList();
+
+        foreach (var stop in _plan.Stops)
+        {
+            if (stop.Latitude is { } lat && stop.Longitude is { } lon && (lat != 0 || lon != 0))
+                continue;
+
+            var pickup = IsPickupStop(stop);
+            var match = wps.FirstOrDefault(w =>
+                    w.OrderId == stop.OrderId &&
+                    pickup == IsPickupWaypoint(w))
+                ?? wps.FirstOrDefault(w => w.OrderId == stop.OrderId);
+
+            if (match is null)
+                continue;
+
+            stop.Latitude = match.Lat;
+            stop.Longitude = match.Lon;
+        }
+    }
+
+    private static bool IsPickupWaypoint(CourierRouteMapWaypointDto w)
+    {
+        var t = w.Title ?? "";
+        return t.Contains("забор", StringComparison.OrdinalIgnoreCase)
+               || t.Contains("отправит", StringComparison.OrdinalIgnoreCase)
+               || t.Contains("pickup", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsDeliveryWaypoint(CourierRouteMapWaypointDto w)
+    {
+        var t = w.Title ?? "";
+        return t.Contains("доставк", StringComparison.OrdinalIgnoreCase)
+               || t.Contains("delivery", StringComparison.OrdinalIgnoreCase)
+               || t.Contains("получат", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsCourierWaypoint(CourierRouteMapWaypointDto w)
+    {
+        if (w.OrderId <= 0)
+            return true;
+        var t = w.Title ?? "";
+        return t.Equals("Курьер", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private List<object> BuildOrderMarkers()
+    {
+        var list = new List<object>();
+        if (_mapData is null)
+            return list;
+
+        foreach (var m in _mapData.Markers)
+        {
+            if (string.Equals(m.Kind, "courier", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (m.Lat == 0 && m.Lon == 0)
+                continue;
+            list.Add(new { lat = m.Lat, lon = m.Lon, title = m.Title, kind = m.Kind });
+        }
+
+        foreach (var w in GetOrderWaypointsOrdered())
+        {
+            var kind = IsPickupWaypoint(w) ? "pickup" : IsDeliveryWaypoint(w) ? "delivery" : "hub";
+            list.Add(new { lat = w.Lat, lon = w.Lon, title = w.Title, kind });
+        }
+
+        return list;
+    }
+
+    private List<object> BuildLiveRouteWaypoints()
+    {
+        var result = new List<object>();
+        if (Math.Abs(_positionLat) < 0.0001 && Math.Abs(_positionLon) < 0.0001)
+            return result;
+
+        result.Add(new { lat = _positionLat, lon = _positionLon, title = "Курьер" });
+
+        var orderWps = GetOrderWaypointsOrdered();
+        if (orderWps.Count == 0)
+            return result.Count >= 2 ? result : new List<object>();
+
+        var trimFrom = GetRouteTrimStartIndex(orderWps);
+        foreach (var w in orderWps.Skip(trimFrom))
+            result.Add(new { lat = w.Lat, lon = w.Lon, title = w.Title });
+
+        return result.Count >= 2 ? result : new List<object>();
+    }
+
+    private List<CourierRouteMapWaypointDto> GetOrderWaypointsOrdered()
+    {
+        if (_mapData?.Waypoints is not { Count: > 0 })
+            return new List<CourierRouteMapWaypointDto>();
+
+        var all = _mapData.Waypoints
+            .Where(w => !IsCourierWaypoint(w) && (w.Lat != 0 || w.Lon != 0))
+            .OrderBy(w => w.Sequence)
+            .ThenBy(w => w.OrderId)
+            .ToList();
+
+        return FilterToPendingWaypoints(all);
+    }
+
+    private List<CourierRouteMapWaypointDto> FilterToPendingWaypoints(List<CourierRouteMapWaypointDto> waypoints)
+    {
+        if (_plan?.Stops is not { Count: > 0 })
+            return waypoints;
+
+        var pendingKeys = _plan.Stops
+            .Where(s => !IsStopDone(s))
+            .Select(s => (s.OrderId, Pickup: IsPickupStop(s)))
+            .ToHashSet();
+
+        if (pendingKeys.Count == 0)
+            return new List<CourierRouteMapWaypointDto>();
+
+        return waypoints
+            .Where(w => pendingKeys.Contains((w.OrderId, IsPickupWaypoint(w))))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Индекс первой точки, с которой строим линию: текущая цель навигатора или следующая невыполненная.
+    /// Пройденный участник (от точки А до курьера) не рисуется.
+    /// </summary>
+    private int GetRouteTrimStartIndex(IReadOnlyList<CourierRouteMapWaypointDto> orderWps)
+    {
+        var target = _navigationActive ? _navTargetStop : GetNextStop();
+        if (target is null)
+            return 0;
+
+        if (target.Latitude is not { } lat || target.Longitude is not { } lon)
+            return 0;
+
+        var idx = FindWaypointIndex(orderWps, target.OrderId, lat, lon, IsPickupStop(target));
+        return idx >= 0 ? idx : 0;
+    }
+
+    private static int FindWaypointIndex(
+        IReadOnlyList<CourierRouteMapWaypointDto> wps,
+        int orderId,
+        double lat,
+        double lon,
+        bool pickup)
+    {
+        const double eps = 0.0002;
+        for (var i = 0; i < wps.Count; i++)
+        {
+            var w = wps[i];
+            if (orderId > 0 && w.OrderId != orderId)
+                continue;
+            if (pickup != IsPickupWaypoint(w))
+                continue;
+            if (Math.Abs(w.Lat - lat) < eps && Math.Abs(w.Lon - lon) < eps)
+                return i;
+        }
+
+        for (var i = 0; i < wps.Count; i++)
+        {
+            var w = wps[i];
+            if (orderId > 0 && w.OrderId == orderId && IsPickupWaypoint(w) == pickup)
+                return i;
+        }
+
+        return -1;
+    }
+
+    private ShiftPlanStopDto? BuildStopFromNextMapWaypoint()
+    {
+        var orderWps = GetOrderWaypointsOrdered();
+        if (orderWps.Count == 0)
+            return null;
+
+        var idx = GetRouteTrimStartIndex(orderWps);
+        if (idx < 0 || idx >= orderWps.Count)
+            return null;
+
+        var w = orderWps[idx];
+        var planStop = _plan?.Stops
+            .OrderBy(s => s.Sequence)
+            .FirstOrDefault(s =>
+                !IsStopDone(s)
+                && s.OrderId == w.OrderId
+                && IsPickupStop(s) == IsPickupWaypoint(w));
+        if (planStop is not null)
+            return planStop;
+
+        return new ShiftPlanStopDto
+        {
+            OrderId = w.OrderId,
+            OrderNumber = ExtractOrderNumberFromTitle(w.Title),
+            Title = w.Title,
+            Latitude = w.Lat,
+            Longitude = w.Lon,
+            StopKind = IsPickupWaypoint(w) ? "SenderPickup" : "RecipientDelivery"
+        };
+    }
+
+    private static int ExtractOrderNumberFromTitle(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return 0;
+        var hash = title.IndexOf('#');
+        if (hash < 0)
+            return 0;
+        var end = hash + 1;
+        while (end < title.Length && char.IsDigit(title[end]))
+            end++;
+        return int.TryParse(title.AsSpan(hash + 1, end - hash - 1), out var n) ? n : 0;
+    }
+
+    private static string OrderPointsLabel(int count) => count switch
+    {
+        1 => "точка заказа",
+        >= 2 and <= 4 => "точки заказа",
+        _ => "точек заказа"
+    };
+
+    private async Task EnableKeyboardDriveAsync()
+    {
+        if (!_mapReady) return;
+        try
+        {
+            await JS.InvokeVoidAsync("leafletMap.enableKeyboardCourierDrive");
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private async Task DisableKeyboardDriveAsync()
+    {
+        if (!_mapReady) return;
+        try
+        {
+            await JS.InvokeVoidAsync("leafletMap.disableKeyboardCourierDrive");
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     private sealed record MapRouteHint(

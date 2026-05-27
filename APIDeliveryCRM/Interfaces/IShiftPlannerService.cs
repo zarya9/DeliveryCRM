@@ -16,7 +16,7 @@ public interface IShiftPlannerService
 
     Task<ShiftPlanSummaryDto?> GetCourierPlanAsync(int courierProfileId, CancellationToken cancellationToken = default);
 
-    Task<ShiftPlanSummaryDto?> ApplyCourierRouteAsync(
+    Task<(ShiftPlanSummaryDto? Plan, string? Error)> ApplyCourierRouteAsync(
         int companyId,
         int courierProfileId,
         IReadOnlyList<ApplyCourierRouteStopRequest> stops,

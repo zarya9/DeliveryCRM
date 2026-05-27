@@ -13,8 +13,12 @@
         <HugeIcon Name="dashboard-square-01" CssClass="icon" /> <span class="sidebar-label">Распределение</span>
     </NavLink>
     <NavLink href="/logistician/chat" class="@(ChatUnreadState.HasAnyChatUnread ? "sidebar-link sidebar-nav-chat-unread" : "sidebar-link")">
-        <span class="sidebar-chat-icon-slot">
+        <span class="sidebar-chat-icon-slot sidebar-chat-icon-slot--with-badge">
             <HugeIcon Name="message-01" CssClass="icon" />
+            @if (ChatUnreadState.TotalChatUnreadCount > 0)
+            {
+                <span class="sidebar-chat-badge" aria-label="Непрочитанные сообщения">@((ChatUnreadState.TotalChatUnreadCount > 99) ? "99+" : ChatUnreadState.TotalChatUnreadCount.ToString())</span>
+            }
         </span>
         <span class="sidebar-label">Чат</span>
     </NavLink>

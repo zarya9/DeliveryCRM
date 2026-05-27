@@ -24,14 +24,15 @@
     <h2 class="dms-card-title">Последние заказы</h2>
     @if (_orders != null && _orders.Count > 0)
     {
-        <table class="table dms-data-table">
+        <div class="table-responsive">
+        <table class="table align-middle orders-table dms-data-table">
             <thead>
                 <tr>
-                    <th>№</th>
-                    <th>Название</th>
-                    <th>Статус</th>
-                    <th>Курьер</th>
-                    <th>Дата</th>
+                    <DmsTableThIcon Icon="invoice-01">№</DmsTableThIcon>
+                    <DmsTableThIcon Icon="package-moving">Название</DmsTableThIcon>
+                    <DmsTableThIcon Icon="activity-01">Статус</DmsTableThIcon>
+                    <DmsTableThIcon Icon="delivery-truck-01">Курьер</DmsTableThIcon>
+                    <DmsTableThIcon Icon="calendar-03">Дата</DmsTableThIcon>
                 </tr>
             </thead>
             <tbody>
@@ -47,7 +48,8 @@
                 }
             </tbody>
         </table>
-        <a href="/manager/orders" class="btn btn-outline-primary">Все заказы</a>
+        </div>
+        <a href="/manager/orders" class="btn btn-outline-primary mt-2">Все заказы</a>
     }
     else
     {

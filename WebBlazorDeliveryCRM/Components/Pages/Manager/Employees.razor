@@ -114,49 +114,58 @@
 
 @if (_showCreateModal)
 {
-    <div class="employee-modal-backdrop" @onclick="CloseCreateEmployeeModal">
-        <div class="employee-modal" @onclick:stopPropagation="true">
-            <div class="d-flex justify-content-between align-items-start mb-3">
-                <h2 class="h5 mb-0">Новый сотрудник</h2>
+    <div class="employee-modal-backdrop">
+        <div class="employee-modal employee-modal--create" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
+                <div>
+                    <h2 class="h5 mb-1 d-inline-flex align-items-center gap-2">
+                        <HugeIcon Name="user-group" CssClass="employee-create-title-icon" />
+                        Новый сотрудник
+                    </h2>
+                    <p class="small text-muted mb-0">Учётная запись и роль в компании</p>
+                </div>
                 <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseCreateEmployeeModal"></button>
             </div>
 
-            <div class="row g-3">
+            <div class="employee-create-form row g-3">
                 <div class="col-md-4">
-                    <label class="form-label">Фамилия</label>
+                    <label class="form-label hub-form-label"><HugeIcon Name="user-03" CssClass="hub-form-label-icon" />Фамилия</label>
                     <input class="form-control"
                            maxlength="60"
+                           placeholder="Иванов"
                            @bind="FNameInput"
                            @bind:event="oninput" />
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label">Имя</label>
+                    <label class="form-label hub-form-label"><HugeIcon Name="user-03" CssClass="hub-form-label-icon" />Имя</label>
                     <input class="form-control"
                            maxlength="60"
+                           placeholder="Иван"
                            @bind="NameInput"
                            @bind:event="oninput" />
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label">Отчество</label>
+                    <label class="form-label hub-form-label"><HugeIcon Name="user-03" CssClass="hub-form-label-icon" />Отчество</label>
                     <input class="form-control"
                            maxlength="60"
+                           placeholder="Иванович"
                            @bind="PatronymicInput"
                            @bind:event="oninput" />
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label">Дата рождения</label>
+                    <label class="form-label hub-form-label"><HugeIcon Name="calendar-03" CssClass="hub-form-label-icon" />Дата рождения</label>
                     <input type="date" class="form-control" @bind="_birthDate" max="@AdultBirthDateMax.ToString("yyyy-MM-dd")" />
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label">Почта (логин)</label>
-                    <input type="email" class="form-control" @bind="_email" />
+                    <label class="form-label hub-form-label"><HugeIcon Name="mail-01" CssClass="hub-form-label-icon" />Почта (логин)</label>
+                    <input type="email" class="form-control" placeholder="name@company.ru" @bind="_email" />
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label">Пароль</label>
-                    <input type="password" class="form-control" @bind="_password" />
+                    <label class="form-label hub-form-label"><HugeIcon Name="settings-01" CssClass="hub-form-label-icon" />Пароль</label>
+                    <input type="password" class="form-control" placeholder="Не менее 6 символов" @bind="_password" />
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label">Должность</label>
+                    <label class="form-label hub-form-label"><HugeIcon Name="briefcase-01" CssClass="hub-form-label-icon" />Должность</label>
                     <select class="form-select" @bind="_selectedRoleId">
                         <option value="0">— выберите должность —</option>
                         @foreach (var r in RolesForEmployees)
@@ -192,7 +201,7 @@
 
 @if (_selectedEmployee is not null)
 {
-    <div class="employee-modal-backdrop" @onclick="CloseEmployee">
+    <div class="employee-modal-backdrop">
         <div class="employee-modal employee-modal--employee-detail" @onclick:stopPropagation="true">
             <div class="employee-detail-header d-flex justify-content-between align-items-start">
                 <h2 class="h5 mb-0">Карточка сотрудника</h2>

@@ -3,6 +3,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Менеджер,Администратор,Админ")]
 @using WebBlazorDeliveryCRM.Services
 @using WebBlazorDeliveryCRM.Components.Shared
+@using WebBlazorDeliveryCRM.Utilities
 @inject LogisticsHubsApiService HubsApi
 @inject AppNotificationService Notify
 @implements IDisposable
@@ -90,7 +91,7 @@
 
 @if (_showCreateModal)
 {
-    <div class="employee-modal-backdrop" @onclick="CloseCreateHubModal">
+    <div class="employee-modal-backdrop">
         <div class="employee-modal employee-modal--hub-create" @onclick:stopPropagation="true">
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <h2 class="h5 mb-0">Новый склад</h2>
@@ -100,31 +101,38 @@
             <div class="row g-3">
                 <div class="col-md-4">
                     <label class="form-label hub-form-label"><HugeIcon Name="store-01" CssClass="hub-form-label-icon" />Название</label>
-                    <input class="form-control" @bind="_name" placeholder="Склад Север" />
+                    <input class="form-control @InvalidClass(_createErrors.Name)" @bind="_name" placeholder="Склад Север" />
+                    @if (_createErrors.Name is not null) { <div class="invalid-feedback d-block">@_createErrors.Name</div> }
                 </div>
                 <div class="col-md-4">
                     <label class="form-label hub-form-label"><HugeIcon Name="location-01" CssClass="hub-form-label-icon" />Город</label>
-                    <input class="form-control" @bind="_city" />
+                    <input class="form-control @InvalidClass(_createErrors.City)" @bind="_city" placeholder="Казань" />
+                    @if (_createErrors.City is not null) { <div class="invalid-feedback d-block">@_createErrors.City</div> }
                 </div>
                 <div class="col-md-4">
                     <label class="form-label hub-form-label"><HugeIcon Name="route-02" CssClass="hub-form-label-icon" />Улица</label>
-                    <input class="form-control" @bind="_street" />
+                    <input class="form-control @InvalidClass(_createErrors.Street)" @bind="_street" placeholder="Улица Баумана" />
+                    @if (_createErrors.Street is not null) { <div class="invalid-feedback d-block">@_createErrors.Street</div> }
                 </div>
                 <div class="col-md-3">
                     <label class="form-label hub-form-label"><HugeIcon Name="home-01" CssClass="hub-form-label-icon" />Дом</label>
-                    <input class="form-control" @bind="_house" />
+                    <input class="form-control @InvalidClass(_createErrors.House)" @bind="_house" placeholder="12" />
+                    @if (_createErrors.House is not null) { <div class="invalid-feedback d-block">@_createErrors.House</div> }
                 </div>
                 <div class="col-md-3">
                     <label class="form-label hub-form-label"><HugeIcon Name="briefcase-01" CssClass="hub-form-label-icon" />Квартира/офис</label>
-                    <input class="form-control" @bind="_flat" />
+                    <input class="form-control @InvalidClass(_createErrors.Flat)" @bind="_flat" />
+                    @if (_createErrors.Flat is not null) { <div class="invalid-feedback d-block">@_createErrors.Flat</div> }
                 </div>
                 <div class="col-md-3">
                     <label class="form-label hub-form-label"><HugeIcon Name="dashboard-square-01" CssClass="hub-form-label-icon" />Регион</label>
-                    <input class="form-control" @bind="_region" />
+                    <input class="form-control @InvalidClass(_createErrors.Region)" @bind="_region" placeholder="Татарстан" />
+                    @if (_createErrors.Region is not null) { <div class="invalid-feedback d-block">@_createErrors.Region</div> }
                 </div>
                 <div class="col-md-3">
                     <label class="form-label hub-form-label"><HugeIcon Name="mail-01" CssClass="hub-form-label-icon" />Индекс</label>
-                    <input class="form-control" @bind="_postal" />
+                    <input class="form-control @InvalidClass(_createErrors.PostalCode)" @bind="_postal" placeholder="420000" maxlength="6" />
+                    @if (_createErrors.PostalCode is not null) { <div class="invalid-feedback d-block">@_createErrors.PostalCode</div> }
                 </div>
             </div>
 
@@ -140,7 +148,7 @@
 
 @if (_showDetailsModal && ActiveHub is not null)
 {
-    <div class="employee-modal-backdrop" @onclick="CloseHubDetailsModal">
+    <div class="employee-modal-backdrop">
         <div class="employee-modal employee-modal--hub-create" @onclick:stopPropagation="true">
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <h2 class="h5 mb-0">@(_hubEditMode ? "Редактирование склада" : "Карточка склада")</h2>
@@ -152,31 +160,38 @@
                 <div class="row g-3">
                     <div class="col-md-4">
                         <label class="form-label hub-form-label"><HugeIcon Name="store-01" CssClass="hub-form-label-icon" />Название</label>
-                        <input class="form-control" @bind="_editName" />
+                        <input class="form-control @InvalidClass(_editErrors.Name)" @bind="_editName" />
+                        @if (_editErrors.Name is not null) { <div class="invalid-feedback d-block">@_editErrors.Name</div> }
                     </div>
                     <div class="col-md-4">
                         <label class="form-label hub-form-label"><HugeIcon Name="location-01" CssClass="hub-form-label-icon" />Город</label>
-                        <input class="form-control" @bind="_editCity" />
+                        <input class="form-control @InvalidClass(_editErrors.City)" @bind="_editCity" />
+                        @if (_editErrors.City is not null) { <div class="invalid-feedback d-block">@_editErrors.City</div> }
                     </div>
                     <div class="col-md-4">
                         <label class="form-label hub-form-label"><HugeIcon Name="route-02" CssClass="hub-form-label-icon" />Улица</label>
-                        <input class="form-control" @bind="_editStreet" />
+                        <input class="form-control @InvalidClass(_editErrors.Street)" @bind="_editStreet" />
+                        @if (_editErrors.Street is not null) { <div class="invalid-feedback d-block">@_editErrors.Street</div> }
                     </div>
                     <div class="col-md-3">
                         <label class="form-label hub-form-label"><HugeIcon Name="home-01" CssClass="hub-form-label-icon" />Дом</label>
-                        <input class="form-control" @bind="_editHouse" />
+                        <input class="form-control @InvalidClass(_editErrors.House)" @bind="_editHouse" />
+                        @if (_editErrors.House is not null) { <div class="invalid-feedback d-block">@_editErrors.House</div> }
                     </div>
                     <div class="col-md-3">
                         <label class="form-label hub-form-label"><HugeIcon Name="briefcase-01" CssClass="hub-form-label-icon" />Квартира/офис</label>
-                        <input class="form-control" @bind="_editFlat" />
+                        <input class="form-control @InvalidClass(_editErrors.Flat)" @bind="_editFlat" />
+                        @if (_editErrors.Flat is not null) { <div class="invalid-feedback d-block">@_editErrors.Flat</div> }
                     </div>
                     <div class="col-md-3">
                         <label class="form-label hub-form-label"><HugeIcon Name="dashboard-square-01" CssClass="hub-form-label-icon" />Регион</label>
-                        <input class="form-control" @bind="_editRegion" />
+                        <input class="form-control @InvalidClass(_editErrors.Region)" @bind="_editRegion" />
+                        @if (_editErrors.Region is not null) { <div class="invalid-feedback d-block">@_editErrors.Region</div> }
                     </div>
                     <div class="col-md-3">
                         <label class="form-label hub-form-label"><HugeIcon Name="mail-01" CssClass="hub-form-label-icon" />Индекс</label>
-                        <input class="form-control" @bind="_editPostal" />
+                        <input class="form-control @InvalidClass(_editErrors.PostalCode)" @bind="_editPostal" maxlength="6" />
+                        @if (_editErrors.PostalCode is not null) { <div class="invalid-feedback d-block">@_editErrors.PostalCode</div> }
                     </div>
                 </div>
                 <div class="d-flex justify-content-end gap-2 mt-3">
@@ -269,6 +284,8 @@
     private string? _editCity;
     private string? _editRegion;
     private string? _editPostal;
+    private HubFormValidation.FieldErrors _createErrors = EmptyFieldErrors();
+    private HubFormValidation.FieldErrors _editErrors = EmptyFieldErrors();
     private PeriodicTimer? _refreshTimer;
     private CancellationTokenSource? _refreshCts;
 
@@ -290,20 +307,17 @@
 
     private async Task SaveHub()
     {
-        if (string.IsNullOrWhiteSpace(_name) || string.IsNullOrWhiteSpace(_street) || string.IsNullOrWhiteSpace(_house))
-        {
-            Notify.ShowWarning("Укажите название, улицу и дом.");
+        if (!ApplyCreateValidation())
             return;
-        }
 
         _saving = true;
         try
         {
-            var ok = await HubsApi.CreateAsync(new CreateLogisticsHubApiRequest
+            var (ok, error) = await HubsApi.CreateAsync(new CreateLogisticsHubApiRequest
             {
-                Name = _name.Trim(),
-                Street = _street.Trim(),
-                House = _house.Trim(),
+                Name = _name,
+                Street = _street,
+                House = _house,
                 Flat = _flat,
                 City = _city,
                 Region = _region,
@@ -327,7 +341,7 @@
             }
             else
             {
-                Notify.ShowError("Не удалось создать склад.");
+                Notify.ShowError(string.IsNullOrWhiteSpace(error) ? "Не удалось создать склад." : error!);
             }
         }
         catch (Exception ex)
@@ -343,6 +357,7 @@
     private void OpenCreateHubModal()
     {
         ResetCreateForm();
+        _createErrors = EmptyFieldErrors();
         _showCreateModal = true;
     }
 
@@ -442,6 +457,7 @@
             return;
 
         _hubEditMode = true;
+        _editErrors = EmptyFieldErrors();
         _editName = ActiveHub.Name ?? string.Empty;
         _editStreet = ActiveHub.Street ?? string.Empty;
         _editHouse = ActiveHub.House ?? string.Empty;
@@ -465,20 +481,17 @@
             Notify.ShowError("Не удалось обновить склад: не определён ID.");
             return;
         }
-        if (string.IsNullOrWhiteSpace(_editName) || string.IsNullOrWhiteSpace(_editStreet) || string.IsNullOrWhiteSpace(_editHouse))
-        {
-            Notify.ShowWarning("Укажите название, улицу и дом.");
+        if (!ApplyEditValidation())
             return;
-        }
 
         _saving = true;
         try
         {
-            var ok = await HubsApi.UpdateAsync(ActiveHub.Id, new CreateLogisticsHubApiRequest
+            var (ok, error) = await HubsApi.UpdateAsync(ActiveHub.Id, new CreateLogisticsHubApiRequest
             {
-                Name = _editName.Trim(),
-                Street = _editStreet.Trim(),
-                House = _editHouse.Trim(),
+                Name = _editName,
+                Street = _editStreet,
+                House = _editHouse,
                 Flat = _editFlat,
                 City = _editCity,
                 Region = _editRegion,
@@ -486,7 +499,7 @@
             });
             if (!ok)
             {
-                Notify.ShowError("Не удалось обновить склад.");
+                Notify.ShowError(string.IsNullOrWhiteSpace(error) ? "Не удалось обновить склад." : error!);
                 return;
             }
 
@@ -505,7 +518,62 @@
     {
         _name = _street = _house = "";
         _flat = _city = _region = _postal = null;
+        _createErrors = EmptyFieldErrors();
     }
+
+    private bool ApplyCreateValidation()
+    {
+        if (!HubFormValidation.TryValidate(_name, _street, _house, _flat, _city, _region, _postal,
+                out var values, out _createErrors, out var summary))
+        {
+            Notify.ShowWarning(summary ?? "Проверьте поля формы.");
+            return false;
+        }
+
+        ApplyNormalizedToCreateForm(values);
+        return true;
+    }
+
+    private bool ApplyEditValidation()
+    {
+        if (!HubFormValidation.TryValidate(_editName, _editStreet, _editHouse, _editFlat, _editCity, _editRegion, _editPostal,
+                out var values, out _editErrors, out var summary))
+        {
+            Notify.ShowWarning(summary ?? "Проверьте поля формы.");
+            return false;
+        }
+
+        ApplyNormalizedToEditForm(values);
+        return true;
+    }
+
+    private void ApplyNormalizedToCreateForm(HubFormValidation.NormalizedValues v)
+    {
+        _name = v.Name;
+        _street = v.Street;
+        _house = v.House;
+        _flat = v.Flat;
+        _city = v.City;
+        _region = v.Region;
+        _postal = v.PostalCode;
+    }
+
+    private void ApplyNormalizedToEditForm(HubFormValidation.NormalizedValues v)
+    {
+        _editName = v.Name;
+        _editStreet = v.Street;
+        _editHouse = v.House;
+        _editFlat = v.Flat;
+        _editCity = v.City;
+        _editRegion = v.Region;
+        _editPostal = v.PostalCode;
+    }
+
+    private static HubFormValidation.FieldErrors EmptyFieldErrors()
+        => new(null, null, null, null, null, null, null);
+
+    private static string? InvalidClass(string? error)
+        => string.IsNullOrEmpty(error) ? null : "is-invalid";
 
     private static bool HasHubCoordinates(LogisticsHubListItemDto h)
         => h.Latitude.HasValue && h.Longitude.HasValue;

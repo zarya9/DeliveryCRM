@@ -23,6 +23,12 @@ public class NotificationsApiService
         return await _http.GetFromJsonAsync<List<NotificationItemDto>>(url, cancellationToken);
     }
 
+    public async Task<int> GetUnreadCountAsync(CancellationToken cancellationToken = default)
+    {
+        var list = await GetMineAsync(onlyUnread: true, cancellationToken: cancellationToken) ?? new();
+        return list.Count;
+    }
+
     public async Task<bool> MarkAsReadAsync(int id, CancellationToken cancellationToken = default)
     {
         var resp = await _http.PostAsync($"/api/Notifications/{id}/read", null, cancellationToken);

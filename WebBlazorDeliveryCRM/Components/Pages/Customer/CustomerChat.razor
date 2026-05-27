@@ -14,7 +14,10 @@
     <p class="subtitle mb-0">Переписка с сотрудниками компании по заказам и вопросам доставки.</p>
 </div>
 
-<CompanyChatPanel TargetUserId="@UserId" TargetRoomId="@RoomId" AutoIntroOrderName="@OrderName" />
+<CompanyChatPanel TargetUserId="@UserId"
+                  TargetRoomId="@RoomId"
+                  AutoIntroOrderId="@OrderId"
+                  AutoIntroOrderName="@OrderName" />
 
 @code {
     [SupplyParameterFromQuery(Name = "userId")]
@@ -22,6 +25,9 @@
 
     [SupplyParameterFromQuery(Name = "roomId")]
     public int? RoomId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "orderId")]
+    public int? OrderId { get; set; }
 
     [SupplyParameterFromQuery(Name = "orderName")]
     public string? OrderName { get; set; }

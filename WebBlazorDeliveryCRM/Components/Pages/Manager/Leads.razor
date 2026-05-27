@@ -93,15 +93,15 @@
             <h2 class="dms-card-title">Новый лид</h2>
 
             <div class="mb-2">
-                <label class="form-label">Название лида</label>
+                <label class="form-label hub-form-label"><HugeIcon Name="package-moving" CssClass="hub-form-label-icon" />Название лида</label>
                 <input class="form-control" @bind="_newName" />
             </div>
             <div class="mb-2">
-                <label class="form-label">Контакт (телефон / email)</label>
+                <label class="form-label hub-form-label"><HugeIcon Name="mail-01" CssClass="hub-form-label-icon" />Контакт (телефон / email)</label>
                 <input class="form-control" @bind="_newContact" />
             </div>
             <div class="mb-2">
-                <label class="form-label">Источник</label>
+                <label class="form-label hub-form-label"><HugeIcon Name="route-02" CssClass="hub-form-label-icon" />Источник</label>
                 <select class="form-select" @bind="_selectedSourceId">
                     <option value="0">— выберите источник —</option>
                     @foreach (var s in _meta?.Sources ?? new List<LeadsApiService.IdNameDto>())
@@ -111,7 +111,7 @@
                 </select>
             </div>
             <div class="mb-2">
-                <label class="form-label">Стадия</label>
+                <label class="form-label hub-form-label"><HugeIcon Name="activity-01" CssClass="hub-form-label-icon" />Стадия</label>
                 <select class="form-select" @bind="_selectedStageId">
                     <option value="0">— выберите стадию —</option>
                     @foreach (var s in _meta?.Stages ?? new List<LeadsApiService.IdNameDto>())
@@ -121,7 +121,7 @@
                 </select>
             </div>
             <div class="mb-2">
-                <label class="form-label">Комментарий</label>
+                <label class="form-label hub-form-label"><HugeIcon Name="message-01" CssClass="hub-form-label-icon" />Комментарий</label>
                 <textarea class="form-control" rows="3" @bind="_newComment"></textarea>
             </div>
 
@@ -142,24 +142,25 @@
 
 @if (_selectedLead is not null)
 {
-    <div class="employee-modal-backdrop" @onclick="CloseLead">
+    <div class="employee-modal-backdrop">
         <div class="employee-modal lead-detail-modal" @onclick:stopPropagation="true">
-            <div class="d-flex justify-content-between align-items-start mb-3">
+            <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
+                <h2 class="h5 mb-0">@(_leadEditMode ? "Редактирование лида" : (_selectedLead?.Name ?? "Лид"))</h2>
                 <button type="button" class="btn-close" aria-label="Закрыть" @onclick="CloseLead"></button>
             </div>
             @if (_leadEditMode)
             {
                 <div class="row g-3">
                     <div class="col-md-6">
-                        <label class="form-label">Название</label>
+                        <label class="form-label hub-form-label"><HugeIcon Name="package-moving" CssClass="hub-form-label-icon" />Название</label>
                         <input class="form-control" @bind="_editLeadName" />
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Контакт</label>
+                        <label class="form-label hub-form-label"><HugeIcon Name="mail-01" CssClass="hub-form-label-icon" />Контакт</label>
                         <input class="form-control" @bind="_editLeadContact" />
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Источник</label>
+                        <label class="form-label hub-form-label"><HugeIcon Name="route-02" CssClass="hub-form-label-icon" />Источник</label>
                         <select class="form-select" @bind="_editLeadSourceId">
                             <option value="0">— выберите источник —</option>
                             @foreach (var s in _meta?.Sources ?? new List<LeadsApiService.IdNameDto>())
@@ -169,7 +170,7 @@
                         </select>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Стадия</label>
+                        <label class="form-label hub-form-label"><HugeIcon Name="activity-01" CssClass="hub-form-label-icon" />Стадия</label>
                         <select class="form-select" @bind="_editLeadStageId">
                             <option value="0">— выберите стадию —</option>
                             @foreach (var s in _meta?.Stages ?? new List<LeadsApiService.IdNameDto>())
@@ -179,7 +180,7 @@
                         </select>
                     </div>
                     <div class="col-12">
-                        <label class="form-label">Комментарий</label>
+                        <label class="form-label hub-form-label"><HugeIcon Name="message-01" CssClass="hub-form-label-icon" />Комментарий</label>
                         <textarea class="form-control" rows="3" @bind="_editLeadComment"></textarea>
                     </div>
                 </div>

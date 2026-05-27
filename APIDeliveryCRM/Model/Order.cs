@@ -102,5 +102,19 @@ namespace APIDeliveryCRM.Model
 
         public ICollection<OrderRouteStop> RouteStops { get; set; } = new List<OrderRouteStop>();
         public ICollection<OrderTimelineEvent> TimelineEvents { get; set; } = new List<OrderTimelineEvent>();
+
+        [NotMapped]
+        public bool CanDeleteByClient { get; set; }
+
+        /// <summary>Оплата была возвращена при отмене (по событию PAYMENT_REFUNDED в таймлайне).</summary>
+        [NotMapped]
+        public bool WasPaymentRefunded { get; set; }
+
+        /// <summary>Фактическая доставка не попала в обещанное окно (другой день или время).</summary>
+        [NotMapped]
+        public bool DeliveryWindowMismatch { get; set; }
+
+        [NotMapped]
+        public string? DeliveryWindowMismatchKind { get; set; }
     }
 }

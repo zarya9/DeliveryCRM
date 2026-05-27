@@ -151,8 +151,6 @@
             _roleName = user.FindFirst(ClaimTypes.Role)?.Value ?? "—";
             _companyName = user.FindFirst("company")?.Value ?? "—";
 
-            // Не дергаем отдельный endpoint профиля пользователя:
-            // некоторые окружения возвращают перегруженный User-объект, что ломает страницу.
             var fullName = user.FindFirst(ClaimTypes.Name)?.Value?.Trim() ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(fullName))
             {

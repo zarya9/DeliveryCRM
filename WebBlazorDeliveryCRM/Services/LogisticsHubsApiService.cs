@@ -81,16 +81,36 @@ public class LogisticsHubsApiService
         return list ?? new List<LogisticsHubListItemDto>();
     }
 
-    public async Task<bool> CreateAsync(CreateLogisticsHubApiRequest body)
+    public async Task<(bool ok, string? error)> CreateAsync(CreateLogisticsHubApiRequest body)
     {
         var res = await _http.PostAsJsonAsync("/api/LogisticsHubs", body);
-        return res.IsSuccessStatusCode;
+        if (res.IsSuccessStatusCode)
+            return (true, null);
+        return (false, await ReadErrorMessageAsync(res));
     }
 
-    public async Task<bool> UpdateAsync(int hubId, CreateLogisticsHubApiRequest body)
+    public async Task<(bool ok, string? error)> UpdateAsync(int hubId, CreateLogisticsHubApiRequest body)
     {
         var res = await _http.PutAsJsonAsync($"/api/LogisticsHubs/{hubId}", body);
-        return res.IsSuccessStatusCode;
+        if (res.IsSuccessStatusCode)
+            return (true, null);
+        return (false, await ReadErrorMessageAsync(res));
+    }
+
+    private static async Task<string?> ReadErrorMessageAsync(HttpResponseMessage res)
+    {
+        try
+        {
+            await using var stream = await res.Content.ReadAsStreamAsync();
+            using var doc = await JsonDocument.ParseAsync(stream);
+            if (doc.RootElement.TryGetProperty("message", out var message))
+                return message.GetString();
+        }
+        catch
+        {
+        }
+
+        return $"Ошибка {(int)res.StatusCode}";
     }
 
     public async Task<(bool ok, string? error)> DeleteAsync(int hubId)
@@ -98,18 +118,6 @@ public class LogisticsHubsApiService
         var res = await _http.DeleteAsync($"/api/LogisticsHubs/{hubId}");
         if (res.IsSuccessStatusCode)
             return (true, null);
-
-        try
-        {
-            await using var stream = await res.Content.ReadAsStreamAsync();
-            using var doc = await JsonDocument.ParseAsync(stream);
-            if (doc.RootElement.TryGetProperty("message", out var message))
-                return (false, message.GetString());
-        }
-        catch
-        {
-        }
-
-        return (false, $"Ошибка {(int)res.StatusCode}");
+        return (false, await ReadErrorMessageAsync(res));
     }
 }

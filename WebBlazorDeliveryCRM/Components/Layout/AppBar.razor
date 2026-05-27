@@ -2,12 +2,17 @@
 @inject ChatHubClientService ChatHub
 @inject ChatApiService ChatApi
 @inject ChatUnreadStateService ChatUnreadState
+@inject NotificationsUnreadStateService NotificationsUnreadState
+@inject ChatNotificationContextService ChatNotifyContext
 @inject AppNotificationService Notify
 @inject NotificationPopupService PopupNotifications
+@inject NotificationsApiService NotificationsApi
 @inject IJSRuntime JS
 @using WebBlazorDeliveryCRM.Components.Shared
 @using WebBlazorDeliveryCRM.Models
+@using WebBlazorDeliveryCRM.Services
 @using System.Security.Claims
+@implements IDisposable
 
 <div class="dms-appbar">
     <a href="/" class="dms-appbar-logo">@DisplayTitle</a>
@@ -51,8 +56,12 @@
         </button>
         @if (_isAuthenticated)
         {
-            <a href="@NotificationsHref" class="dms-btn-outline dms-icon-btn" title="Уведомления" aria-label="Уведомления">
+            <a href="@NotificationsHref" class="dms-btn-outline dms-icon-btn dms-icon-btn--with-badge" title="Уведомления" aria-label="Уведомления">
                 <HugeIcon Name="notification-01" CssClass="dms-icon" />
+                @if (_unreadNotifications > 0)
+                {
+                    <span class="dms-icon-badge" aria-label="Непрочитанные уведомления">@(_unreadNotifications > 99 ? "99+" : _unreadNotifications.ToString())</span>
+                }
             </a>
         }
         else
@@ -76,7 +85,7 @@
     private string NotificationsHref => _role switch
     {
         "Клиент" => "/customer/notifications",
-        "Курьер" => "/courier/notifications",
+        "Курьер" or "Система" => "/courier/notifications",
         "Логист" => "/logistician/notifications",
         "Логистика" => "/logistician/notifications",
         _ => "/manager/notifications"
@@ -88,6 +97,7 @@
     private int _currentUserId;
     private Dictionary<int, string> _roomKinds = new();
     private bool _chatHandlersAttached;
+    private int _unreadNotifications;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -120,6 +130,9 @@
                 await ChatHub.StartAsync();
                 await RefreshRoomKindsAsync();
                 await ChatUnreadState.RefreshAsync();
+                NotificationsUnreadState.Changed += OnUnreadNotificationsChanged;
+                await NotificationsUnreadState.RefreshAsync();
+                _unreadNotifications = NotificationsUnreadState.Count;
                 AttachChatHandlers();
             }
             catch
@@ -196,15 +209,45 @@
             {
                 return InvokeAsync(async () =>
                 {
+                    if (payload.chatRoomId is > 0)
+                    {
+                        if (!ChatNotifyContext.ShouldNotifyForRoom(payload.chatRoomId.Value))
+                        {
+                            await ChatUnreadState.RefreshAsync();
+                            return;
+                        }
+
+                        var chatTitle = string.IsNullOrWhiteSpace(payload.title) ? "Новое сообщение" : payload.title!;
+                        var chatBody = string.IsNullOrWhiteSpace(payload.message) ? string.Empty : payload.message!;
+                        var chatUrl = ChatRoutes.Room(_role, payload.chatRoomId.Value);
+                        PopupNotifications.Raise(new NotificationPopupService.PopupNotification(payload.id, chatTitle, chatBody, chatUrl));
+                        await Notify.ShowPushWhenHiddenAsync(chatTitle, chatBody);
+                        await ChatUnreadState.RefreshAsync();
+                        return;
+                    }
+
                     var title = string.IsNullOrWhiteSpace(payload.title) ? "Уведомление" : payload.title!;
                     var body = string.IsNullOrWhiteSpace(payload.message) ? "Новое событие в системе." : payload.message!;
                     PopupNotifications.Raise(new NotificationPopupService.PopupNotification(payload.id, title, body, NotificationsHref));
                     await Notify.ShowPushWhenHiddenAsync(title, body);
+                    await ChatUnreadState.RefreshAsync();
+                    await NotificationsUnreadState.RefreshAsync();
                 });
             });
         }
 
         _chatHandlersAttached = true;
+    }
+
+    private void OnUnreadNotificationsChanged(int next)
+    {
+        _unreadNotifications = next;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        NotificationsUnreadState.Changed -= OnUnreadNotificationsChanged;
     }
 
     private Task OnAppBarChatMessageAsync(ChatIncomingMessage payload)
@@ -213,12 +256,6 @@
         {
             if (payload.SenderId == _currentUserId)
                 return;
-
-            if (IsDirectRoom(payload.ChatRoomId))
-            {
-                var sender = string.IsNullOrWhiteSpace(payload.SenderName) ? "Сотрудник" : payload.SenderName!;
-                Notify.ShowInfo($"Новое личное сообщение от {sender}.", pushWhenHidden: true);
-            }
 
             await ChatUnreadState.RefreshAsync();
         });
@@ -229,7 +266,7 @@
 
     private async Task RefreshRoomKindsAsync()
     {
-        var rooms = await ChatApi.GetRoomsListAsync();
+        var (rooms, _) = await ChatApi.GetRoomsListAsync();
         _roomKinds = rooms.ToDictionary(x => x.ChatRoomId, x => x.RoomKind ?? "company");
     }
 
@@ -245,6 +282,7 @@
         public int id { get; set; }
         public string? title { get; set; }
         public string? message { get; set; }
+        public int? chatRoomId { get; set; }
     }
 
     private static string ResolveDisplayTitle(string? companyName, string? role)
@@ -258,6 +296,7 @@
         {
             "Клиент" => "Клиентский кабинет",
             "Курьер" => "Курьерский контур",
+            "Система" => "Курьерский контур",
             "Менеджер" => "Панель менеджера",
             "Логист" => "Панель логиста",
             "Админ" or "Администратор" => "Панель администратора",

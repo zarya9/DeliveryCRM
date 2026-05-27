@@ -46,7 +46,7 @@ public class ShiftPlannerController : Controller
     }
 
     [HttpPost("courier/{courierId:int}/apply-route")]
-    [Authorize(Roles = "Курьер,Логист,Логистика,Администратор,Админ,Менеджер")]
+    [Authorize(Roles = "Курьер,Система,Логист,Логистика,Администратор,Админ,Менеджер")]
     public async Task<IActionResult> ApplyCourierRoute(int courierId, [FromBody] ApplyCourierRouteRequest request, CancellationToken cancellationToken)
     {
         var isCourier = User.IsInRole("Курьер");
@@ -70,20 +70,20 @@ public class ShiftPlannerController : Controller
             return BadRequest(new { message = "Список точек маршрута пуст." });
 
         var reason = isCourier && !isStaff ? "courier.route_changed" : "logistician.route_map";
-        var plan = await _planner.ApplyCourierRouteAsync(
+        var (plan, error) = await _planner.ApplyCourierRouteAsync(
             companyId.Value,
             courierId,
             request.Stops,
             reason,
             cancellationToken);
         if (plan == null)
-            return BadRequest(new { message = "Не удалось применить маршрут. Проверьте координаты точек и заказы." });
+            return BadRequest(new { message = error ?? "Не удалось применить маршрут. Проверьте координаты точек и заказы." });
 
         return Ok(plan);
     }
 
     [HttpGet("courier/{courierId:int}")]
-    [Authorize(Roles = "Курьер,Логист,Логистика,Администратор,Админ,Менеджер")]
+    [Authorize(Roles = "Курьер,Система,Логист,Логистика,Администратор,Админ,Менеджер")]
     public async Task<IActionResult> GetCourierPlan(int courierId, CancellationToken cancellationToken)
     {
         var plan = await _planner.GetCourierPlanAsync(courierId, cancellationToken);

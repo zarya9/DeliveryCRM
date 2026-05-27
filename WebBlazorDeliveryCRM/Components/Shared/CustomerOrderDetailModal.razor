@@ -33,6 +33,32 @@
                             <span class="text-muted small ms-2">@Order.OrderType.Name</span>
                         }
                     </div>
+                    @if (OrderStatusUi.IsCancelled(Order.OrderStatus?.Name))
+                    {
+                        <div class="alert alert-secondary py-2 small mb-2">
+                            Заказ отменён и убран из списка активных.
+                            @if (Order.WasPaymentRefunded)
+                            {
+                                <span> Оплата возвращена на карту (тестовый режим MockPay).</span>
+                            }
+                            <span> Подробности — в <a href="/customer/orders/history">истории заказов</a>.</span>
+                        </div>
+                    }
+                    @if (Order.DeliveryWindowMismatch && Order.Delivered_at.HasValue)
+                    {
+                        <div class="alert alert-warning py-2 small mb-2">
+                            @if (!string.IsNullOrWhiteSpace(Order.Delay_reason))
+                            {
+                                <span>@Order.Delay_reason</span>
+                            }
+                            else
+                            {
+                                <span>Доставка выполнена не в обещанное окно.</span>
+                            }
+                            <span> Если нужна помощь — </span>
+                            <button type="button" class="btn btn-link btn-sm p-0 align-baseline" @onclick="ContactManagerAboutOrderAsync" @onclick:stopPropagation="true">напишите менеджеру</button>.
+                        </div>
+                    }
                     @if (!string.IsNullOrWhiteSpace(Order.Description))
                     {
                         <p class="small mb-2">@Order.Description</p>
@@ -43,7 +69,7 @@
                         <dt class="col-sm-4 text-muted">Сумма</dt>
                         <dd class="col-sm-8 mb-1">@FormatMoneyRub(Order.Final_cost > 0 ? Order.Final_cost : Order.Estimated_cost)</dd>
                         <dt class="col-sm-4 text-muted">Оплата</dt>
-                        <dd class="col-sm-8 mb-1">@(Order.Is_paid ? "Оплачен" : "Не оплачен")</dd>
+                        <dd class="col-sm-8 mb-1">@FormatPaymentState(Order)</dd>
                         @if (Order.CourierProfile is not null)
                         {
                             <dt class="col-sm-4 text-muted">Курьер</dt>
@@ -57,6 +83,17 @@
                         <HugeIcon Name="message-01" CssClass="dms-icon-sm" />
                         Написать менеджеру по заказу
                     </button>
+                    @if (CanDeleteOrder(Order))
+                    {
+                        <button type="button"
+                                class="btn btn-outline-danger btn-sm d-inline-flex align-items-center gap-2 mt-2 ms-2"
+                                disabled="@_deleteInProgress"
+                                @onclick="DeleteOrderAsync"
+                                @onclick:stopPropagation="true">
+                            <HugeIcon Name="delete-02" CssClass="dms-icon-sm" />
+                            @(_deleteInProgress ? "Отмена..." : "Отменить заказ")
+                        </button>
+                    }
                 </div>
                 <div class="customer-order-detail-addresses">
                     <div class="mb-2">
@@ -92,11 +129,13 @@
 @code {
     [Parameter] public OrderDto? Order { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<OrderDto> OnDelete { get; set; }
 
     private string _mapElementId = "customer-order-detail-map";
     private int _renderedForOrderId;
     private bool _mapInitialized;
     private string? _mapFootnote;
+    private bool _deleteInProgress;
 
     protected override void OnParametersSet()
     {
@@ -285,6 +324,17 @@
 
     private static string FormatMoneyRub(decimal v) => $"{v:N2} ₽";
 
+    private static string FormatPaymentState(OrderDto order)
+    {
+        if (OrderStatusUi.IsCancelled(order.OrderStatus?.Name))
+        {
+            if (order.WasPaymentRefunded)
+                return "Возврат оформлен";
+            return order.Is_paid ? "Оплачен" : "Не оплачен";
+        }
+        return order.Is_paid ? "Оплачен" : "Не оплачен";
+    }
+
     private static string CourierDisplay(CourierProfileDto c)
     {
         var u = c.User;
@@ -306,9 +356,31 @@
             return;
         }
 
-        var orderNameEncoded = Uri.EscapeDataString(string.IsNullOrWhiteSpace(Order.Name) ? $"Заказ №{Order.Order_Number}" : Order.Name.Trim());
-        Navigation.NavigateTo($"/customer/chat?userId={contactUserId.Value}&orderName={orderNameEncoded}");
+        var orderTitle = string.IsNullOrWhiteSpace(Order.Name) ? $"Заказ №{Order.Order_Number}" : Order.Name.Trim();
+        var orderNameEncoded = Uri.EscapeDataString(orderTitle);
+        Navigation.NavigateTo($"/customer/chat?userId={contactUserId.Value}&orderId={Order.ID_Order}&orderName={orderNameEncoded}");
         await CloseAsync();
+    }
+
+    private async Task DeleteOrderAsync()
+    {
+        if (Order is null || _deleteInProgress)
+            return;
+
+        _deleteInProgress = true;
+        try
+        {
+            await OnDelete.InvokeAsync(Order);
+        }
+        finally
+        {
+            _deleteInProgress = false;
+        }
+    }
+
+    private static bool CanDeleteOrder(OrderDto order)
+    {
+        return order.CanDeleteByClient;
     }
 
     private async Task CloseAsync()

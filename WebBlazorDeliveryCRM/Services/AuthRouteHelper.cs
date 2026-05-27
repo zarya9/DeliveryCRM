@@ -37,7 +37,7 @@ public static class AuthRouteHelper
             p = "/";
 
         if (p.StartsWith("/courier", StringComparison.Ordinal))
-            return role == "Курьер";
+            return role is "Курьер" or "Система" or "Администратор" or "Админ" or "Менеджер";
         if (p.StartsWith("/customer", StringComparison.Ordinal))
             return role == "Клиент";
         if (p.StartsWith("/logistician", StringComparison.Ordinal))
@@ -56,7 +56,7 @@ public static class AuthRouteHelper
         "Менеджер" => "/manager",
         "Логист" or "Логистика" => "/logistician",
         "Админ" or "Администратор" => "/admin/employees",
-        "Курьер" => "/courier/shift",
+        "Курьер" or "Система" => "/courier/shift",
         _ => "/home"
     };
 

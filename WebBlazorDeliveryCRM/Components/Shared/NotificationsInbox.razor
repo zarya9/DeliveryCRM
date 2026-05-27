@@ -1,13 +1,20 @@
 @implements IDisposable
 @using Microsoft.AspNetCore.SignalR.Client
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.JSInterop
 @using WebBlazorDeliveryCRM.Models
 @using WebBlazorDeliveryCRM.Services
+@using WebBlazorDeliveryCRM.Utilities
 @inject NotificationsApiService NotificationsApi
 @inject ChatHubClientService ChatHub
 @inject AppNotificationService Notify
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NotificationsUnreadStateService UnreadState
+@inject IJSRuntime JS
 
-<div class="dms-card">
-    <div class="notifications-inbox-toolbar d-flex justify-content-between align-items-center mb-3">
+<div class="dms-card notifications-inbox-card">
+    <div class="notifications-inbox-toolbar">
         <h2 class="dms-card-title @(string.IsNullOrEmpty(ToolbarTitleIconName) ? null : "dms-card-title-with-icon") mb-0">
             @if (!string.IsNullOrEmpty(ToolbarTitleIconName))
             {
@@ -15,8 +22,7 @@
             }
             Входящие
         </h2>
-        <div class="d-flex gap-2 flex-wrap align-items-center">
-            <label class="small text-muted mb-0" for="notif-filter-select">Фильтр</label>
+        <div class="notifications-inbox-filter">
             <select id="notif-filter-select" class="form-select form-select-sm notifications-filter-select" value="@_selectedFilter" @onchange="OnFilterChanged">
                 <option value="all">Все уведомления</option>
                 <option value="unread">Только непрочитанные</option>
@@ -28,75 +34,76 @@
 
     @if (_loading && _items is null)
     {
-        <p class="text-muted">Загрузка…</p>
+        <p class="text-muted mb-0">Загрузка…</p>
     }
     else if (_items is null || _items.Count == 0)
     {
-        <p class="text-muted mb-0">Пока нет уведомлений. Они появятся при новых сообщениях в чатах и других событиях.</p>
+        <div class="notifications-empty">
+            <HugeIcon Name="notification-01" CssClass="notifications-empty-icon" />
+            <p class="mb-0 text-muted">Пока нет уведомлений. Здесь появятся события по заказам, сменам и SLA.</p>
+        </div>
     }
     else
     {
-        <div class="list-group notifications-list">
+        <div class="notifications-list">
             @foreach (var n in _items.OrderByDescending(x => x.SentAt))
             {
-                <div class="list-group-item list-group-item-action d-flex flex-column flex-md-row gap-2 notifications-item @(n.IsRead ? "" : "notifications-item--unread")">
-                    <div class="flex-grow-1">
-                        <div class="d-flex flex-wrap gap-2 align-items-baseline">
-                            <strong class="notifications-title">@n.Title</strong>
-                            @if (!string.IsNullOrEmpty(n.TypeName))
-                            {
-                                <StatusBadge Text="@n.TypeName" Tone="neutral" />
-                            }
-                            @if (!n.IsRead)
-                            {
-                                <StatusBadge Text="Новое" Tone="primary" />
-                            }
-                            @if (n.IsCritical)
-                            {
-                                <StatusBadge Text="Критичное" Tone="danger" />
-                            }
-                            @if (n.RequiresAck && !n.AcknowledgedAt.HasValue)
-                            {
-                                <StatusBadge Text="Нужно подтвердить" Tone="warning" />
-                            }
+                var visual = NotificationVisuals.Resolve(n);
+                var canOpen = ResolveCanOpen(n);
+                <article class="notifications-item @(n.IsRead ? "notifications-item--read" : "notifications-item--unread") @(canOpen ? "notifications-item--clickable" : "")"
+                         data-notification-id="@(n.IsRead ? null : n.Id)"
+                         role="@(canOpen ? "button" : null)"
+                         tabindex="@(canOpen ? 0 : -1)"
+                         @onclick="() => OnItemClickAsync(n)"
+                         @onkeydown="e => OnItemKeydownAsync(e, n)">
+                    <div class="notifications-item-icon notifications-item-icon--@visual.Tone" title="@visual.CategoryLabel">
+                        <HugeIcon Name="@visual.IconName" CssClass="notifications-item-icon-svg" />
+                    </div>
+                    <div class="notifications-item-body">
+                        <div class="notifications-item-head">
+                            <div class="notifications-item-titles">
+                                <span class="notifications-item-category">@visual.CategoryLabel</span>
+                                <strong class="notifications-title">@n.Title</strong>
+                            </div>
+                            <div class="notifications-item-badges">
+                                @if (n.IsCritical)
+                                {
+                                    <StatusBadge Text="Критичное" Tone="danger" />
+                                }
+                                @if (n.RequiresAck && !n.AcknowledgedAt.HasValue)
+                                {
+                                    <StatusBadge Text="Подтвердить" Tone="warning" />
+                                }
+                            </div>
                         </div>
-                        <p class="mb-1 mt-1 small notifications-message">@n.Message</p>
-                        <div class="text-muted small notifications-meta">
-                            @n.SentAt.ToString("dd.MM.yyyy")
+                        <p class="notifications-message mb-0">@n.Message</p>
+                        <div class="notifications-meta">
+                            <span>@n.SentAt.ToString("dd.MM.yyyy")</span>
                             @if (n.OrderId.HasValue)
                             {
                                 <span> · Заказ #@n.OrderId</span>
                             }
-                        </div>
-                        @if (n.ShiftId.HasValue)
-                        {
-                            <a class="btn btn-sm btn-outline-primary mt-2" href="@($"/logistician/shifts/{n.ShiftId.Value}")">
-                                Итоговый маршрут смены
-                            </a>
-                        }
-                    </div>
-                    @if (!n.IsRead)
-                    {
-                        <div>
-                            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_marking" @onclick="() => MarkRead(n)">
-                                Прочитано
-                            </button>
-                            @if (n.RequiresAck && !n.AcknowledgedAt.HasValue)
+                            @if (n.ShiftId.HasValue)
                             {
-                                <button type="button" class="btn btn-sm btn-outline-danger ms-1" disabled="@_marking" @onclick="() => Ack(n)">
-                                    Подтвердить
-                                </button>
+                                <span> · Смена #@n.ShiftId</span>
                             }
                         </div>
+                    </div>
+                    @if (n.RequiresAck && !n.AcknowledgedAt.HasValue)
+                    {
+                        <div class="notifications-item-actions" @onclick:stopPropagation="true">
+                            <button type="button" class="btn btn-sm btn-outline-danger" disabled="@_marking" @onclick="() => Ack(n)">
+                                Подтвердить
+                            </button>
+                        </div>
                     }
-                </div>
+                </article>
             }
         </div>
     }
 </div>
 
 @code {
-    /// <summary>Иконка слева от «Входящие»; null — без иконки (старый вид).</summary>
     [Parameter] public string? ToolbarTitleIconName { get; set; }
 
     private List<NotificationItemDto>? _items;
@@ -104,25 +111,82 @@
     private bool _marking;
     private IDisposable? _hubSub;
     private string _selectedFilter = "all";
+    private string? _role;
+    private DotNetObjectReference<NotificationsInbox>? _dotNetRef;
+    private string? _observeFingerprint;
+    private readonly HashSet<int> _autoMarkInFlight = new();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender) return;
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
 
-        await Reload();
+            var state = await AuthStateProvider.GetAuthenticationStateAsync();
+            _role = state.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
+                     ?? state.User.FindFirst("role")?.Value;
+
+            await Reload();
+
+            try
+            {
+                var conn = await ChatHub.GetConnectionAsync();
+                await ChatHub.StartAsync();
+                _hubSub = conn.On<NotificationReceivedSignalDto>("NotificationReceived", _ =>
+                {
+                    return Reload(showSpinner: false);
+                });
+            }
+            catch
+            {
+                /* SignalR опционален */
+            }
+        }
+
+        await EnsureVisibilityObserverAsync();
+    }
+
+    private async Task EnsureVisibilityObserverAsync()
+    {
+        if (_items is null || _loading || _dotNetRef is null)
+            return;
+
+        var fingerprint = string.Join(',', _items.Where(x => !x.IsRead).Select(x => x.Id));
+        if (fingerprint == _observeFingerprint)
+            return;
+
+        _observeFingerprint = fingerprint;
 
         try
         {
-            var conn = await ChatHub.GetConnectionAsync();
-            await ChatHub.StartAsync();
-            _hubSub = conn.On<NotificationReceivedSignalDto>("NotificationReceived", _ =>
-            {
-                return Reload(showSpinner: false);
-            });
+            await JS.InvokeVoidAsync("deliveryCrmNotificationsInbox.observe", _dotNetRef, ".notifications-list");
         }
         catch
         {
-            /* SignalR опционален */
+            // JS interop may fail during prerender/dispose
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnNotificationVisible(int notificationId)
+    {
+        if (_items is null || notificationId <= 0)
+            return;
+
+        var item = _items.FirstOrDefault(x => x.Id == notificationId);
+        if (item is null || item.IsRead)
+            return;
+
+        if (!_autoMarkInFlight.Add(notificationId))
+            return;
+
+        try
+        {
+            await MarkReadAsync(item);
+        }
+        finally
+        {
+            _autoMarkInFlight.Remove(notificationId);
         }
     }
 
@@ -142,6 +206,9 @@
                 onlyCritical: onlyCritical,
                 onlyUnread: onlyUnread,
                 onlyRequiresAck: onlyAckRequired) ?? new();
+
+            _observeFingerprint = null;
+            await UnreadState.RefreshAsync();
         }
         finally
         {
@@ -157,20 +224,38 @@
         await Reload();
     }
 
-    private async Task MarkRead(NotificationItemDto n)
+    private bool ResolveCanOpen(NotificationItemDto n)
+        => NotificationVisuals.ResolveTargetUrl(n, _role) is not null;
+
+    private async Task OnItemClickAsync(NotificationItemDto n)
     {
-        _marking = true;
-        try
+        var url = NotificationVisuals.ResolveTargetUrl(n, _role);
+        if (string.IsNullOrEmpty(url))
+            return;
+
+        if (!n.IsRead)
+            await MarkReadAsync(n);
+
+        Navigation.NavigateTo(url);
+    }
+
+    private async Task OnItemKeydownAsync(KeyboardEventArgs e, NotificationItemDto n)
+    {
+        if (e.Key is "Enter" or " ")
+            await OnItemClickAsync(n);
+    }
+
+    private async Task MarkReadAsync(NotificationItemDto n)
+    {
+        if (n.IsRead)
+            return;
+
+        if (await NotificationsApi.MarkAsReadAsync(n.Id))
         {
-            if (await NotificationsApi.MarkAsReadAsync(n.Id))
-            {
-                n.IsRead = true;
-                StateHasChanged();
-            }
-        }
-        finally
-        {
-            _marking = false;
+            n.IsRead = true;
+            UnreadState.SetIfDifferent(Math.Max(0, UnreadState.Count - 1));
+            _observeFingerprint = null;
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -182,8 +267,10 @@
             if (await NotificationsApi.AcknowledgeAsync(n.Id))
             {
                 n.AcknowledgedAt = DateTime.UtcNow;
-                n.IsRead = true;
-                StateHasChanged();
+                if (!n.IsRead)
+                    await MarkReadAsync(n);
+                else
+                    await InvokeAsync(StateHasChanged);
             }
         }
         finally
@@ -195,5 +282,13 @@
     public void Dispose()
     {
         _hubSub?.Dispose();
+        _dotNetRef?.Dispose();
+        try
+        {
+            _ = JS.InvokeVoidAsync("deliveryCrmNotificationsInbox.disconnect");
+        }
+        catch
+        {
+        }
     }
 }
